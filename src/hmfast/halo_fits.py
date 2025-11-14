@@ -1,0 +1,88 @@
+import jax
+import jax.numpy as jnp
+
+
+@jax.jit
+def MF_T08(sigmas, z, delta_mean):
+    """
+    Tinker et al. (2008) halo mass function.
+
+    Computes the differential mass function dn/dlnσ for given
+    variance σ(R) over a range of redshifts.
+
+    Parameters
+    ----------
+    sigmas : jnp.ndarray
+        Variance of the linear density field σ(R, z), shape (n_R, n_z) or (n_R,)
+    z : float or jnp.ndarray
+        Redshift(s) corresponding to sigmas
+    delta_mean : float or jnp.ndarray
+        Halo overdensity Δ (e.g., 200, 500, 1600). Can be scalar or shape (n_z,)
+
+    Returns
+    -------
+    f_sigma : jnp.ndarray
+        Halo mass function values, shape matching sigmas
+        (dn/dlnσ) in units consistent with Tinker et al. (2008)
+    """
+    # Convert delta_mean to log scale
+    delta_mean = jnp.log10(delta_mean)
+    
+    # Define parameters as JAX arrays
+    delta_mean_tab = jnp.log10(jnp.array([200, 300, 400, 600, 800, 1200, 1600, 2400, 3200]))
+    A_tab = jnp.array([0.186, 0.200, 0.212, 0.218, 0.248, 0.255, 0.260, 0.260, 0.260])
+    aa_tab = jnp.array([1.47, 1.52, 1.56, 1.61, 1.87, 2.13, 2.30, 2.53, 2.66])
+    b_tab = jnp.array([2.57, 2.25, 2.05, 1.87, 1.59, 1.51, 1.46, 1.44, 1.41])
+    c_tab = jnp.array([1.19, 1.27, 1.34, 1.45, 1.58, 1.80, 1.97, 2.24, 2.44])
+
+    # Linear interpolation using jnp.interp
+    Ap = jnp.interp(delta_mean, delta_mean_tab, A_tab) * (1 + z) ** -0.14
+    a = jnp.interp(delta_mean, delta_mean_tab, aa_tab) * (1 + z) ** -0.06
+    b = jnp.interp(delta_mean, delta_mean_tab, b_tab) * (1 + z) ** -jnp.power(10, -jnp.power(0.75 / jnp.log10(jnp.power(10, delta_mean) / 75), 1.2))
+    c = jnp.interp(delta_mean, delta_mean_tab, c_tab)
+    
+    # Calculate final result f(σ)
+    f_sigma = 0.5 * Ap[:, None] * (jnp.power(sigmas / b[:, None], -a[:, None]) + 1) * jnp.exp(-c[:, None] / sigmas**2)
+    return f_sigma
+
+
+@jax.jit
+def BF_T10(sigmas, z, delta_mean):
+    """
+    Tinker et al. (2010) large-scale linear bias, JAX-friendly.
+
+    Parameters
+    ----------
+    sigmas : jnp.ndarray
+        sigma(R,z) or sigma(M,z), shape (nM, n_z)
+    z : scalar or array_like
+        Redshift(s) (kept for API compatibility)
+    delta_mean : scalar or array_like
+        Halo overdensity Δ, shape (n_z,) or scalar
+
+    Returns
+    -------
+    b_nu : jnp.ndarray
+        Halo bias, shape same as sigmas
+    """
+    y = jnp.log10(delta_mean)
+    delta_c = 1.686  # the critical overdensity (slightly redshift-dependent in LCDM), so this is apporximate
+    
+    # Tinker (2010) parameters
+    A  = jnp.array(1.0 + 0.24 * y * jnp.exp(-(4.0 / y) ** 4))
+    a  = jnp.array(0.44 * y - 0.88)
+    B  = jnp.array(0.183)
+    b_ = jnp.array(1.5)
+    C  = jnp.array((0.019 + 0.107 * y + 0.19 * jnp.exp(-(4.0 / y) ** 4)))
+    c  = jnp.array(2.4)
+
+    nu = delta_c / sigmas
+    nu_a = jnp.power(nu, a)
+    first = A * (nu_a / (nu_a + delta_c ** a))
+    b_nu = 1.0 - first + B * jnp.power(nu, b_) + C * jnp.power(nu, c)
+
+    return b_nu
+
+
+
+

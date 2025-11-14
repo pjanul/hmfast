@@ -6,11 +6,13 @@ and machine learning emulators for cosmological applications.
 """
 
 __version__ = "0.1.0"
-__author__ = "Boris"
-__email__ = "boris@example.com"
+__author__ = "Patrick Janulewicz, Licong Xu, Boris Bolliet"
+__email__ = "pj407@cam.ac.uk"
 
 from .halo_model import HaloModel
-from .emulator import HaloEmulator
-from .utils import cosmology_utils
+from .utils import interpolate_tracer
+from .tracers.tsz import gnfw_pressure_profile, TSZTracer
+from .load_emulator import EmulatorLoader, EmulatorLoaderPCA
+from .ede_emulator import EDEEmulator
 
-__all__ = ["HaloModel", "HaloEmulator", "cosmology_utils"]
+__all__ = ["HaloModel", "EDEEmulator", "EDEEmulator"]

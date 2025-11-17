@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from hmfast.halo_model import HaloModel
-from hmfast.ede_emulator import EDEEmulator
+from hmfast.emulator_eval import CosmoEmulator
 from functools import partial
 from hmfast.base_tracer import BaseTracer
 
@@ -17,7 +17,7 @@ def gnfw_pressure_profile(x, z, m, emulator, params = None):
     # Compute helper variables and the final value of Pe
     h = H0 / 100.0 
 
-    H = emulator.get_hubble_at_z(z, params_values_dict=params) * 299792.458  # multiply by speed of light in km/s 
+    H = emulator.get_hubble_at_z(z, params=params) * 299792.458  # multiply by speed of light in km/s 
     m_delta_tilde = (m / B) # convert to M_sun 
     C = 1.65 * (h / 0.7)**2 * (H / H0)**(8 / 3) * (m_delta_tilde / (0.7 * 3e14))**(2 / 3 + 0.12) * (0.7/h)**1.5 # eV cm^-3
     scaled_x = c500 * x
@@ -34,8 +34,8 @@ class TSZTracer(BaseTracer):
 
     def _compute_r_and_ell(self, z, m):
         h, B, delta = self.params['H0']/100, self.params['B'], self.params['delta']
-        d_A = self.emulator.get_angular_distance_at_z(z, params_values_dict=self.params) * h
-        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params_values_dict=self.params) / (B**(1/3))
+        d_A = self.emulator.get_angular_distance_at_z(z, params=self.params) * h
+        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=self.params) / (B**(1/3))
         ell_delta = d_A / r_delta
         return r_delta, ell_delta
 

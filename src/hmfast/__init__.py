@@ -12,7 +12,7 @@ __email__ = "pj407@cam.ac.uk"
 from .halo_model import HaloModel
 from .utils import interpolate_tracer
 from .tracers.tsz import gnfw_pressure_profile, TSZTracer
-from .load_emulator import EmulatorLoader, EmulatorLoaderPCA
-from .ede_emulator import EDEEmulator
+from .emulator_load import EmulatorLoader, EmulatorLoaderPCA
+from .emulator_eval import CosmoEmulator, PkEmulator
 
 __all__ = ["HaloModel", "EDEEmulator", "TSZTracer"]

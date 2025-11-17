@@ -8,8 +8,8 @@ import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
 from hmfast.halo_fits import MF_T08, BF_T10
-from hmfast.utils import interpolate_tracer#, trapezoid
-from hmfast.ede_emulator import EDEEmulator
+from hmfast.utils import interpolate_tracer
+from hmfast.emulator_eval import CosmoEmulator, PkEmulator
 from mcfit import TophatVar
 jax.config.update("jax_enable_x64", True)
 
@@ -22,7 +22,7 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, emulator, params, mass_model = MF_T08, bias_model = BF_T10):
+    def __init__(self, cosmo_emulator, pk_emulator, params, mass_model = MF_T08, bias_model = BF_T10):
         """
         Initialize the halo model.
         
@@ -37,20 +37,21 @@ class HaloModel:
         """
         
 
-        self.emulator = emulator
+        self.cosmo_emulator = cosmo_emulator
+        self.pk_emulator = pk_emulator
         self.mass_model = mass_model
         self.bias_model = bias_model
-        self.params = self.emulator.get_all_relevant_params(params)
+        self.params = self.cosmo_emulator.get_all_relevant_params(params)
 
         # Create TophatVar instance once
-        _, dummy_k = emulator.get_pkl_at_z(1., params_values_dict=self.params)
+        _, dummy_k = pk_emulator.get_pk_at_z(1., params=self.params, linear=True)
         self._tophat_instance = partial(TophatVar(dummy_k, lowring=True, backend='jax'), extrap=True)
 
         # Precompute sigma grid and HMF grid
         self.R_grid, self.sigma_grid = self._compute_sigma_grid()
         self.dndlnm_grid = self._compute_hmf_grid()
         
-        self.z_grid = self.emulator.z_grid()
+        self.z_grid = self.cosmo_emulator.z_grid()
         
         # Compute the interpolation functions so they can be rapidly accessed
         self._hmf_interp = jscipy.interpolate.RegularGridInterpolator((jnp.log(1. + self.z_grid), jnp.log(self.M_grid)), jnp.log(self.dndlnm_grid))
@@ -65,10 +66,10 @@ class HaloModel:
             sigma : array_like, σ(R, z) values
         """
         params = self.params
-        z_grid = self.emulator.z_grid()
+        z_grid = self.cosmo_emulator.z_grid()
     
         # Power spectra for all redshifts
-        P = jax.vmap(lambda zp: self.emulator.get_pkl_at_z(zp, params_values_dict=params)[0].flatten())(z_grid).T
+        P = jax.vmap(lambda zp: self.pk_emulator.get_pk_at_z(zp, params=params, linear=True)[0].flatten())(z_grid).T
     
         # Compute σ²(R, z)
         R, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(None, 0))(P)
@@ -87,11 +88,11 @@ class HaloModel:
     
         # Get sigma(R, z) and radius grid
         R_grid, sigma_grid = self._compute_sigma_grid()  # shape: (n_R,), (n_R, n_z)
-        z_grid = self.emulator.z_grid()
+        z_grid = self.cosmo_emulator.z_grid()
     
         # Compute derivative dσ²/dR using TophatVar
-        _, ks = self.emulator.get_pkl_at_z(1.0, params_values_dict=params)
-        P = jax.vmap(lambda zp: self.emulator.get_pkl_at_z(zp, params_values_dict=params)[0].flatten())(z_grid).T
+        _, ks = self.pk_emulator.get_pk_at_z(1.0, params=params, linear=True)
+        P = jax.vmap(lambda zp: self.pk_emulator.get_pk_at_z(zp, params=params, linear=True)[0].flatten())(z_grid).T
     
         # dσ²/dR grid
         dvar_grid = jax.vmap(lambda pks_col: 
@@ -99,7 +100,7 @@ class HaloModel:
                              in_axes=1)(P)  # shape: (n_z, n_R)
     
         # Compute overdensity threshold and then the HMF
-        delta_mean = self.emulator.get_delta_mean_from_delta_crit_at_z(delta, z_grid, params_values_dict=params)
+        delta_mean = self.cosmo_emulator.get_delta_mean_from_delta_crit_at_z(delta, z_grid, params=params)
         hmf_grid = self.mass_model(sigma_grid, z_grid, delta_mean)
     
         # Mass grid
@@ -159,7 +160,7 @@ class HaloModel:
         points = jnp.stack([M, z_array], axis=-1)
     
         sigma_M = sigma_interp(points)
-        delta_mean = self.emulator.get_delta_mean_from_delta_crit_at_z(delta, 1, params_values_dict=self.params)
+        delta_mean = self.cosmo_emulator.get_delta_mean_from_delta_crit_at_z(delta, 1, params=self.params)
             
         return self.bias_model(sigma_M, z, delta_mean)
 
@@ -182,7 +183,7 @@ class HaloModel:
         # Vectorize u_ell interpolation and mass function over z, and also compute dVdzdOmega
         u_ell_grid = jax.vmap(lambda zp: interpolate_tracer(zp, m_grid, tracer, ell_grid)[1])(z_grid)
         dndlnm_grid = jax.vmap(lambda zp: self.mass_function(zp, m_grid))(z_grid)
-        comov_vol = self.emulator.dVdzdOmega(z_grid, params_values_dict=self.params)
+        comov_vol = self.cosmo_emulator.get_dVdzdOmega_at_z(z_grid, params=self.params)
 
         # Expand grids to align with the shape of `result`
         dndlnm_grid_expanded = dndlnm_grid[:, :, None]  # Shape becomes (100, 100, 1)

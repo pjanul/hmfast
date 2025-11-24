@@ -66,7 +66,7 @@ def BF_T10(sigmas, z, delta_mean):
         Halo bias, shape same as sigmas
     """
     y = jnp.log10(delta_mean)
-    delta_c = 1.686  # the critical overdensity (slightly redshift-dependent in LCDM), so this is apporximate
+    delta_c = 1.686  # the critical overdensity (slightly redshift-dependent in LCDM), so this is approximate
     
     # Tinker (2010) parameters
     A  = jnp.array(1.0 + 0.24 * y * jnp.exp(-(4.0 / y) ** 4))

@@ -26,20 +26,47 @@ def gnfw_pressure_profile(x, z, m, emulator, params = None):
     return Pe
 
 
-
 class TSZTracer(BaseTracer):
+    """
+    tSZ tracer using GNFW profile.
+    Fully continuous tracer: local_contribution = 0, profile_contribution = 1
+    """
     def __init__(self, emulator, params):
-        super().__init__(params)  # sets up x_grid and hankel
+        super().__init__(params)
         self.emulator = emulator
 
     def _compute_r_and_ell(self, z, m):
+        """
+        Helper to compute r_delta and ell_delta for each halo.
+        """
         h, B, delta = self.params['H0']/100, self.params['B'], self.params['delta']
         d_A = self.emulator.get_angular_distance_at_z(z, params=self.params) * h
-        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=self.params) / (B**(1/3))
+        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=self.params) / B**(1/3)
         ell_delta = d_A / r_delta
         return r_delta, ell_delta
 
-    def hankel_integrand(self, x, z, m):
+
+    def get_contributions(self, z, m):
+        """
+        tSZ is a continuous tracer: local_contribution = 0, profile_contribution = 1
+        """
+        N = jnp.atleast_1d(m)
+        local_contribution = jnp.zeros_like(N)
+        profile_contribution = jnp.ones_like(N)
+        return local_contribution, profile_contribution
+
+    def get_prefactor(self, z, m):
+        """
+        Compute tSZ prefactor.
+        """
+        r_delta, ell_delta = self._compute_r_and_ell(z, m)
+        h = self.params['H0'] / 100
+        m_e, sigma_T, mpc_per_h_to_cm = 510998.95, 6.6524587321e-25, 3.085677581e24 / h
+
+        prefactor = (sigma_T / m_e) * 4 * jnp.pi * r_delta * mpc_per_h_to_cm / (ell_delta**2)
+        return prefactor, ell_delta
+
+    def get_hankel_integrand(self, x, z, m):
         x_min, x_max = self.params['x_min'], self.params['x_max']
         W_x = jnp.where((x >= x_min) & (x <= x_max), 1.0, 0.0)
 
@@ -48,15 +75,3 @@ class TSZTracer(BaseTracer):
             return x**0.5 * Pe * W_x
 
         return jax.vmap(single_m)(m)
-
-    def _get_hankel_inputs(self, z, m):
-        r_delta, ell_delta = self._compute_r_and_ell(z, m)
-        
-        # Define: h, electron mass in eV/c^2; Thompson cross-section in cm^2;  1 Mpc/h in cm
-        h = self.params['H0'] / 100
-        m_e, sigma_T, mpc_per_h_to_cm = 510998.95, 6.6524587321e-25, 3.085677581e24 / h  
-        prefactor = ( sigma_T / m_e) * 4 * jnp.pi * r_delta * mpc_per_h_to_cm / (ell_delta**2)
-        integrand = self.hankel_integrand(self.x_grid, z, m)
-        return prefactor, integrand, ell_delta
-
-    

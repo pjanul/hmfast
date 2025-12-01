@@ -2,16 +2,23 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
 from hmfast.base_tracer import BaseTracer, HankelTransform
-from jax.scipy.special import erf, sici  # Use jax-enabled math for special functions
+#from hmfast.utils import sici # for now, we will implement our own sici until JAX fixes the bug
+from jax.scipy.special import sici # eventually we will want to import this, but there is a bug in the JAX version
+from jax.scipy.special import erf  # Use jax-enabled math for special functions
 import numpy as np
 _eps = 1e-30
-dndz_data = jnp.array(np.loadtxt("../data/hmfast_data/normalised_dndz_cosmos_0.txt"))
+
+jax.config.update("jax_enable_x64", True)
+dndz_data = jnp.array(np.loadtxt("../../data/hmfast_data/normalised_dndz_cosmos_0.txt"))
+
+
 
 
 class GalaxyHODTracer(BaseTracer):
     """
     Galaxy HOD tracer implementing central + satellite occupation and
-    NFW satellites.
+    NFW satellites. Implements the formalism described in Kusiak et al (2003)
+    Link to paper: https://arxiv.org/pdf/2203.12583
 
     Parameters
     ----------
@@ -28,13 +35,11 @@ class GalaxyHODTracer(BaseTracer):
         x_min, x_max, x_npoints = params['x_min'], params['x_max'], params['x_npoints']
         self.x_grid = jnp.logspace(jnp.log10(x_min), jnp.log10(x_max), x_npoints)
         self.hankel = HankelTransform(x_min=x_min, x_max=x_max, x_npoints=x_npoints, nu=0.5)
-
+        self.r_grid = jnp.logspace(jnp.log10(x_min), jnp.log10(x_max), x_npoints)
         self.emulator = emulator # cosmology emulator
         self.halo_model = halo_model
 
-    # -------------------------
-    # HOD functions (vectorized)
-    # -------------------------
+
     def get_N_centrals(self, m, params = None):
         """Mean central occupation: shape = M.shape"""
         M_min = params["M_min_HOD"]
@@ -42,6 +47,7 @@ class GalaxyHODTracer(BaseTracer):
         x = (jnp.log10(m) - jnp.log10(M_min)) / sigma
         return 0.5 * (1.0 + erf(x))
 
+    
     def get_N_satellites(self, m, params = None):
         """Mean satellite occupation: shape = M.shape"""
         M0 = params["M0_HOD"]
@@ -79,7 +85,6 @@ class GalaxyHODTracer(BaseTracer):
         # vectorize over z
         return jax.vmap(ng_bar_single)(z)
 
-    
 
     def get_wg_at_z_alt(self, z, params=None):
         """
@@ -90,9 +95,7 @@ class GalaxyHODTracer(BaseTracer):
 
         """
 
-        
         z_grid = jnp.geomspace(params['z_min'], params['z_max'], params['z_npoints'])
-
 
         # Compute ng(z) on the grid using the existing get_ng_bar_at_z
         ng_grid = self.get_ng_bar_at_z(z_grid, params=params)  # shape (n_z,)
@@ -122,11 +125,9 @@ class GalaxyHODTracer(BaseTracer):
 
         z = dndz_data[:, 0]          # first column: redshifts
         phi_prime = dndz_data[:, 1]  # second column: phi_prime
-        #print("phi_prime", phi_prime)
+
         return Wg_q
-
-   
-
+        
 
     def get_wg_at_z(self, z, params=None):
         """
@@ -153,47 +154,38 @@ class GalaxyHODTracer(BaseTracer):
     def c_Duffy2008(self, z, m, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
         """
         Duffy et al. 2008 mass-concentration relation.
-        
-        Parameters:
-            M : float or array, halo mass in Msun/h
-            z : float or array, redshift
-            A, B, C : fit parameters
-            M_pivot : pivot mass (Msun/h)
-        
-        Returns:
-            c : concentration
+        A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
         """
         return A * (m / M_pivot)**B * (1 + z)**C
 
-
-
-        
-
-    def compute_u_m_ell(self, z, m, params = None):
-        rparams = self.emulator.get_all_relevant_params(params)
-        rho_m0 = rparams['Omega0_m'] * rparams["Rho_crit_0"] 
-        c_200c = self.c_Duffy2008(z, m)
-        B = params["B"] 
+     
+    def compute_u_m_ell_alt(self, z, m, params = None):
+        """
+        This function calculates u_ell^m(z, M) via the analytic method described in Kusiak et al (2023).
+        As of November 2025, the jax.scipy.special.sici functions are not well behaved for large inputs.
+        As a result, we will shelve this method for now until the next stable JAX release.
+        """
 
         m = jnp.atleast_1d(m) 
+
         ell_min = params.get("ell_min", 1e2)
         ell_max = params.get("ell_max", 3.5e3) 
-        
-        r_200c = self.emulator.get_r_delta_of_m_delta_at_z(200, m, z, params=params) / B**(1/3)
 
-        chi = self.emulator.get_angular_distance_at_z(z, params=params) * (1.0 + z)
+        c_200c = self.c_Duffy2008(z, m)
+        r_200c = self.emulator.get_r_delta_of_m_delta_at_z(200, m, z, params=params) 
+        lambda_val = params.get("lambda_HOD", 1.0) 
+
+        
+        chi = self.emulator.get_angular_distance_at_z(z, params=params) * (1.0 + z) 
         ell_row = jnp.logspace(jnp.log10(ell_min), jnp.log10(ell_max), 100)
 
         ell = jnp.broadcast_to(ell_row[None, :], (m.shape[0], 100))           # (N_m, N_k)
         k = (ell_row + 0.5) / chi   # physical k
   
-        
         k_mat = k[None, :]                            # (1, N_k)
         r_mat = r_200c[:, None]                       # (N_m, 1)
         c_mat = jnp.atleast_1d(c_200c)[:, None]       # (N_m, 1)
-        
-        lambda_val = 1
-        
+                
         q = k_mat * r_mat / c_mat            # (N_m, N_k)
         q_scaled = (1 + lambda_val * c_mat) * q
 
@@ -203,46 +195,88 @@ class GalaxyHODTracer(BaseTracer):
         
         Si_q, Ci_q = sici(q)
         Si_q_scaled, Ci_q_scaled = sici(q_scaled)
-        #Ci_q, Ci_q_scaled = -1 * Ci_q, -1 * Ci_q_scaled  # We need to flip the sign of Ci since Ci_JAX(x) = - Ci_needed(x)
-
         
-        u_ell_m = (m[:, None] / rho_m0) * ( jnp.cos(q) * (Ci_q_scaled - Ci_q) +
-                                            jnp.sin(q) * (Si_q_scaled - Si_q) - 
-                                            jnp.sin(lambda_val * c_mat * q)/(q_scaled) ) * f_nfw_val
-   
-
+        u_ell_m = (    jnp.cos(q) * (Ci_q_scaled - Ci_q) 
+                    +  jnp.sin(q) * (Si_q_scaled - Si_q) 
+                    -  jnp.sin(lambda_val * c_mat * q) / q_scaled ) * f_nfw_val 
+        
+        #u_ell_m = jnp.clip(u_ell_m, 0.0, 1.0)
         return ell, u_ell_m
 
 
-    def compute_u_ell(self, z, m, params = None):
-        Nc = self.get_N_centrals(m, params=params) 
-        Ns = self.get_N_satellites(m, params=params)
-
-        ng_bar = self.get_ng_bar_at_z(z, params = params)
-        W_g = self.get_wg_at_z(z, params=params)
-        
-        pref = W_g / ng_bar 
-
-        ell, u_m_ell = self.compute_u_m_ell(z, m, params=params)
-        return ell, pref[:, None] * (Nc[:, None] + Ns[:, None] * u_m_ell)
 
 
-    def compute_u_ell_squared(self, z, m, params = None):
+    def compute_u_ell(self, z, m, moment=1, params=None):
         """ 
+        Compute either the first or second moment of the galaxy HOD tracer u_ell.
         For galaxy HOD:, 
-           〈|u_ell^g(M, z)|^2〉= W_g(z) / ng_bar(z)^2 * [Ns^2 u_ell^g(M, z)^2 + 2Ns u_ell^g(M, z)]
-        You cannot simply take [u_ell^g(M, z)]^2.
+            First moment:     W_g / ng_bar * [Nc + Ns * u_ell_m]
+            Second moment:    W_g^2 / ng_bar^2 * [Ns^2 * u_ell_m^2 + 2 * Ns * u_ell_m]
+        You cannot simply take u_ell_g**2.
         """
-
         Ns = self.get_N_satellites(m, params=params)
-        ng_bar = self.get_ng_bar_at_z(z, params=params)
-        W_g = self.get_wg_at_z(z, params=params)
-        ell, u_m_ell = self.compute_u_m_ell(z, m, params=params)
-        pref = W_g / ng_bar**2
+        Nc = self.get_N_centrals(m, params=params)
+        ng = self.get_ng_bar_at_z(z, params=params) * (params["H0"]/100)**3
+        W  = self.get_wg_at_z(z, params=params)
+        ell, u_m = self.compute_u_m_ell(z, m, params=params)
+    
+        moment_funcs = [
+            lambda _: (W/ng)[:, None] * (Nc[:, None] + Ns[:, None] * u_m),
+            lambda _: (W**2/ng**2)[:, None] * (Ns[:, None]**2 * u_m**2 + 2*Ns[:, None] * u_m),
+        ]
+    
+        u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
+    
+        return ell, u_ell
+  
         
-        u_ell_squared =  pref[:, None] * ( Ns[:, None]**2 * u_m_ell**2 + 2 * Ns[:, None] * u_m_ell )
 
-        return ell, u_ell_squared
+    # This code is for the Hankel transform. We may be able to remove it once JAX resolved the bugs in SiCi  
+    def _nfw_profile(self, r, r_s, rho_s, r_out):
+        x = r / r_s
+        rho = rho_s / (x * (1 + x)**2)
+        return jnp.where(r <= r_out, rho, 0.0)
 
+    def _rho_s_from_M(self, M, r_s, c):
+        return M / (4.0 * jnp.pi * r_s**3 * (jnp.log1p(c) - c / (1 + c)) + 1e-30)
 
+    def compute_u_m_ell(self, z, m_array, lambda_val=1.0, params=None):
+        m_array = jnp.atleast_1d(m_array)
+    
+        # compute halo quantities
+        r200c = self.emulator.get_r_delta_of_m_delta_at_z(200, m_array, z, params=params)
+        c200c = self.c_Duffy2008(z, m_array)
+        r_s = r200c / c200c
+        r_out = lambda_val * r200c
+    
+        # avoid zero radius
+        r_min = 1e-4
+        r_grid = jnp.clip(self.r_grid, a_min=r_min)
+    
+        rho_s = jax.vmap(self._rho_s_from_M)(m_array, r_s, jnp.full_like(m_array, c200c))
+    
+        # integrand for Hankel
+        def integrand_single(r_s_i, rho_s_i, r_out_i):
+            rho_r = self._nfw_profile(r_grid, r_s_i, rho_s_i, r_out_i)
+            return 4 * jnp.pi * r_grid**2 * rho_r
+    
+        integrand = jax.vmap(integrand_single)(r_s, rho_s, r_out)
+    
+        # Hankel transform
+        k, u_k = self.hankel.transform(integrand)
+        u_k *= jnp.sqrt(jnp.pi / (2 * k[None, :]))
+        
+        # normalize so u(k→0) = 1
+        u_k /= u_k[:, 0:1]
+    
+        # scale to ell
+        chi = self.emulator.get_angular_distance_at_z(z, params=params) * (1+z) * params["H0"]/100
+        ell = k[None, :] * chi
+        N_m = m_array.shape[0]
+        ell = jnp.broadcast_to(ell, (N_m, k.shape[0]))
+    
+        return ell, u_k 
+    
+
+    
 

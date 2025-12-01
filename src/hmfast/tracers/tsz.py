@@ -72,24 +72,32 @@ class TSZTracer(BaseTracer):
         return jax.vmap(single_m)(m)
 
 
-    def compute_u_ell(self, z, m, params=None):
+    def compute_u_ell(self, z, m, moment=1, params=None):
         """
-        Compute u_ell(M,z) using the general decomposition:
-            u_ell = prefactor * [local_contribution + profile_contribution * u_k]
+        Compute either the first or second moment of the tSZ power spectrum tracer u_ell.
+        For tSZ:
+            1st moment:  u_ell
+            2nd moment:  u_ell^2
         """
-
+        
+        # Hankel transform
         hankel_integrand = self.get_hankel_integrand(self.x_grid, z, m)
-        k, u_k = self.hankel.transform(hankel_integrand)     # applies Hankel transform
-        u_k *=  jnp.sqrt(jnp.pi / (2 * k[None, :]))
-
-        
-        prefactor, scale_factor = self.get_prefactor(z, m)          # get prefactor
-        ell = k[None, :] * scale_factor[:, None] 
-        u_ell = prefactor[:, None] *  u_k
-        
+        k, u_k = self.hankel.transform(hankel_integrand)
+        u_k *= jnp.sqrt(jnp.pi / (2 * k[None, :]))
+    
+        # Prefactors and ell-scaling
+        prefactor, scale_factor = self.get_prefactor(z, m)
+        ell = k[None, :] * scale_factor[:, None]
+        u_ell_base = prefactor[:, None] * u_k
+    
+        # Select moment using JAX-safe branching
+        moment_funcs = [
+            lambda _: u_ell_base,          # moment = 1
+            lambda _: u_ell_base**2,       # moment = 2
+        ]
+    
+        u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
+    
         return ell, u_ell
 
-    def compute_u_ell_squared(self, z, m, params=None): 
-        """ For tSZ, 〈|u_ell(M, z)|^2〉= u_ell^2(M, z) """
-        ell, u_ell = self.compute_u_ell(z, m, params=None)
-        return ell, u_ell**2
+

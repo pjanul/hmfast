@@ -34,18 +34,11 @@ class BaseTracer(ABC):
         """
    
     @abstractmethod
-    def compute_u_ell(self, z, m, power=1, params=None):
+    def compute_u_ell(self, z, m, moment=1, params=None):
         """
         Compute u_ell(M,z). All child classes must have a version of this function implemented.
         """
         pass 
 
-    @abstractmethod
-    def compute_u_ell_squared(self, z, m, params=None):
-        """
-        Compute u_ell^2(M,z). All child classes must have a version of this function implemented.
-        Note that for many tracers, we cannot simply take u_ell^2, 
-        but rather we require its second moment 〈|u_ell(M, z)|^2〉.
-        """
-        pass
+   
   

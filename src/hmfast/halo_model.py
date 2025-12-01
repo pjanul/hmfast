@@ -8,7 +8,6 @@ import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
 from hmfast.halo_fits import MF_T08, BF_T10
-from hmfast.utils import interpolate_tracer
 from hmfast.emulator_eval import CosmoEmulator, PkEmulator
 from mcfit import TophatVar
 jax.config.update("jax_enable_x64", True)
@@ -128,7 +127,7 @@ class HaloModel:
         hmf = jnp.exp(self._hmf_interp((jnp.log(1.+z), jnp.log(M))))
         return hmf
     
-    #@partial(jax.jit, static_argnums=(0,))
+    @partial(jax.jit, static_argnums=(0,))
     def bias_function(self, z: float, M: float, params = None) -> jnp.ndarray:
         """
         Compute the halo bias function.
@@ -158,24 +157,27 @@ class HaloModel:
 
 
     
+    def interpolate_tracer(self, z, m, tracer, ell_eval, moment=1, params = None):
+        """
+        Interpolate u_ell values onto a uniform ell grid for multiple m values. 
+        """
+    
+        ells, u_ells = tracer.compute_u_ell(z, m, moment=moment, params=params)
+            
+        # Interpolator function for a single m
+        def interpolate_single(ell, u_ell):
+            interpolator = jscipy.interpolate.RegularGridInterpolator((ell,), u_ell, method='linear', bounds_error=False, fill_value=None)
+            return interpolator(ell_eval)
+    
+        # Vectorize the interpolation across all m and interpolate
+        u_ell_eval = jax.vmap(interpolate_single, in_axes=(0, 0), out_axes=0)(ells, u_ells)
+    
+        return ell_eval, u_ell_eval
+
 
     def get_ell_grid(self, params = None):
         """
         Generate ell grid with specified parameters.
-        
-        Parameters
-        ----------
-        lmin : float
-            Minimum multipole
-        lmax : float  
-            Maximum multipole
-        dlogell : float
-            Logarithmic spacing in ell
-            
-        Returns
-        -------
-        jnp.ndarray
-            Array of multipole values
         """
 
         lmin, lmax = params.get('ell_min', 2.0), params.get('ell_max', 1.0e4)
@@ -186,19 +188,19 @@ class HaloModel:
         num_points = int((log10_lmax - log10_lmin) / dlogell) + 1
         return jnp.logspace(log10_lmin, log10_lmax, num=num_points)
 
-
+    #@partial(jax.jit, static_argnums=(0, 1))
     def get_C_ell_1h(self, tracer, params = None):
         """
         Compute the 1-halo term for C_ell.
         """
-
+        
         # Compute grids
         z_grid = jnp.geomspace(params['z_min'], params['z_max'], params['z_npoints'])
         m_grid = jnp.geomspace(params['M_min'], params['M_max'], params['M_npoints'])
         ell_grid = self.get_ell_grid(params = params)
 
         # Vectorize u_ell interpolation and mass function over z, and also compute dVdzdOmega
-        u_ell_squared_grid = jax.vmap(lambda zp: interpolate_tracer(zp, m_grid, tracer, ell_grid, power=2, params=params)[1])(z_grid)
+        u_ell_squared_grid = jax.vmap(lambda zp: self.interpolate_tracer(zp, m_grid, tracer, ell_grid, moment=2, params=params)[1])(z_grid)
         dndlnm_grid = jax.vmap(lambda zp: self.mass_function(zp, m_grid, params=params))(z_grid)
         comov_vol = self.cosmo_emulator.get_dVdzdOmega_at_z(z_grid, params=params)
 
@@ -226,8 +228,6 @@ class HaloModel:
                 
         return C_yy  
 
-
-
         
     def get_C_ell_2h(self, tracer, params=None):
         """
@@ -241,7 +241,7 @@ class HaloModel:
         # Compute mass function and bias
         dndlnm_grid = jax.vmap(lambda z: self.mass_function(z, m_grid, params=params))(z_grid)
         bias_grid = jax.vmap(lambda z: self.bias_function(z, m_grid, params=params))(z_grid)
-        u_ell_grid = jax.vmap(lambda z: interpolate_tracer(z, m_grid, tracer, ell_grid, power=1, params=params)[1])(z_grid)
+        u_ell_grid = jax.vmap(lambda z: self.interpolate_tracer(z, m_grid, tracer, ell_grid, moment=1, params=params)[1])(z_grid)
         
         # Integrate over mass for each z and ell
         logm_grid = jnp.log(m_grid)

@@ -10,11 +10,10 @@ __author__ = "Patrick Janulewicz, Licong Xu, Boris Bolliet"
 __email__ = "pj407@cam.ac.uk"
 
 from .halo_model import HaloModel
-from .utils import interpolate_tracer
 from .emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from .emulator_eval import CosmoEmulator, PkEmulator
 from .tracers.tsz import gnfw_pressure_profile, TSZTracer
 from .tracers.galaxy_hod import GalaxyHODTracer
 
 
-__all__ = ["HaloModel", "EDEEmulator", "TSZTracer", "GalaxyHODTracer"]
+__all__ = ["HaloModel", "CosmoEmulator", "PkEmulator", "TSZTracer", "GalaxyHODTracer"]

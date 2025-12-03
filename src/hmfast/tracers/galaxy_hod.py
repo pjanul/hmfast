@@ -6,14 +6,22 @@ from hmfast.base_tracer import BaseTracer, HankelTransform
 from jax.scipy.special import sici # eventually we will want to import this, but there is a bug in the JAX version
 from jax.scipy.special import erf  # Use jax-enabled math for special functions
 import numpy as np
+import os
 _eps = 1e-30
 
 jax.config.update("jax_enable_x64", True)
 
+# Path to this Python file's directory
+_here = os.path.dirname(os.path.abspath(__file__))
+
+# Path to the hmfast_data directory (parent dir of this file + hmfast_data)
+data_path = os.path.join(_here, "..", "hmfast_data", "normalised_dndz_cosmos_0.txt")
+
 try:
-    dndz_data = jnp.array(np.loadtxt("../../data/hmfast_data/normalised_dndz_cosmos_0.txt"))
-except: 
-    pass
+    dndz_data = jnp.array(np.loadtxt(data_path))
+except Exception as e:
+    raise FileNotFoundError(f"Could not load dndz file at {data_path}") from e
+
 
 
 
@@ -236,7 +244,5 @@ class GalaxyHODTracer(BaseTracer):
         ell = jnp.broadcast_to(ell, (N_m, k.shape[0]))
     
         return ell, u_k 
-    
 
     
-

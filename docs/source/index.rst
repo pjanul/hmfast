@@ -27,7 +27,7 @@ Key features include:
 
    installation
    emulator
-   c_ell
+   halo_model
 
 
 Questions & Feedback

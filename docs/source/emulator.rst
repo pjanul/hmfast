@@ -1,4 +1,4 @@
-Computing cosmological functions from emulators
+The Emulator class
 ============
 
 This page documents the primary public functions provided by the emulators used throughout `hmfast`. It covers the following functions.
@@ -24,7 +24,7 @@ Below are short examples showing how to call each function and plot the results.
     params_hmfast = {
 
         # Emulator parameters. See https://github.com/cosmopower-organization for more details.
-        'fEDE': 0.1,              # only for wcdm models
+        'fEDE': 0.1,              # only for ede models
         'log10z_c': 3.5,
         'thetai_scf': jnp.pi/2,
         'ln10^{10}A_s': 3.047, 
@@ -129,10 +129,10 @@ Example showing how to query ρ_crit(z) and plot it. The returned units are
    :alt: Critical density
 
 
-Power spectrum P(k) at a given redshift
+Matter power spectrum P(k) at a given redshift
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use the PkEmulator to request the linear or nonlinear power spectrum at a given
+Use the PkEmulator to request the linear or nonlinear matter power spectrum at a given
 redshift. ``get_pk_at_z`` returns (P_k, k_grid). Plot P(k) on a log-log scale.
 
 .. code-block:: python
@@ -140,10 +140,10 @@ redshift. ``get_pk_at_z`` returns (P_k, k_grid). Plot P(k) on a log-log scale.
     # Choose redshift
     z_pk = 0.5
     
-    # Linear power spectrum
+    # Linear matter power spectrum
     Pk_lin, k_lin = emulator.pk_emulator.get_pk_at_z(z_pk, params=params_hmfast, linear=True)
     
-    # Non-linear power spectrum (if available in your emulator files)
+    # Non-linear matter power spectrum (if available in your emulator files)
     Pk_nl, k_nl = emulator.pk_emulator.get_pk_at_z(z_pk, params=params_hmfast, linear=False)
     
     plt.figure(figsize=(7,4))

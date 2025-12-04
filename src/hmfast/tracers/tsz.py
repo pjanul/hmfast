@@ -4,6 +4,7 @@ from hmfast.halo_model import HaloModel
 from hmfast.emulator_eval import Emulator
 from functools import partial
 from hmfast.base_tracer import BaseTracer, HankelTransform
+from hmfast.defaults import merge_with_defaults
 
 
 
@@ -23,6 +24,7 @@ class TSZTracer(BaseTracer):
         """
         GNFW pressure profile as a function of dimensionless scaled radius x = r/r500.
         """ 
+        params = merge_with_defaults(params)
         x = self.x_grid
     
         # Pull needed parameters
@@ -43,6 +45,7 @@ class TSZTracer(BaseTracer):
         """
         Helper to compute r_delta and ell_delta for each halo.
         """
+        params = merge_with_defaults(params)
         h, B, delta = params['H0']/100, params['B'], params['delta']
         d_A = self.emulator.get_angular_distance_at_z(z, params=params) * h
         r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=params) / B**(1/3)
@@ -54,6 +57,7 @@ class TSZTracer(BaseTracer):
         """
         Compute tSZ prefactor.
         """
+        params = merge_with_defaults(params)
         r_delta, ell_delta = self._compute_r_and_ell(z, m, params=params)
         h = params['H0'] / 100
         m_e, sigma_T, mpc_per_h_to_cm = 510998.95, 6.6524587321e-25, 3.085677581e24 / h
@@ -62,6 +66,7 @@ class TSZTracer(BaseTracer):
         return prefactor, ell_delta
 
     def get_hankel_integrand(self, z, m, params=None):
+        params = merge_with_defaults(params)
         x = self.x_grid
         x_min, x_max = self.x_grid[0], self.x_grid[-1] # First element in x_grid is the smallest, last is the biggest
         W_x = jnp.where((x >= x_min) & (x <= x_max), 1.0, 0.0)
@@ -81,6 +86,7 @@ class TSZTracer(BaseTracer):
             2nd moment:  u_ell^2
         """
         
+        params = merge_with_defaults(params)
         # Hankel transform
         hankel_integrand = self.get_hankel_integrand(z, m, params=params)
         k, u_k = self.hankel.transform(hankel_integrand)

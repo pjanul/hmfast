@@ -3,8 +3,8 @@ import jax
 import jax.numpy as jnp
 from typing import Dict, Any, Optional, Union
 from functools import partial
-from .emulator_load import EmulatorLoader, EmulatorLoaderPCA 
-
+from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA 
+from hmfast.defaults import merge_with_defaults
 # Enable 64-bit precision
 jax.config.update("jax_enable_x64", True)
 
@@ -18,20 +18,6 @@ _COSMO_MODELS = {
     5: {"suffix": "v1", "subdir": "mnu-3states"},
     6: {"suffix": "v2", "subdir": "ede"},
 }
-
-def merge_with_defaults(params=None):
-    """ A global helper function that any of the classes can call to merge params with defaults."""
-    defaults = {
-        'fEDE': 0.001,            'tau_reio': 0.054,        'H0': 67.66,           'ln10^{10}A_s': 3.047,    
-        'omega_b': 0.02242,       'omega_cdm': 0.11933,     'n_s': 0.9665,         'log10z_c': 3.562,      
-        'thetai_scf': 2.83,       'r': 0.,                  'N_ur': 0.00441,       'N_ncdm': 1,
-        'deg_ncdm': 3,            'm_ncdm': 0.02,           'T_cmb': 2.7255,       'w0_fld': -0.95,  
-    }
-    
-    merged = defaults.copy()
-    if params:
-        merged.update(params)
-    return merged
 
 
 
@@ -438,10 +424,7 @@ class PkEmulator:
         self.pk_grid_zmax = 4999.0
 
 
-    def get_pk_at_z(self, 
-                    z: Union[float, jnp.ndarray], 
-                    params: Dict[str, Union[float, jnp.ndarray]], 
-                    linear=True) -> tuple[jnp.ndarray, jnp.ndarray]:
+    def get_pk_at_z(self, z, params=None, linear=True):
         """
         Get linear power spectrum at redshift z.
         

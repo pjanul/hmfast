@@ -2,9 +2,9 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
 from hmfast.base_tracer import BaseTracer, HankelTransform
-#from hmfast.utils import sici # for now, we will implement our own sici until JAX fixes the bug
-from jax.scipy.special import sici # eventually we will want to import this, but there is a bug in the JAX version
-from jax.scipy.special import erf  # Use jax-enabled math for special functions
+from hmfast.defaults import merge_with_defaults
+from jax.scipy.special import sici, erf # eventually we will want to import this, but there is a bug in the JAX version
+
 import numpy as np
 import os
 _eps = 1e-30
@@ -55,6 +55,8 @@ class GalaxyHODTracer(BaseTracer):
 
     def get_N_centrals(self, m, params = None):
         """Mean central occupation: shape = M.shape"""
+
+        params = merge_with_defaults(params)
         M_min = params["M_min_HOD"]
         sigma = params["sigma_log10M_HOD"]
 
@@ -65,6 +67,7 @@ class GalaxyHODTracer(BaseTracer):
     
     def get_N_satellites(self, m, params = None):
         """Mean satellite occupation: shape = M.shape"""
+        params = merge_with_defaults(params)
         M0 = params["M0_HOD"]
         M1p = params["M1_prime_HOD"]
         alpha = params["alpha_s_HOD"]
@@ -84,6 +87,7 @@ class GalaxyHODTracer(BaseTracer):
         params: parameter dict 
         """
         
+        params = merge_with_defaults(params)
         logm = jnp.log(m)
         z = jnp.atleast_1d(z)
 
@@ -105,6 +109,8 @@ class GalaxyHODTracer(BaseTracer):
         Return Wg_grid at requested z.
         Uses pre-loaded dndz_data = [z, phi_prime].
         """
+        
+        params = merge_with_defaults(params)
         zq = jnp.atleast_1d(jnp.array(z, dtype=jnp.float64))
     
         # Extract precomputed phi_prime
@@ -136,7 +142,7 @@ class GalaxyHODTracer(BaseTracer):
         As of November 2025, the jax.scipy.special.sici functions are not well behaved for large inputs.
         As a result, we will shelve this method for now until the next stable JAX release.
         """
-
+        params = merge_with_defaults(params)
         m = jnp.atleast_1d(m) 
 
         c_200c = self.c_Duffy2008(z, m)
@@ -182,7 +188,8 @@ class GalaxyHODTracer(BaseTracer):
             Second moment:    W_g^2 / ng_bar^2 * [Ns^2 * u_ell_m^2 + 2 * Ns * u_ell_m]
         You cannot simply take u_ell_g**2.
         """
-        
+
+        params = merge_with_defaults(params)
         Ns = self.get_N_satellites(m, params=params)
         Nc = self.get_N_centrals(m, params=params)
         ng = self.get_ng_bar_at_z(z, m, params=params) * (params["H0"]/100)**3
@@ -210,6 +217,7 @@ class GalaxyHODTracer(BaseTracer):
         return M / (4.0 * jnp.pi * r_s**3 * (jnp.log1p(c) - c / (1 + c)) + 1e-30)
 
     def get_u_m_ell(self, z, m_array, lambda_val=1.0, params=None):
+        params = merge_with_defaults(params)
         m_array = jnp.atleast_1d(m_array)
     
         # compute halo quantities

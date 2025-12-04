@@ -69,6 +69,8 @@ AUX_FILES = [
 def get_default_data_path():
     return os.environ.get("HMFAST_EMULATOR_PATH", os.path.join(os.path.expanduser("~"), "hmfast_data"))
 
+
+
 def download_emulators(target_dir=None, models="ede-v2", skip_existing=True, download_auxiliary=True):
     """
     Download emulator .npz files for specified cosmopower models into target_dir.

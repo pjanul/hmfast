@@ -3,24 +3,17 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
+from hmfast.download import get_default_data_path
+import os
+
+
 from jax.scipy.special import sici, erf # eventually we will want to import this, but there is a bug in the JAX version
 
 import numpy as np
-import os
 _eps = 1e-30
 
 jax.config.update("jax_enable_x64", True)
 
-# Path to this Python file's directory
-_here = os.path.dirname(os.path.abspath(__file__))
-
-# Path to the hmfast_data directory (parent dir of this file + hmfast_data)
-data_path = os.path.join(_here, "..", "hmfast_data", "normalised_dndz_cosmos_0.txt")
-
-try:
-    dndz_data = jnp.array(np.loadtxt(data_path))
-except Exception as e:
-    raise FileNotFoundError(f"Could not load dndz file at {data_path}") from e
 
 
 
@@ -51,7 +44,16 @@ class GalaxyHODTracer(BaseTracer):
         self.r_grid = x_grid
         self.emulator = emulator.cosmo_emulator # cosmology emulator
         self.halo_model = halo_model
-        
+
+    def load_dndz_data(self):
+        dndz_path = os.path.join(get_default_data_path(), "hmfast_auxiliary_files", "normalised_dndz_cosmos_0.txt")
+        try:
+            return jnp.array(np.loadtxt(dndz_path))
+        except Exception as e:
+            raise FileNotFoundError(
+                f"Could not load dndz file at {dndz_path}. Download it with hmfast.download.download_emulators()."
+            ) from e
+
 
     def get_N_centrals(self, m, params = None):
         """Mean central occupation: shape = M.shape"""
@@ -114,6 +116,7 @@ class GalaxyHODTracer(BaseTracer):
         zq = jnp.atleast_1d(jnp.array(z, dtype=jnp.float64))
     
         # Extract precomputed phi_prime
+        dndz_data = self.load_dndz_data()
         z_data = dndz_data[:, 0]
         phi_prime_data = dndz_data[:, 1]
     

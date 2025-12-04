@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Union
 from functools import partial
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA 
 from hmfast.defaults import merge_with_defaults
+from hmfast.download import get_default_data_path
 # Enable 64-bit precision
 jax.config.update("jax_enable_x64", True)
 
@@ -28,6 +29,10 @@ class Emulator:
     """
 
     def __init__(self, data_path, cosmo_model = 0):
+        
+        if data_path is None:
+            data_path = get_default_data_path()
+            
         self.data_path = data_path
         self.cosmo_model = cosmo_model
 

@@ -8,26 +8,30 @@ from .emulator_load import EmulatorLoader, EmulatorLoaderPCA
 # Enable 64-bit precision
 jax.config.update("jax_enable_x64", True)
 
-_COSMO_MODEL_SUFFIX_MAP = {
-        0: "v1",            # lcdm
-        1: "mnu_v1",        # mnu
-        2: "neff_v1",       # neff
-        3: "w_v1",          # wcdm
-        4: "v1",            # ede-v1
-        5: "v1",            # mnu-3states 
-        6: "v2",            # ede-v2
-    }
 
-_COSMO_MODEL_SUBDIR_MAP = {
-        0: "lcdm",          # lcdm
-        1: "mnu",           # mnu
-        2: "neff",          # neff
-        3: "wcdm",          # wcdm
-        4: "ede",           # ede-v1
-        5: "mnu-3states",   # mnu-3states 
-        6: "ede",           # ede-v2
-    }
+_COSMO_MODELS = {
+    0: {"suffix": "v1", "subdir": "lcdm"},
+    1: {"suffix": "mnu_v1", "subdir": "mnu"},
+    2: {"suffix": "neff_v1", "subdir": "neff"},
+    3: {"suffix": "w_v1", "subdir": "wcdm"},
+    4: {"suffix": "v1", "subdir": "ede"},
+    5: {"suffix": "v1", "subdir": "mnu-3states"},
+    6: {"suffix": "v2", "subdir": "ede"},
+}
 
+def merge_with_defaults(params=None):
+    """ A global helper function that any of the classes can call to merge params with defaults."""
+    defaults = {
+        'fEDE': 0.001,            'tau_reio': 0.054,        'H0': 67.66,           'ln10^{10}A_s': 3.047,    
+        'omega_b': 0.02242,       'omega_cdm': 0.11933,     'n_s': 0.9665,         'log10z_c': 3.562,      
+        'thetai_scf': 2.83,       'r': 0.,                  'N_ur': 0.00441,       'N_ncdm': 1,
+        'deg_ncdm': 3,            'm_ncdm': 0.02,           'T_cmb': 2.7255,       'w0_fld': -0.95,  
+    }
+    
+    merged = defaults.copy()
+    if params:
+        merged.update(params)
+    return merged
 
 
 
@@ -41,75 +45,38 @@ class Emulator:
         self.data_path = data_path
         self.cosmo_model = cosmo_model
 
-        # Map cosmo_model_idx → suffix
-        self.cosmo_model_suffix = (_COSMO_MODEL_SUFFIX_MAP.get(cosmo_model))
-
-        # Lazy-loaded emulator instances
+        # Lazy-loaded emulator instances. Can add more emulators in the future
         self._cosmo_emulator = None
         self._pk_emulator = None
-        # Future: self._ttteee_emulator = None, etc.
-
-    def _load_emulators(self, subfolder: str, emulator_dict: Dict[str, str]):
-        if not os.path.exists(self.emulator_path):
-            raise FileNotFoundError(f"Emulator directory not found: {self.emulator_path}")
         
-        self._emulators = {}
-        for key, filename in emulator_dict.items():
-            path = os.path.join(self.emulator_path, subfolder, filename)
-            self._emulators[key] = EmulatorLoader(path)
-        
-        print(f"✓ Successfully loaded {len(self._emulators)} emulators from {self.emulator_path}")
+    
+    def _lazy_load_emulator(self, attr_name: str, cls):
+        emulator = getattr(self, attr_name)
+        if emulator is None:
+            emulator = cls(data_path=self.data_path, cosmo_model=self.cosmo_model)
+            setattr(self, attr_name, emulator)
+        return emulator
 
     @property
     def cosmo_emulator(self):
-        if self._cosmo_emulator is None:
-            self._cosmo_emulator = CosmoEmulator(
-                data_path=self.data_path,
-                cosmo_model=self.cosmo_model
-            )
-        return self._cosmo_emulator
-
+        return self._lazy_load_emulator("_cosmo_emulator", CosmoEmulator)
+    
     @property
     def pk_emulator(self):
-        if self._pk_emulator is None:
-            self._pk_emulator = PkEmulator(
-                data_path=self.data_path,
-                cosmo_model=self.cosmo_model
-            )
-        return self._pk_emulator
+        return self._lazy_load_emulator("_pk_emulator", PkEmulator)
 
-    @staticmethod
-    def get_default_params():
-        default_params = {
-            'fEDE': 0.001,
-            'tau_reio': 0.054,
-            'H0': 67.66,
-            'ln10^{10}A_s': 3.047,
-            'omega_b': 0.02242,
-            'omega_cdm': 0.11933,
-            'n_s': 0.9665,
-            'log10z_c': 3.562,
-            'thetai_scf': 2.83,
-            'r': 0.,
-            'N_ur': 0.00441,  # For Neff = 3.044
-            'N_ncdm': 1,
-            'deg_ncdm': 3,
-            'm_ncdm': 0.02,
-            'T_cmb': 2.7255,
-            'w0_fld': -0.95,  
-            
-        }
+    
+    def __getattr__(self, name):
+        """Delegate attribute access to cosmo_emulator or pk_emulator."""
+        for emulator in (self.cosmo_emulator, self.pk_emulator):
+            if hasattr(emulator, name):
+                return getattr(emulator, name)
+        raise AttributeError(f"'Emulator' object has no attribute '{name}'")
 
-        return default_params
-
-    def _merge_with_defaults(self, params):
-        merged = self.get_default_params().copy()
-        if params:
-            merged.update(params)
-        return merged
+    
 
 
-class CosmoEmulator(Emulator):
+class CosmoEmulator:
     """
     Cosmological emulator with JAX compatibility.
 
@@ -117,32 +84,24 @@ class CosmoEmulator(Emulator):
     such as H(z), d_A(z), sigma8(z), and other quantities derived from them.
     """
     
-    
-    def __init__(self, data_path: Optional[str] = None, cosmo_model=0):
-        """
-        Initialize the cosmology emulator.
-        
-        Parameters
-        ----------
-        data_path : str, optional
-            Path to emulator data directory. If None, uses environment variable.
-        """
-
-        # Emulator metadata
+    def __init__(self, data_path: str, cosmo_model=0):
         self.cosmo_model = cosmo_model
-        cosmo_model_suffix = _COSMO_MODEL_SUFFIX_MAP[cosmo_model]
-        cosmo_model_subdir = _COSMO_MODEL_SUBDIR_MAP[cosmo_model]
-        
-        EMULATOR_DICT = {'DAZ': f'DAZ_{cosmo_model_suffix}', 'HZ': f'HZ_{cosmo_model_suffix}', 'S8Z': f'S8Z_{cosmo_model_suffix}'}
-   
-        # Get data path using same logic as classy_szfast
-        self.emulator_path = os.path.join(data_path, cosmo_model_subdir)
-        
-        # Initialize emulator storage
-        self._emulators = {}
-        self._load_emulators("growth-and-distances", EMULATOR_DICT)
-        
-        # Set up interpolation grids using actual emulator modes
+        model_info = _COSMO_MODELS[cosmo_model]
+        self.emulator_path = os.path.join(data_path, model_info["subdir"])
+
+        emulator_dict = {
+            'DAZ': f'DAZ_{model_info["suffix"]}',
+            'HZ': f'HZ_{model_info["suffix"]}',
+            'S8Z': f'S8Z_{model_info["suffix"]}'
+        }
+
+        if not os.path.exists(self.emulator_path):
+            raise FileNotFoundError(f"Emulator directory not found: {self.emulator_path}")
+
+        # One-liner dictionary comprehension to load emulators
+        self._emulators = {k: EmulatorLoader(os.path.join(self.emulator_path, "growth-and-distances", v))
+                           for k, v in emulator_dict.items()}
+
         self._setup_interpolation_grids_post_load()
         
     
@@ -181,10 +140,8 @@ class CosmoEmulator(Emulator):
         jnp.ndarray
             Interpolated values
         """
-        # Ensure z_requested is an array
+        # Ensure z_requested is an array and then linearly interpolate
         z_req = jnp.atleast_1d(z_requested)
-        
-        # Perform linear interpolation
         result = jnp.interp(z_req, z_grid, predictions, left=jnp.nan, right=jnp.nan)
         
         # Return scalar if input was scalar
@@ -209,7 +166,7 @@ class CosmoEmulator(Emulator):
         if params is None:
             params = {}
         
-        p = self._merge_with_defaults(params)
+        p = merge_with_defaults(params)
         
         # Derive additional parameters following classy_szfast.py:308-320
         p['h'] = p['H0'] / 100.0
@@ -253,9 +210,9 @@ class CosmoEmulator(Emulator):
         jnp.ndarray
             Hubble parameter(s) in Mpc^(-1)
         """
-        merged_params = self._merge_with_defaults(params)
         
-        # Get predictions on full grid. 
+        # Merge parameters with defaults and get predictions on full grid. 
+        merged_params = merge_with_defaults(params)
         hz_predictions = 10**self._emulators['HZ'].predictions(merged_params)
         
         # Interpolate to requested redshifts
@@ -280,9 +237,9 @@ class CosmoEmulator(Emulator):
         jnp.ndarray
             Angular diameter distance(s) in Mpc
         """
-        merged_params = self._merge_with_defaults(params)
-        
-        # Get predictions on full grid
+
+        # Merge parameters with defaults and get predictions on full grid. 
+        merged_params = merge_with_defaults(params)
         da_predictions = self._emulators['DAZ'].predictions(merged_params)
 
         # If we're dealing with EDE-v2, we need to convert from log and add an extra element to the array due to size differences in the emulators
@@ -312,9 +269,9 @@ class CosmoEmulator(Emulator):
         jnp.ndarray
             sigma8 value(s)
         """
-        merged_params = self._merge_with_defaults(params)
-        
-        # Get predictions on full grid
+
+        # Merge parameters with defaults and get predictions on full grid. 
+        merged_params = merge_with_defaults(params)        
         s8_predictions = self._emulators['S8Z'].predictions(merged_params)
         
         # Interpolate to requested redshifts
@@ -427,7 +384,7 @@ class CosmoEmulator(Emulator):
    
 
 
-class PkEmulator(Emulator):
+class PkEmulator:
     """
     Cosmological emulator with JAX compatibility.
     
@@ -436,35 +393,24 @@ class PkEmulator(Emulator):
     """
      
     
-    def __init__(self, data_path: Optional[str] = None, cosmo_model=0):
-        """
-        Initialize the P(k) emulator.
-        
-        Parameters
-        ----------
-        data_path : str, optional
-            Path to emulator data directory. If None, uses environment variable.
-        """
-
-        # Emulator metadata
+    def __init__(self, data_path: str, cosmo_model=0):
         self.cosmo_model = cosmo_model
-        cosmo_model_suffix = _COSMO_MODEL_SUFFIX_MAP[cosmo_model]
-        cosmo_model_subdir = _COSMO_MODEL_SUBDIR_MAP[cosmo_model]
-        
-        EMULATOR_DICT = {'DAZ': f'DAZ_{cosmo_model_suffix}', 'HZ': f'HZ_{cosmo_model_suffix}', 'S8Z': f'S8Z_{cosmo_model_suffix}'}
-   
-        # Get data path using same logic as classy_szfast
-        self.emulator_path = os.path.join(data_path, cosmo_model_subdir)
-        
-        # Emulator metadata
-        EMULATOR_DICT = {'PKNL': f'PKNL_{cosmo_model_suffix}', 'PKL': f'PKL_{cosmo_model_suffix}'}
-                
-        # Initialize emulator storage
-        self._emulators = {}
-        self._load_emulators("PK", EMULATOR_DICT)
-        
-        # Set up interpolation grids using actual emulator modes
+        model_info = _COSMO_MODELS[cosmo_model]
+        self.emulator_path = os.path.join(data_path, model_info["subdir"])
+
+        emulator_dict = {
+            'PKNL': f'PKNL_{model_info["suffix"]}',
+            'PKL': f'PKL_{model_info["suffix"]}'
+        }
+
+        if not os.path.exists(self.emulator_path):
+            raise FileNotFoundError(f"Emulator directory not found: {self.emulator_path}")
+
+        self._emulators = {k: EmulatorLoader(os.path.join(self.emulator_path, "PK", v))
+                           for k, v in emulator_dict.items()}
+
         self._setup_interpolation_grids_post_load()
+
         
    
 
@@ -514,7 +460,7 @@ class PkEmulator(Emulator):
             Power spectrum and k array
         """
         
-        merged_params = self._merge_with_defaults(params)
+        merged_params = merge_with_defaults(params)
         
         # Add redshift to parameters for prediction
         z_val = jnp.atleast_1d(z)[0] if hasattr(z, '__len__') else z

@@ -1,20 +1,19 @@
-The HaloModel class
-=====
+The Halo Model Module
+=====================
 
-This page documents the primary public functions provided by the ``HaloModel`` class in ``hmfast``. It covers the following functions.
+This page documents the primary public functions provided by the ``HaloModel`` class in ``hmfast``. It covers the following functions:
 
-- ``get_hmf(z, m, params)`` — Return the halo mass function :math:`\mathrm{d}n/\mathrm{d}\ln M` evaluated at redshift ``z`` and halo mass array ``m``.  
-- ``get_hbf(z, m, params)`` — Return the halo bias function :math:`b(m)` evaluated at redshift ``z`` and mass array ``m``.  
-- ``get_C_ell_1h(tracer, z, m, ell, params)`` — Compute the 1-halo contribution to the angular power spectrum :math:`C_\ell` for a given ``tracer``.  
-- ``get_C_ell_2h(tracer, z, m, ell, params)`` — Compute the 2-halo contribution to the angular power spectrum :math:`C_\ell` for a given ``tracer``.  
+- ``get_hmf(z, m, params)`` — Returns the halo mass function :math:`\mathrm{d}n/\mathrm{d}\ln M` evaluated at redshift ``z`` and halo mass array ``m``.  
+- ``get_hbf(z, m, params)`` — Returns the halo bias function :math:`b(m)` evaluated at redshift ``z`` and mass array ``m``.  
+- ``get_C_ell_1h(tracer, z, m, ell, params)`` — Computes the 1-halo contribution to the angular power spectrum :math:`C_\ell` for a given tracer.  
+- ``get_C_ell_2h(tracer, z, m, ell, params)`` — Computes the 2-halo contribution to the angular power spectrum :math:`C_\ell` for a given tracer.  
 
+---
 
 Setting up your halo model
--------------
+--------------------------
 
-To use the HaloModel class, you must first instantiate your parameters, emulators, and, in some cases, tracers. 
-First, begin by setting your input parameters. A list of current ``hmfast`` parameters can be found below. 
-
+To use the ``HaloModel`` class, you must first instantiate your cosmological parameters and load the emulator. Here's an example:
 
 .. code-block:: python
 
@@ -22,10 +21,12 @@ First, begin by setting your input parameters. A list of current ``hmfast`` para
     import jax
     import jax.numpy as jnp
     import matplotlib.pyplot as plt
-
-
+    from hmfast.tracers.galaxy_hod import GalaxyHODTracer
+    from hmfast.tracers.tsz import TSZTracer
+    
+    
     params_hmfast = {
-
+    
         # Emulator parameters. See https://github.com/cosmopower-organization for more details.
         'fEDE': 0.1,
         'log10z_c': 3.5,
@@ -61,33 +62,25 @@ First, begin by setting your input parameters. A list of current ``hmfast`` para
     }
 
 
-Once your parameters have been initialised, you may now create a HaloModel object. Each HaloModel object is defined by the following properties:
-
-1. **The emulator(s) used to evaluate cosmological quantities.** Once this has been set, you cannot change it.  
-   If you want to redo these calculations with a new set of emulators (e.g., LCDM, EDE, etc.), you must create a new HaloModel object.
-
-2. **The `params` dictionary containing all relevant free parameters.** This may be changed freely.
-
-
 .. code-block:: python
 
-    # Load emulators from your data file
+    # Load emulators
     emulator_path = "your/path/to/hmfast_data"
     emulator = hmfast.emulator_eval.Emulator(emulator_path, cosmo_model=0)
-    
-    # Define your halo model, which depends on your emulators and parameters
+
+    # Define the halo model
     halo_model = hmfast.halo_model.HaloModel(emulator, params=params_hmfast)
 
-    # Also define the mass and redshift arrays that will be used later
+    # Mass and redshift grids
     z_grid = jnp.geomspace(0.005, 3.0, 100)
     m_grid = jnp.geomspace(5e10, 3.5e15, 100)
-   
 
-Halo mass and bias functions 
--------------
+---
 
-Below we show example code to compute and plot the halo mass and halo bias
-as a function of mass for several redshifts. 
+Halo mass and bias functions
+----------------------------
+
+With our halo model defined, we can now compute halo mass and bias functions.
 
 .. code-block:: python
 
@@ -108,8 +101,8 @@ as a function of mass for several redshifts.
     
     # Top: Halo Mass Function
     for color, ls, z in zip(colors, linestyles, z_values):
-    dn_dlnm = halo_model.get_hmf(z, m_grid, params=params_hmfast)
-    axes[0].loglog(m_grid, dn_dlnm, lw=2, color=color, linestyle=ls, label=rf"$z={z}$")
+        dn_dlnm = halo_model.get_hmf(z, m_grid, params=params_hmfast)
+        axes[0].loglog(m_grid, dn_dlnm, lw=2, color=color, linestyle=ls, label=rf"$z={z}$")
     axes[0].grid(which='both', linestyle='--', alpha=0.5)
     axes[0].set_ylim(1e-6, 1e-1)
     axes[0].legend(fontsize=legend_size, frameon=False)
@@ -117,8 +110,8 @@ as a function of mass for several redshifts.
     
     # Bottom: Halo Bias Function
     for color, ls, z in zip(colors, linestyles, z_values):
-    b_m = halo_model.get_hbf(z, m_grid, params=params_hmfast)
-    axes[1].loglog(m_grid, b_m, lw=2, color=color, linestyle=ls, label=rf"$z={z}$")
+        b_m = halo_model.get_hbf(z, m_grid, params=params_hmfast)
+        axes[1].loglog(m_grid, b_m, lw=2, color=color, linestyle=ls, label=rf"$z={z}$")
     axes[1].grid(which='both', linestyle='--', alpha=0.5)
     axes[1].legend(fontsize=legend_size, frameon=False)
     axes[1].set_xlabel(r"$M\ [M_\odot/h]$", size=title_size)
@@ -127,64 +120,53 @@ as a function of mass for several redshifts.
     plt.tight_layout()
     plt.show()
 
-
-
 .. image:: _static/hmf_hbf.png
    :width: 75%
    :align: center
    :alt: Halo mass and bias functions
 
+---
 
+Adding tracers
+---------------
 
-Angular power spectra
--------------
+Once you are ready to compute angular power spectra, you can create tracer objects via the ``add_tracer`` method. Each tracer evaluates a profile over a dimensionless radial grid:
 
-The HaloModel class can also be used to compute the angular power spectrum :math:`C_\ell`. 
-To do this, you must first define your tracer. 
+.. math::
 
+    x = \frac{r}{r_{\rm scale}}
 
-Each Tracer object is defined by the following properties:
-
-1. **The emulator(s) used to evaluate cosmological quantities.** Once this has been set, you cannot change it.  
-   If you want to redo these calculations with a new set of emulators (e.g., LCDM, EDE, etc.), you must create a new Tracer object.
-   This must match the emulator used for the HaloModel class.
-
-2. **The HaloModel object on which you will evaluate this tracer.** Much like the emulator, this can only be changed by defining a new Tracer object.
-   This is not required for all tracers.
-
-3. **A dimensionless radial grid x = r / r_scale (e.g. r500 or r_s) over which the profile will be evaluated.**
-   Again, just like the emulator, this can only be changed by defining a new Tracer object.
-
-4. **The `params` dictionary containing all relevant free parameters.** This may be changed freely.
-
-
+(e.g., ``r500`` or ``r_s``). This ``x_grid`` is a defining property of the tracer that cannot be changed after creation.
+If you wish to use a different radial grid, simply create a new tracer with a new ``x_grid``.
 
 .. code-block:: python
 
-    
-    # Define your tracers. These tracers evaluate the profile over a dimensionless radial grid x = r / r_scale (e.g. r500 or r_s)
-    # You may either pass a custom x_grid, or you may omit the x_grid argument which will fall back to defaults. 
+    # Define radial grids for tracers
     x_grid_tsz = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
     x_grid_hod = jnp.logspace(jnp.log10(1e-5), jnp.log10(50.0), 512)
-    tsz_tracer = hmfast.tracers.tsz.TSZTracer(emulator, x_grid=x_grid_tsz, params=params_hmfast)
-    galaxy_hod_tracer = hmfast.tracers.galaxy_hod.GalaxyHODTracer(emulator, halo_model, x_grid=x_grid_hod, params=params_hmfast)
+    
+    # Add tracers
+    tsz_tracer = halo_model.add_tracer(TSZTracer, x_grid_tsz)
+    galaxy_hod_tracer = halo_model.add_tracer(GalaxyHODTracer, x_grid_hod)
 
+---
 
+Angular power spectra
+---------------------
 
-Now, you're ready to compute the angular power spectrum. Let's begin with tSZ.
+You may now easily compute the 1-halo and 2-halo of your tSZ tracer:
+
 
 .. code-block:: python
 
-    # Define the ell array 
+    # tSZ tracer
     ell_grid_tsz = jnp.geomspace(2, 8e3, 50)
     
-    # Compute angular power spectra
     D_terms = [
         ('1-halo term', halo_model.get_C_ell_1h(tsz_tracer, z_grid, m_grid, ell_grid_tsz, params=params_hmfast), 0.25, '-'),
         ('2-halo term', halo_model.get_C_ell_2h(tsz_tracer, z_grid, m_grid, ell_grid_tsz, params=params_hmfast), 0.75, '-.')
     ]
     
-    # Plot
     plt.figure(figsize=(8,5))
     cmap = plt.get_cmap("viridis")
     for label, C_ell, color_pos, ls in D_terms:
@@ -199,29 +181,25 @@ Now, you're ready to compute the angular power spectrum. Let's begin with tSZ.
     plt.tight_layout()
     plt.show()
 
-
-
 .. image:: _static/C_ell_yy.png
    :width: 75%
    :align: center
    :alt: tSZ angular power spectrum
 
 
-Let's now also plot angular power spectrum for the galaxy HOD tracer.
+And similarly for your galaxy HOD tracer:
 
 
 .. code-block:: python
 
-    # Define the ell array
+    # Galaxy HOD tracer
     ell_grid_hod = jnp.geomspace(1e2, 3.5e3, 50)
     
-    # Compute C_ell for discrete 1-halo and 2-halo terms
     C_terms = [
-        ('1-halo term', halo_model.get_C_ell_1h(galaxy_hod_tracer, z_grid, m_grid, ell_grid_hod, params=params_hmfast), 0.25, '-'),  # green
-        ('2-halo term', halo_model.get_C_ell_2h(galaxy_hod_tracer, z_grid, m_grid, ell_grid_hod, params=params_hmfast), 0.75, '-.')  # blue
+        ('1-halo term', halo_model.get_C_ell_1h(galaxy_hod_tracer, z_grid, m_grid, ell_grid_hod, params=params_hmfast), 0.25, '-'),
+        ('2-halo term', halo_model.get_C_ell_2h(galaxy_hod_tracer, z_grid, m_grid, ell_grid_hod, params=params_hmfast), 0.75, '-.')
     ]
     
-    # Plot
     plt.figure(figsize=(8,5))
     cmap = plt.get_cmap("viridis")
     for label, C_ell, color_pos, ls in C_terms:
@@ -235,14 +213,7 @@ Let's now also plot angular power spectrum for the galaxy HOD tracer.
     plt.tight_layout()
     plt.show()
 
-
 .. image:: _static/C_ell_gg.png
    :width: 75%
    :align: center
    :alt: Galaxy HOD angular power spectrum
-
-
-
-    
-    
-    

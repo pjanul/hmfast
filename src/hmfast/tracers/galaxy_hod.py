@@ -42,9 +42,11 @@ class GalaxyHODTracer(BaseTracer):
           - M_min_HOD, sigma_log10M_HOD, M0_HOD, M1_prime_HOD, alpha_s_HOD
     """
 
-    def __init__(self, emulator, halo_model, x_grid=jnp.logspace(jnp.log10(1e-5), jnp.log10(50.0), 512), params=None):        
+    def __init__(self, emulator, halo_model, x_grid=None, params=None):        
         
-       
+        if x_grid is None:
+            x_grid = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
+            
         self.hankel = HankelTransform(x_grid, nu=0.5)
         self.r_grid = x_grid
         self.emulator = emulator.cosmo_emulator # cosmology emulator

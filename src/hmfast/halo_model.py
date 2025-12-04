@@ -46,6 +46,13 @@ class HaloModel:
         _, dummy_k = self.pk_emulator.get_pk_at_z(1., params=params, linear=True)
         self._tophat_instance = partial(TophatVar(dummy_k, lowring=True, backend='jax'), extrap=True)
         self._tophat_instance_dvar = partial(TophatVar(dummy_k, lowring=True, backend='jax', deriv=1))
+
+    def add_tracer(self, tracer, x_grid):
+        """
+        Allows the user to create a tracer for this halo model.
+        This forces the cosmology to map that of this object
+        """
+        return tracer(emulator=self.emulator, halo_model=self, x_grid=x_grid)
         
     
     def _compute_sigma_grid(self, params = None):

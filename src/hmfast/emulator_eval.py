@@ -28,12 +28,9 @@ class Emulator:
     Lazily loads individual emulators (Cosmo, Pk, etc.) on demand.
     """
 
-    def __init__(self, data_path, cosmo_model = 0):
+    def __init__(self, cosmo_model = 0):
         
-        if data_path is None:
-            data_path = get_default_data_path()
-            
-        self.data_path = data_path
+        self.data_path = get_default_data_path()
         self.cosmo_model = cosmo_model
 
         # Lazy-loaded emulator instances. Can add more emulators in the future
@@ -44,7 +41,7 @@ class Emulator:
     def _lazy_load_emulator(self, attr_name: str, cls):
         emulator = getattr(self, attr_name)
         if emulator is None:
-            emulator = cls(data_path=self.data_path, cosmo_model=self.cosmo_model)
+            emulator = cls(cosmo_model=self.cosmo_model)
             setattr(self, attr_name, emulator)
         return emulator
 
@@ -75,11 +72,11 @@ class CosmoEmulator:
     such as H(z), d_A(z), sigma8(z), and other quantities derived from them.
     """
     
-    def __init__(self, data_path: str, cosmo_model=0):
+    def __init__(self, cosmo_model=0):
         self.cosmo_model = cosmo_model
         model_info = _COSMO_MODELS[cosmo_model]
-        self.emulator_path = os.path.join(data_path, model_info["subdir"])
-
+        self.emulator_path = os.path.join(get_default_data_path(), model_info["subdir"])
+        
         emulator_dict = {
             'DAZ': f'DAZ_{model_info["suffix"]}',
             'HZ': f'HZ_{model_info["suffix"]}',
@@ -183,9 +180,7 @@ class CosmoEmulator:
 
         
     
-    def get_hubble_at_z(self, 
-                       z: Union[float, jnp.ndarray], 
-                       params: Dict[str, Union[float, jnp.ndarray]]) -> jnp.ndarray:
+    def get_hubble_at_z(self, z, params=None):
         """
         Get Hubble parameter at redshift z.
         
@@ -210,9 +205,7 @@ class CosmoEmulator:
         return self._interpolate_z_dependent(z, hz_predictions, self.cp_z_interp)
         
 
-    def get_angular_distance_at_z(self, 
-                                  z: Union[float, jnp.ndarray], 
-                                  params: Dict[str, Union[float, jnp.ndarray]]) -> jnp.ndarray:
+    def get_angular_distance_at_z(self, z, params=None):
         """
         Get angular diameter distance at redshift z.
         
@@ -242,9 +235,7 @@ class CosmoEmulator:
         return self._interpolate_z_dependent(z, da_predictions, self.cp_z_interp)
 
 
-    def get_sigma8_at_z(self, 
-                       z: Union[float, jnp.ndarray], 
-                       params: Dict[str, Union[float, jnp.ndarray]]) -> jnp.ndarray:
+    def get_sigma8_at_z(self, z, params=None):
         """
         Get sigma8 at redshift z.
         
@@ -269,9 +260,7 @@ class CosmoEmulator:
         return self._interpolate_z_dependent(z, s8_predictions, self.cp_z_interp)
 
 
-    def get_rho_crit_at_z(self, 
-                         z: Union[float, jnp.ndarray], 
-                         params: Dict[str, Union[float, jnp.ndarray]]) -> jnp.ndarray:
+    def get_rho_crit_at_z(self, z, params=None):
         """
         Get critical density at redshift z.
         
@@ -384,10 +373,10 @@ class PkEmulator:
     """
      
     
-    def __init__(self, data_path: str, cosmo_model=0):
+    def __init__(self, cosmo_model=0):
         self.cosmo_model = cosmo_model
         model_info = _COSMO_MODELS[cosmo_model]
-        self.emulator_path = os.path.join(data_path, model_info["subdir"])
+        self.emulator_path = os.path.join(get_default_data_path(), model_info["subdir"])
 
         emulator_dict = {
             'PKNL': f'PKNL_{model_info["suffix"]}',

@@ -1,20 +1,16 @@
 import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
+from jax.scipy.special import sici, erf 
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 import os
 
-
-from jax.scipy.special import sici, erf # eventually we will want to import this, but there is a bug in the JAX version
-
-import numpy as np
+import numpy as np # it may be a good idea to eventually remove numpy dependence altogether
 _eps = 1e-30
 
 jax.config.update("jax_enable_x64", True)
-
-
 
 
 
@@ -46,13 +42,10 @@ class GalaxyHODTracer(BaseTracer):
         self.halo_model = halo_model
 
     def load_dndz_data(self):
-        dndz_path = os.path.join(get_default_data_path(), "hmfast_auxiliary_files", "normalised_dndz_cosmos_0.txt")
-        try:
-            return jnp.array(np.loadtxt(dndz_path))
-        except Exception as e:
-            raise FileNotFoundError(
-                f"Could not load dndz file at {dndz_path}. Download it with hmfast.download.download_emulators()."
-            ) from e
+        dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "normalised_dndz_cosmos_0.txt")
+        data = np.loadtxt(dndz_path)
+        return jnp.array(data)
+        
 
 
     def get_N_centrals(self, m, params = None):

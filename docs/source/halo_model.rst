@@ -65,8 +65,8 @@ To use the ``HaloModel`` class, you must first instantiate your cosmological par
 .. code-block:: python
 
     # Load emulators
-    emulator_path = "your/path/to/hmfast_data"
-    emulator = hmfast.emulator_eval.Emulator(emulator_path, cosmo_model=0)
+    
+    emulator = hmfast.emulator_eval.Emulator(cosmo_model=0)
 
     # Define the halo model
     halo_model = hmfast.halo_model.HaloModel(emulator)
@@ -135,7 +135,7 @@ Once you are ready to compute angular power spectra, you can create tracer objec
 
     x = \frac{r}{r_{\rm scale}}
 
-For tSZ tracers, the scale is the radius ``r500`` (the radius enclosing 500 times the critical density).  
+For tSZ tracers, the scale is the radius :math:`r_{\Delta}` (the radius enclosing :math:`\Delta` times the critical density).
 For galaxy HOD tracers, the scale is the halo scale radius ``r_s`` from the NFW profile.  
 
 This ``x_grid`` is a defining property of the tracer that cannot be changed after creation.  

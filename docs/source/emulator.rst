@@ -23,33 +23,17 @@ Below are short examples showing how to call each function and plot the results.
     import matplotlib.pyplot as plt
     
     params_hmfast = {
-    
-        # Emulator parameters. See https://github.com/cosmopower-organization for more details.
-        'fEDE': 0.1,              # only for ede models
-        'log10z_c': 3.5,
-        'thetai_scf': jnp.pi/2,
-        'ln10^{10}A_s': 3.047,
-        'n_s': 0.965,
-        'H0': 67.5,
         'omega_b': 0.02,
-        'omega_cdm': 0.15,
-        'r': 0.0,
-        'm_ncdm': 0.06,
-        'N_ur': 2.0308,
-        'w0_fld': -0.95,           # only for wcdm models
-    
-        # Other cosmological parameters
-        'T_cmb': 2.7255,
-        'deg_ncdm': 1,
-    
+        'omega_cdm':  0.12,
+        'H0': 67.5, 
+        'tau_reio': 0.0561,
+        'ln10^{10}A_s': 3.047,
+        'n_s': 0.9665
     }
     
     
-    # Path to your emulator data directory
-    emulator_path = "your/path/to/hmfast_data"
-    
     # Create emulator container and redshift array
-    emulator = hmfast.emulator_eval.Emulator(emulator_path, cosmo_model=0)
+    emulator = hmfast.emulator_eval.Emulator(cosmo_model=0)
     z_grid = jnp.linspace(0.05, 20.0, 200)
 
 
@@ -62,7 +46,7 @@ Adjust plotting styles to match the usage guide.
 
 .. code-block:: python
 
-    H_grid = emulator.get_hubble_at_z(z_grid, params=params_hmfast) * 299792.458
+    H_grid = emulator.get_hubble_at_z(z=z_grid, params=params_hmfast) * 299792.458
 
     label_size = 12
     title_size = 14
@@ -90,7 +74,7 @@ Compute and plot the angular diameter distance for the same redshift range.
 
 .. code-block:: python
 
-    dA_grid = emulator.get_angular_distance_at_z(z_grid, params=params_hmfast)
+    dA_grid = emulator.get_angular_distance_at_z(z=z_grid, params=params_hmfast)
 
     plt.figure(figsize=(7,4))
     plt.plot(z_grid, dA_grid, lw=2, color='C1', label=r"$d_A(z)$")
@@ -114,7 +98,7 @@ Example showing how to query ρ_crit(z) and plot it. The returned units are
 
 .. code-block:: python
 
-    rho_crit_grid = emulator.get_rho_crit_at_z(z_grid, params=params_hmfast)
+    rho_crit_grid = emulator.get_rho_crit_at_z(z=z_grid, params=params_hmfast)
 
     plt.figure(figsize=(7,4))
     plt.semilogy(z_grid, rho_crit_grid, lw=2, color='C2', label=r"$\rho_{\rm crit}(z)$")

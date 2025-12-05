@@ -18,7 +18,7 @@ class TSZTracer(BaseTracer):
             x_grid = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
         self.x_grid = x_grid
         self.hankel = HankelTransform(x_grid, nu=0.5)
-        self.emulator = emulator.cosmo_emulator
+        self.emulator = emulator
 
     def gnfw_pressure_profile(self, z, m, params = None):
         """

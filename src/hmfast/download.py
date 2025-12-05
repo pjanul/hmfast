@@ -1,7 +1,6 @@
 import os
-from urllib.request import urlopen
+import requests
 
-# Split EDE versions out for flexible user requests, but both write to ede subdirectory.
 COSMOPOWER_MODELS = {
     "ede-v2": [
         "growth-and-distances/DAZ_v2.npz",
@@ -17,7 +16,6 @@ COSMOPOWER_MODELS = {
         "PK/PKL_v1.npz",
         "PK/PKNL_v1.npz",
     ],
-    # all other standard models as before
     "lcdm": [
         "growth-and-distances/DAZ_v1.npz",
         "growth-and-distances/HZ_v1.npz",
@@ -57,35 +55,48 @@ COSMOPOWER_MODELS = {
 
 AUX_FILES = [
     {
-        "url": "https://github.com/CLASS-SZ/class_sz/blob/master/class-sz/class_sz_auxiliary_files/includes/normalised_dndz_cosmos_0.txt",
+        "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class-sz/class_sz_auxiliary_files/includes/normalised_dndz_cosmos_0.txt",
         "subdir": "auxiliary_files",
         "filename": "normalised_dndz_cosmos_0.txt"
     }
 ]
 
-
-
-
 def get_default_data_path():
-    return os.environ.get("HMFAST_EMULATOR_PATH", os.path.join(os.path.expanduser("~"), "hmfast_data"))
-
-
-
-def download_emulators(target_dir=None, models="ede-v2", skip_existing=True, download_auxiliary=True):
     """
-    Download emulator .npz files for specified cosmopower models into target_dir.
-    Also downloads auxiliary files if download_auxiliary is True.
-
-    - models: list of model names (e.g. ["ede-v1", "lcdm", ...]), or "all" to download every known model.
-    - By default, only ede-v2 is downloaded.
+    Returns the base data path for emulator and auxiliary files.
+    Uses the HMFAST_DATA_PATH environment variable if set,
+    otherwise defaults to ~/hmfast_data.
     """
-    if target_dir is None:
-        target_dir = get_default_data_path()
+    return os.environ.get("HMFAST_DATA_PATH", os.path.join(os.path.expanduser("~"), "hmfast_data"))
+
+def download_file(url, local_path, skip_existing=True):
+    if skip_existing and os.path.exists(local_path):
+        print(f"  Already exists: {local_path} (skipped)")
+        return
+    print(f"  Downloading: {url} → {local_path}")
+    
+    headers = {"User-Agent": "python-requests/2.0"}  # GitHub sometimes needs this
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    with open(local_path, "wb") as f:
+        f.write(response.content)
+    print(f"  Saved to {local_path}")
+
+def download_emulators(models="ede-v2", skip_existing=True):
+    """
+    Download emulator .npz files and all required auxiliary files
+    into the default data directory.
+
+    Files are always downloaded to ~/hmfast_data, or to the path specified by the
+    environment variable HMFAST_DATA_PATH.
+    """
+    target_dir = get_default_data_path()
     os.makedirs(target_dir, exist_ok=True)
 
     valid_models = list(COSMOPOWER_MODELS.keys())
 
-    # If user passed "all", download everything
     if models == "all" or models == ["all"]:
         models_to_fetch = valid_models
     elif models is None:
@@ -95,7 +106,6 @@ def download_emulators(target_dir=None, models="ede-v2", skip_existing=True, dow
     else:
         models_to_fetch = models
 
-    # Validate models
     for m in models_to_fetch:
         if m not in valid_models:
             raise ValueError(f"Unknown model '{m}'. Available: {valid_models}")
@@ -108,31 +118,13 @@ def download_emulators(target_dir=None, models="ede-v2", skip_existing=True, dow
             url = f"https://github.com/cosmopower-organization/{subdir}/raw/main/{rel_path}"
             local_dir = os.path.join(target_dir, subdir, os.path.dirname(rel_path))
             local_path = os.path.join(local_dir, os.path.basename(rel_path))
-            os.makedirs(local_dir, exist_ok=True)
-            if skip_existing and os.path.exists(local_path):
-                print(f"  Already exists: {local_path} (skipped)")
-                continue
-            print(f"  Fetching {rel_path} ...")
-            try:
-                with urlopen(url) as resp, open(local_path, "wb") as out_file:
-                    out_file.write(resp.read())
-            except Exception as e:
-                print(f"  *** Error downloading {rel_path}: {e}")
+            download_file(url, local_path, skip_existing=skip_existing)
 
-    if download_auxiliary:
-        print(f"Downloading auxiliary files to: {target_dir}/hmfast_auxiliary_files")
-        for aux in AUX_FILES:
-            aux_dir = os.path.join(target_dir, aux["subdir"])
-            aux_path = os.path.join(aux_dir, aux["filename"])
-            os.makedirs(aux_dir, exist_ok=True)
-            if skip_existing and os.path.exists(aux_path):
-                print(f"  Already exists: {aux_path} (skipped)")
-                continue
-            print(f"  Fetching {aux['filename']} ...")
-            try:
-                with urlopen(aux["url"]) as resp, open(aux_path, "wb") as out_file:
-                    out_file.write(resp.read())
-            except Exception as e:
-                print(f"  *** Error downloading {aux['filename']}: {e}")
+    # Always download auxiliary files
+    print(f"Downloading auxiliary files to: {target_dir}/auxiliary_files")
+    for aux in AUX_FILES:
+        aux_dir = os.path.join(target_dir, aux["subdir"])
+        aux_path = os.path.join(aux_dir, aux["filename"])
+        download_file(aux["url"], aux_path, skip_existing=skip_existing)
 
     print("Download complete.")

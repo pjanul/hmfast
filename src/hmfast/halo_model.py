@@ -8,7 +8,7 @@ import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
 from hmfast.halo_fits import MF_T08, BF_T10
-from hmfast.emulator_eval import CosmoEmulator, PkEmulator
+from hmfast.emulator_eval import Emulator
 from hmfast.defaults import merge_with_defaults
 
 from mcfit import TophatVar
@@ -112,7 +112,7 @@ class HaloModel:
         
         
     @partial(jax.jit, static_argnums=(0,))
-    def get_hmf(self, z: float, M: float, params = None) -> jnp.ndarray:
+    def get_hmf(self, z = jnp.geomspace(5e10, 3.5e15, 100), m = jnp.geomspace(0.005, 3.0, 100), params = None) -> jnp.ndarray:
         """
         Compute the halo mass function.
         
@@ -131,11 +131,11 @@ class HaloModel:
         # Compute the hmf values which sets up the interpolator
         params = merge_with_defaults(params)
         self._compute_hmf_grid(params=params)
-        hmf = jnp.exp(self._hmf_interp((jnp.log(1.+z), jnp.log(M))))
+        hmf = jnp.exp(self._hmf_interp((jnp.log(1.+z), jnp.log(m))))
         return hmf
     
     @partial(jax.jit, static_argnums=(0,))
-    def get_hbf(self, z: float, M: float, params = None) -> jnp.ndarray:
+    def get_hbf(self, z = jnp.geomspace(5e10, 3.5e15, 100), m = jnp.geomspace(0.005, 3.0, 100), params = None) -> jnp.ndarray:
         """
         Compute the halo bias function.
         
@@ -156,7 +156,7 @@ class HaloModel:
         # Compute the sigma values which sets up the interpolator
         params = merge_with_defaults(params)
         self._compute_sigma_grid(params = params)
-        sigma_M = jnp.exp(self._sigma_interp((jnp.log(1.+z), jnp.log(M))))
+        sigma_M = jnp.exp(self._sigma_interp((jnp.log(1.+z), jnp.log(m))))
 
         # Get the delta_mean values and pass it to the bias model
         delta_mean = self.emulator.get_delta_mean_from_delta_crit_at_z(params["delta"], z, params=params)
@@ -183,7 +183,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=(0, 1))
-    def get_C_ell_1h(self, tracer, z, m, ell, params = None):
+    def get_C_ell_1h(self, tracer, z = jnp.geomspace(5e10, 3.5e15, 100), m = jnp.geomspace(0.005, 3.0, 100), ell= jnp.geomspace(1e2, 3.5e3, 50), params = None):
         """
         Compute the 1-halo term for C_ell.
         """
@@ -219,7 +219,7 @@ class HaloModel:
         return C_ell_1h  
 
     @partial(jax.jit, static_argnums=(0, 1))
-    def get_C_ell_2h(self, tracer, z, m, ell, params=None):
+    def get_C_ell_2h(self, tracer, z = jnp.geomspace(5e10, 3.5e15, 100), m = jnp.geomspace(0.005, 3.0, 100), ell= jnp.geomspace(1e2, 3.5e3, 50), params=None):
         """
         Compute the 2-halo term for C_ell.
         """

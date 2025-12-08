@@ -25,8 +25,7 @@ The recommended way to get started is as follows:
 2. **Import the package and begin:**
 
    You may now import the package. 
-   ``hmfast`` relies on pre-trained cosmological emulators to quickly compute halo model quantities.  
-
+   ``hmfast`` relies on pre-trained cosmological emulators to quickly compute halo model quantities. 
    Because these emulator files are too large to include in the package distribution, 
    they will be automatically downloaded the first time you import ``hmfast`` if they are not already present. 
 

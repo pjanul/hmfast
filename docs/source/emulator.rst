@@ -32,7 +32,7 @@ Below are short examples showing how to call each function and plot the results.
     }
     
     
-    # Create emulator container and redshift array
+    # Define the emulator instance
     emulator = hmfast.emulator_eval.Emulator(cosmo_model=0)
 
 
@@ -47,6 +47,7 @@ Below is an example showing how to compute and plot the Hubble parameter for a r
    H_grid = emulator.get_hubble_at_z(z=jnp.linspace(0.05, 20.0, 200), params=params_hmfast) * 299792.458
 
     # ------ Plot the results ------
+   z_grid = jnp.linspace(0.05, 20.0, 200)
    plt.figure(figsize=(7,4))
    plt.semilogy(z_grid, H_grid, lw=2, label=r"$H(z)$")
    plt.grid(alpha=0.4, linestyle='--')
@@ -72,6 +73,7 @@ Compute and plot the angular diameter distance for the same redshift range.
     dA_grid = emulator.get_angular_distance_at_z(z=jnp.linspace(0.05, 20.0, 200), params=params_hmfast)
 
     # ------ Plot the results ------
+    z_grid = jnp.linspace(0.05, 20.0, 200)
     plt.figure(figsize=(7,4))
     plt.plot(z_grid, dA_grid, lw=2, color='C1', label=r"$d_A(z)$")
     plt.grid(alpha=0.4, linestyle='--')
@@ -97,6 +99,7 @@ Compute and plot the angular diameter distance for the same redshift range.
     rho_crit_grid = emulator.get_rho_crit_at_z(z=jnp.linspace(0.05, 20.0, 200), params=params_hmfast)
 
     # ------ Plot the results ------
+    z_grid = jnp.linspace(0.05, 20.0, 200)
     plt.figure(figsize=(7,4))
     plt.semilogy(z_grid, rho_crit_grid, lw=2, color='C2', label=r"$\rho_{\rm crit}(z)$")
     plt.grid(alpha=0.4, linestyle='--', which='both')

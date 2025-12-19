@@ -135,7 +135,7 @@ class GalaxyHODTracer(BaseTracer):
         return A * (m / M_pivot)**B * (1 + z)**C
 
      
-    def compute_u_m_ell_alt(self, z, m, ell, params = None):
+    def get_u_m_ell_alt(self, z, m, ell=jnp.geomspace(10, 5e3, 100), params = None):
         """
         This function calculates u_ell^m(z, M) via the analytic method described in Kusiak et al (2023).
         As of November 2025, the jax.scipy.special.sici functions are not well behaved for large inputs.

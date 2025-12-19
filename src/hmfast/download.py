@@ -120,7 +120,7 @@ def download_file(url, local_path, skip_existing=True):
         f.write(response.content)
     #print(f"  Saved to {local_path}")
 
-def download_emulators(models="ede-v2", skip_existing=True):
+def download_emulators(models="all", skip_existing=True):
     target_dir = get_default_data_path()
     os.makedirs(target_dir, exist_ok=True)
 

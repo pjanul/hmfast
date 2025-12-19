@@ -19,22 +19,22 @@ The recommended way to get started is as follows:
 
 2. **Import the package and begin:**
 
-   You may now import the package. 
-   ``hmfast`` relies on pre-trained cosmological emulators perform quick calculations.
-   These files are quite large, so ``hmfast`` will automatically download a subset of them at import if they are not already present.
+   After installation, import the package. 
+   ``hmfast`` relies on pre-trained emulators, with a distinct set for each cosmology.
+   To reduce the initial data footprint, only the ΛCDM and EDE-v2 sets are downloaded automatically. 
    
    By default, they are stored in ``~/hmfast_data``.  
 
-   If you want to use a different location for these files, simply uncomment the first two lines below and set your preferred path.
+   **To change the download location**, simply uncomment the first two lines below and set your preferred path.
 
-   If you want to download all emulators (~1 GB), simply uncomment the last line below.
+   **To download all emulators** (~1 GB), simply uncomment the last line below.
 
    .. code-block:: python
 
       # import os
       # os.environ["HMFAST_DATA_PATH"] = "path/to/hmfast_data"
       import hmfast
-      # hmfast.download_emulators(models="all")
+      # hmfast.download_emulators()
 
    
 After these steps, you should be all set to start using ``hmfast``.

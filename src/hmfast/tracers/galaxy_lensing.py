@@ -52,7 +52,6 @@ class GalaxyLensingTracer(BaseTracer):
         if not os.path.isabs(filename):
             filename = os.path.join(get_default_data_path(), "auxiliary_files", filename)
 
-        print("filename", filename)
         data = np.loadtxt(filename)
         return jnp.array(data)
 
@@ -69,7 +68,7 @@ class GalaxyLensingTracer(BaseTracer):
         h = params["H0"] / 100
         
         # Load source distribution
-        dndz_data = self.load_file_data(filename="normalised_dndz_cosmos_0.txt")
+        dndz_data = self.load_file_data(filename="nz_source_normalized_bin4.txt")
         z_data = dndz_data[:, 0]
         phi_prime_data = dndz_data[:, 1]
     
@@ -125,14 +124,14 @@ class GalaxyLensingTracer(BaseTracer):
         chi_z = self.emulator.get_angular_distance_at_z(zq, params=params) * (1 + zq) * h # Comoving distance in Mpc/h
         H_z = self.emulator.get_hubble_at_z(zq, params=params)   # Hubble parameter in km/s/Mpc
     
-        I_g = self.get_I_g(zq, params=params)
+        I_g = self.get_I_g(zq, params=params) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (
             (3.0 / 2.0) * Omega_m * 
             (H0/c_km_s)**2 / h**2 *
             (1 + z) / chi_z  *
-            I_g
+            I_g 
         )
 
     
@@ -195,7 +194,7 @@ class GalaxyLensingTracer(BaseTracer):
                     +  jnp.sin(q) * (Si_q_scaled - Si_q) 
                     -  jnp.sin(lambda_val * c_mat * q) / q_scaled ) * f_nfw_val * m_over_rho_crit 
         
-     
+
         return ell, u_ell_m
 
 

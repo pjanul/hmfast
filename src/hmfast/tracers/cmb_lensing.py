@@ -151,9 +151,11 @@ class CMBLensingTracer(BaseTracer):
         params = merge_with_defaults(params)
         W = self.get_W_kappa_cmb(z, params=params) 
         ell, u_m = self.get_u_m_ell(z, m, params=params)
+
+        h = params["H0"]/100
     
         moment_funcs = [
-            lambda _:  W[:, None] * u_m,
+            lambda _:  W[:, None] * u_m ,
             lambda _: (W**2)[:, None] * u_m**2,
         ]
     

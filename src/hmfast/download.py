@@ -99,8 +99,16 @@ AUX_FILES = [
         "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class-sz/class_sz_auxiliary_files/includes/nz_lens_bin1.txt",
         "subdir": "auxiliary_files",
         "filename": "nz_lens_bin1.txt"
+    },
+    {
+        "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class-sz/class_sz_auxiliary_files/includes/nz_source_normalized_bin4.txt",
+        "subdir": "auxiliary_files",
+        "filename": "nz_source_normalized_bin4.txt"
     }
 ]
+
+
+
 
 
 def get_default_data_path():

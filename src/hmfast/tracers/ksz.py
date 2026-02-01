@@ -182,7 +182,9 @@ class KSZTracer(BaseTracer):
 
         # Get full prefactor
         a = 1.0 / (1.0 + z)
-        prefactor =  4 * jnp.pi * r_delta**3 * a * sigma_T_over_m_p * (1 + z)**3 / chi**2 * vrms
+        mu_e = 1.14
+        f_free = 1
+        prefactor =  4 * jnp.pi * r_delta**3 * a * sigma_T_over_m_p * f_free / mu_e * (1 + z)**3 / chi**2 * vrms
 
         return prefactor, ell_delta
 

@@ -1,3 +1,5 @@
+import os
+import numpy as np # it may be a good idea to eventually remove numpy dependence altogether, but now we need it for np.loadtxt
 import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
@@ -7,10 +9,7 @@ from hmfast.emulator_eval import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
-import os
-
-import numpy as np # it may be a good idea to eventually remove numpy dependence altogether
-_eps = 1e-30
+from hmfast.literature import c_D08
 
 jax.config.update("jax_enable_x64", True)
 
@@ -30,13 +29,13 @@ class GalaxyHODTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, cosmo_model=0, x=None):        
+    def __init__(self, cosmo_model=0, x=None, concentration_relation=c_D08):        
         
-        if x is None:
-            x = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
-            
-        self.hankel = HankelTransform(x, nu=0.5)
-        self.x = x
+        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
+        self.hankel = HankelTransform(self.x, nu=0.5)
+        self.concentration_relation = concentration_relation
+
+        # Load emulator and make sure the required files are loaded outside of jitted functions
         self.emulator = Emulator(cosmo_model=cosmo_model)
         self.emulator._load_emulator("DAZ")
         self.emulator._load_emulator("HZ")
@@ -100,7 +99,7 @@ class GalaxyHODTracer(BaseTracer):
         return jax.vmap(ng_bar_single)(z)
         
 
-    def get_wg(self, z, params=None):
+    def get_W_g(self, z, params=None):
         """
         Return Wg_grid at requested z.
         Uses pre-loaded dndz_data = [z, phi_prime].
@@ -120,63 +119,51 @@ class GalaxyHODTracer(BaseTracer):
         H_grid = self.emulator.get_hubble_at_z(zq, params=params)  # 1/Mpc
         chi_grid = self.emulator.get_angular_distance_at_z(zq, params=params) * (1.0 + zq)  # Mpc comov
 
-        # Assemble Wg on the grid
-        Wg_grid = H_grid * (phi_prime_at_z / chi_grid**2)
-        return Wg_grid
+        # Assemble W_g on the grid
+        W_g = H_grid * (phi_prime_at_z / chi_grid**2)
+        return W_g
 
 
-    def c_Duffy2008(self, z, m, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
-        """
-        Duffy et al. 2008 mass-concentration relation.
-        A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
-        """
-        return A * (m / M_pivot)**B * (1 + z)**C
 
-
-        
-
-     
     def get_u_m_ell(self, z, m, params = None):
         """
         This function calculates u_ell^m(z, M) via the analytic method described in Kusiak et al (2023).
         Due to a bug in the initial implementation of SiCi, this will only work for JAX v0.8.2 and above.
         """
+        
         params = merge_with_defaults(params)
         m = jnp.atleast_1d(m) 
+        x = self.x
 
-        x_min = 1e-8
-        x = jnp.clip(self.x, a_min=x_min)
-
-        c_200c = self.c_Duffy2008(z, m)
-        r_200c = self.emulator.get_r_delta_of_m_delta_at_z(200, m, z, params=params) 
+        # Concentration parameters
+        delta = params["delta"]
+        c_delta = self.concentration_relation(z, m)
+        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=params) 
         lambda_val = params.get("lambda_HOD", 1.0) 
 
-       
+        # Use x grid to get l values. It may eventually make sense to not do the Hankel
         dummy_profile = jnp.ones_like(x)
         k, _ = self.hankel.transform(dummy_profile)
-        #jax.debug.print("analytic k[0:5]: {}", k[0:5])
-
-        
         chi = self.emulator.get_angular_distance_at_z(z, params=params) * (1.0 + z) * (params["H0"]/100)
         ell = k * chi - 0.5
-       
-        ell = jnp.broadcast_to(ell[None, :], (m.shape[0], k.shape[0]))    # (N_m, N_k)
-        
-  
+        ell = jnp.broadcast_to(ell[None, :], (m.shape[0], k.shape[0]))   
+
+        # Ensure proper dimensionality of k, r_delta, c_delta
         k_mat = k[None, :]                            # (1, N_k)
-        r_mat = r_200c[:, None]                       # (N_m, 1)
-        c_mat = jnp.atleast_1d(c_200c)[:, None]       # (N_m, 1)
-                
+        r_mat = r_delta[:, None]                       # (N_m, 1)
+        c_mat = jnp.atleast_1d(c_delta)[:, None]       # (N_m, 1)
+
+        # Get q values for the SiCi functions
         q = k_mat * r_mat / c_mat * (1+z)            # (N_m, N_k)
         q_scaled = (1 + lambda_val * c_mat) * q
+        Si_q, Ci_q = sici(q)
+        Si_q_scaled, Ci_q_scaled = sici(q_scaled)
 
+        # Get NFW function f_NFW(x) 
         f_nfw = lambda x: 1.0 / (jnp.log1p(x) - x/(1 + x))
         f_nfw_val = f_nfw(lambda_val * c_mat)
 
-        
-        Si_q, Ci_q = sici(q)
-        Si_q_scaled, Ci_q_scaled = sici(q_scaled)
-        
+        # Compute Fourier transform via analytic formula
         u_ell_m = (    jnp.cos(q) * (Ci_q_scaled - Ci_q) 
                     +  jnp.sin(q) * (Si_q_scaled - Si_q) 
                     -  jnp.sin(lambda_val * c_mat * q) / q_scaled ) * f_nfw_val 
@@ -200,7 +187,7 @@ class GalaxyHODTracer(BaseTracer):
         Ns = self.get_N_satellites(m, params=params)
         Nc = self.get_N_centrals(m, params=params)
         ng = self.get_ng_bar(z, m, params=params) * (params["H0"]/100)**3
-        W  = self.get_wg(z, params=params)
+        W  = self.get_W_g(z, params=params)
         ell, u_m = self.get_u_m_ell(z, m, params=params)
     
         moment_funcs = [

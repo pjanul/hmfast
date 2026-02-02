@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 
 @jax.jit
-def MF_T08(sigmas, z, delta_mean):
+def mf_T08(sigmas, z, delta_mean):
     """
     Tinker et al. (2008) halo mass function.
 
@@ -47,7 +47,7 @@ def MF_T08(sigmas, z, delta_mean):
 
 
 @jax.jit
-def BF_T10(sigmas, z, delta_mean):
+def bf_T10(sigmas, z, delta_mean):
     """
     Tinker et al. (2010) large-scale linear bias, JAX-friendly.
 
@@ -85,4 +85,28 @@ def BF_T10(sigmas, z, delta_mean):
 
 
 
+
+def c_D08(z, m, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
+    """
+    Duffy et al. (2008) mass-concentration relation for c200_c.
+    A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
+    """
+    return A * (m / M_pivot)**B * (1 + z)**C
+
+
+def c_SC14(m, z):
+    """
+    Sanchez-Conde & Prada (2014) concentration-mass relation for c200_c.
+    Coefficients are found below equation 1, https://arxiv.org/pdf/1312.1729
+    """
+    
+    # Coefficients from Eq. 1
+    c_array = jnp.array([37.5153, -1.5093, 1.636e-2, 3.66e-4, -2.89237e-5, 5.32e-7])
+    logM = jnp.log10(m)
+    powers = jnp.array([logM**i for i in range(6)])
+    poly = jnp.sum(c_array[:, None] * powers, axis=0)
+    c200 = poly * (1 + z) ** -1
+    return c200
+
+   
 

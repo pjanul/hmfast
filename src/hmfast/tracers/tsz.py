@@ -5,6 +5,8 @@ from hmfast.emulator_eval import Emulator
 from functools import partial
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
+from hmfast.literature import c_D08
+
 
 
 
@@ -12,12 +14,11 @@ class TSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, cosmo_model=0, x=None):
+    def __init__(self, cosmo_model=0, x=None, concentration_relation=c_D08):
         
-        if x is None:
-            x = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
-        self.x = x
-        self.hankel = HankelTransform(x, nu=0.5)
+        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
+        self.hankel = HankelTransform(self.x, nu=0.5)
+        self.concentration_relation = concentration_relation
 
         # Load emulator and make sure the required files are loaded outside of jitted functions
         self.emulator = Emulator(cosmo_model=0)
@@ -33,11 +34,10 @@ class TSZTracer(BaseTracer):
     
         # Pull needed parameters
         H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0GNFW", "alphaGNFW", "betaGNFW", "gammaGNFW", "B")) 
-        c_delta = 1.156 # Placeholder
+        c_delta = 1.156  #self.concentration_relation(z, m) #
         
         # Compute helper variables and the final value of Pe
         h = H0 / 100.0 
-    
         H = self.emulator.get_hubble_at_z(z, params=params) * 299792.458  # multiply by speed of light in km/s 
         m_delta_tilde = (m / B) # convert to M_sun 
         C = 1.65 * (h / 0.7)**2 * (H / H0)**(8 / 3) * (m_delta_tilde / (0.7 * 3e14))**(2 / 3 + 0.12) * (0.7/h)**1.5 # eV cm^-3

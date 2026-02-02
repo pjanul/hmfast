@@ -5,18 +5,19 @@ from hmfast.emulator_eval import Emulator
 from functools import partial
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
+from hmfast.literature import c_D08
+
 
 
 class KSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, cosmo_model=0, x=None):
+    def __init__(self, cosmo_model=0, x=None, concentration_relation=c_D08):
         
-        if x is None:
-            x = jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
-        self.x = x
-        self.hankel = HankelTransform(x, nu=0.5)
+        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
+        self.hankel = HankelTransform(self.x, nu=0.5)
+        self.concentration_relation = concentration_relation
 
         # Load emulator and make sure the required files are loaded outside of jitted functions
         self.emulator = Emulator(cosmo_model=0)
@@ -28,14 +29,6 @@ class KSZTracer(BaseTracer):
         _, _ = self.emulator.get_pk_at_z(1., params=None, linear=True) 
 
 
-    def c_Duffy2008(self, z, m, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
-        """
-        Duffy et al. 2008 mass-concentration relation.
-        A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
-        """
-        return A * (m / M_pivot)**B * (1 + z)**C
-
-
     def nfw_density_profile(self, z, m, params=None):
         params = merge_with_defaults(params)
 
@@ -44,7 +37,7 @@ class KSZTracer(BaseTracer):
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]   # Baryon fraction
         r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=params)
     
-        c_delta = self.c_Duffy2008(z, m)
+        c_delta = self.concentration_relation(z, m)
         r_s = r_delta / c_delta
     
         x =  jnp.clip(self.x, 1e-8, None) 
@@ -88,40 +81,34 @@ class KSZTracer(BaseTracer):
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]   # Baryon fraction
         
         # Critical density at redshift z
-        Hz = self.emulator.get_hubble_at_z(z, params=params)  # km/s/Mpc
-        H0 = params["H0"]
-        E_z = Hz / H0
-        
-        # Critical density in M_sun h^2 / Mpc^3
-        rho_crit_0 = 2.77536627e11
-        rho_crit = rho_crit_0 * E_z**2
+        rho_crit_z = self.emulator.get_rho_crit_at_z(z, params=params)
         
         # Battaglia+16 parameters (Table 2: AGN feedback model)
-        A_rho0 = params.get("B16_A_rho0", 4000.0)
-        A_alpha = params.get("B16_A_alpha", 0.88)
-        A_beta = params.get("B16_A_beta", 3.83)
+        A_rho0 = 4000.0
+        A_alpha = 0.88
+        A_beta = 3.83
         
-        alpha_m_rho0 = params.get("B16_alpha_m_rho0", 0.29)
-        alpha_m_alpha = params.get("B16_alpha_m_alpha", -0.03)
-        alpha_m_beta = params.get("B16_alpha_m_beta", 0.04)
+        alpha_m_rho0 = 0.29
+        alpha_m_alpha = -0.03
+        alpha_m_beta = 0.04
         
-        alpha_z_rho0 = params.get("B16_alpha_z_rho0", -0.66)
-        alpha_z_alpha = params.get("B16_alpha_z_alpha", 0.19)
-        alpha_z_beta = params.get("B16_alpha_z_beta", -0.025)
+        alpha_z_rho0 = -0.66
+        alpha_z_alpha = 0.19
+        alpha_z_beta = -0.025
         
         # Extended parameters
-        mcut = params.get("B16_mcut", 1e14)  # M_sun
-        alphap_m_rho0 = params.get("B16_alphap_m_rho0", 0.29)
-        alphap_m_alpha = params.get("B16_alphap_m_alpha", -0.03)
-        alphap_m_beta = params.get("B16_alphap_m_beta", 0.04)
+        mcut = 1e14  # M_sun
+        alphap_m_rho0 = 0.29
+        alphap_m_alpha = -0.03
+        alphap_m_beta = 0.04
         
-        alpha_c_rho0 = params.get("B16_alpha_c_rho0", 0.0)
-        alpha_c_alpha = params.get("B16_alpha_c_alpha", 0.0)
-        alpha_c_beta = params.get("B16_alpha_c_beta", 0.0)
+        alpha_c_rho0 = 0.0
+        alpha_c_alpha = 0.0
+        alpha_c_beta = 0.0
         
-        gamma = params.get("B16_gamma", -0.2)
-        xc = params.get("B16_xc", 0.5)
-        c_delta = params.get("c_200c", 1.0)
+        gamma = -0.2
+        xc = 0.5
+        c_delta = self.concentration_relation(z, m) 
         
         # Convert mass to M_sun (not M_sun/h)
         m_200c_msun = m / h
@@ -141,8 +128,8 @@ class KSZTracer(BaseTracer):
         # Profile shape function (dimensionless)
         p_x = (x / xc)**gamma * (1 + (x / xc)**alpha)**(-(beta + gamma) / alpha)
 
-        # Factor of 8.86e10 is required to give the same result as class_sz but should eventually be split into consitutuent constants/factors
-        rho_gas = rho0 * rho_crit * f_b * p_x * 8.86e10  
+        # Compute final profile
+        rho_gas = rho0 * rho_crit_z * f_b * p_x 
         
         return rho_gas
     
@@ -154,7 +141,7 @@ class KSZTracer(BaseTracer):
         params = merge_with_defaults(params)
         h, B, delta = params['H0']/100, params['B'], params['delta']
         d_A = self.emulator.get_angular_distance_at_z(z, params=params) * h
-        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=params) #/ B**(1/3)
+        r_delta = self.emulator.get_r_delta_of_m_delta_at_z(delta, m, z, params=params) 
         
         ell_delta = d_A / r_delta
         return r_delta, ell_delta
@@ -196,10 +183,9 @@ class KSZTracer(BaseTracer):
         h  = cparams['h'] 
         r_delta, ell_delta = self._compute_r_and_ell(z, m, params=params)
         x = self.x
-        x_min = x[0]  
-
+       
         # First element in x grid is the smallest, truncate at r_delta (x = r_delta/r_delta = 1)
-        W_x = jnp.where((x >= x_min) & (x <= 1), 1.0, 0.0)
+        W_x = jnp.where((x >= x[0]) & (x <= 1), 1.0, 0.0)
 
         def single_m(m_val):
             rho_gas = self.b16_density_profile(z, m_val, params=params)

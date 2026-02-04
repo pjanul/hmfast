@@ -17,6 +17,7 @@ from .tracers.ksz import KSZTracer
 from .tracers.cmb_lensing import CMBLensingTracer
 from .tracers.galaxy_lensing import GalaxyLensingTracer
 from .tracers.galaxy_hod import GalaxyHODTracer
+from .tracers.cib import CIBTracer
 from .download import download_emulators
 
 

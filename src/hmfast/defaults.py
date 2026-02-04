@@ -37,6 +37,21 @@ DEFAULT_PARAMS = {
     'M1_prime_HOD': 10**12.7, # msun/h
     'M_min_HOD': 10**11.8, # msun/h
     'M0_HOD' :0,
+
+
+
+     # CIB tracer-specific parameters
+    'L0_cib': 6.4e-8,             # Normalisation of L − M relation in [Jy MPc2/Msun]
+    'alpha_cib': 0.36,            # redshift evolution of dust temperature
+    'beta_cib': 1.75,             # emissivity index of sed
+    'gamma_cib': 1.7,             # Power law index of SED at high frequency
+    'T0_cib': 24.4,               # dust temperature today in Kelvins
+    'm_eff_cib': 10**12.6,        # Most efficient halo mass in Msun
+    'sigma2_LM_cib': 0.5,         # Size of of halo masses sourcing CIB emission
+    'delta_cib': 3.6,             # Redshift evolution of L − M normalisation
+    'z_plateau_cib': 1e100,       # see 5.2.1 of https://arxiv.org/pdf/1208.5049.pdf
+    'M_min_cib': 0,
+
     
 }
 

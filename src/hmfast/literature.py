@@ -3,7 +3,7 @@ import jax.numpy as jnp
 
 
 @jax.jit
-def mf_T08(sigmas, z, delta_mean):
+def hmf_T08(sigmas, z, delta_mean):
     """
     Tinker et al. (2008) halo mass function.
 
@@ -47,7 +47,7 @@ def mf_T08(sigmas, z, delta_mean):
 
 
 @jax.jit
-def bf_T10(sigmas, z, delta_mean):
+def hbf_T10(sigmas, z, delta_mean):
     """
     Tinker et al. (2010) large-scale linear bias, JAX-friendly.
 
@@ -82,6 +82,28 @@ def bf_T10(sigmas, z, delta_mean):
     b_nu = 1.0 - first + B * jnp.power(nu, b_) + C * jnp.power(nu, c)
 
     return b_nu
+
+
+def shmf_TW10(M_host, M_sub):
+    """
+    Tinker & Wetzel (2010) subhalo mass function (Eq. 2).
+
+    Parameters
+    ----------
+    M_host : float or array_like
+        Host halo mass [Msun]
+    M_sub : float or array_like
+        Subhalo mass [Msun]
+
+    Returns
+    -------
+    dN_dlnmu : float or array_like
+        Number of subhalos per host per dln(mu)
+    """
+   
+    mu = M_sub / M_host
+    dN_dlnmu = 0.30 * mu ** (-0.7) * jnp.exp(-9.9 * mu ** 2.5)
+    return dN_dlnmu
 
 
 

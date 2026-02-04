@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
-from hmfast.literature import mf_T08, bf_T10
+from hmfast.literature import hmf_T08, hbf_T10
 from hmfast.emulator_eval import Emulator
 from hmfast.defaults import merge_with_defaults
 import hmfast.tracers as tracers
@@ -25,7 +25,7 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, cosmo_model=0, mass_model = mf_T08, bias_model = bf_T10):
+    def __init__(self, cosmo_model=0, mass_model = hmf_T08, bias_model = hbf_T10):
         """
         Initialize the halo model.
         
@@ -33,9 +33,9 @@ class HaloModel:
         ----------
         params : dict, optional
             Cosmological parameters. 
-        mass_model : function, default MF_T08 (i.e. the halo mass function model from Tinker et al 2008)
+        mass_model : function, default hmf_T08 (i.e. the halo mass function model from Tinker et al 2008)
             Mass function to use.
-        bias_model : function, default BF_T10 (i.e. the halo bias function model from Tinker et al 2010)
+        bias_model : function, default hbf_T10 (i.e. the halo bias function model from Tinker et al 2010)
             Bias function to use.
         """
         

@@ -5,7 +5,6 @@ import jax.scipy as jscipy
 from jax.scipy.special import sici, erf 
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.emulator_eval import Emulator
-from hmfast.halo_model import HaloModel
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 from hmfast.literature import c_D08
@@ -38,8 +37,6 @@ class CMBLensingTracer(BaseTracer):
         self.emulator._load_emulator("DAZ")
         self.emulator._load_emulator("HZ")
         self.emulator._load_emulator("DER")
-        self.halo_model = HaloModel(cosmo_model=cosmo_model)  # Eventually want to allow the user to pass hmf prescription (e.g. T08)
-
 
     def get_W_kappa_cmb(self, z, params=None):
         """

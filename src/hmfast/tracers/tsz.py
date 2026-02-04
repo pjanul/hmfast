@@ -1,8 +1,6 @@
 import jax
 import jax.numpy as jnp
-from hmfast.halo_model import HaloModel
 from hmfast.emulator_eval import Emulator
-from functools import partial
 from hmfast.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
 from hmfast.literature import c_D08

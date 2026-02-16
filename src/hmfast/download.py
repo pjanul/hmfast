@@ -91,17 +91,17 @@ COSMOPOWER_MODELS = {
 
 AUX_FILES = [
     {
-        "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class_sz/class_sz_auxiliary_files/includes/normalised_dndz_cosmos_0.txt",
+        "url": "https://raw.githubusercontent.com/hmfast/hmfast/refs/heads/main/src/hmfast/data/normalised_dndz_cosmos_0.txt",
         "subdir": "auxiliary_files",
         "filename": "normalised_dndz_cosmos_0.txt"
     },
     {
-        "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class-sz/class_sz_auxiliary_files/includes/nz_lens_bin1.txt",
+        "url": "https://raw.githubusercontent.com/hmfast/hmfast/refs/heads/main/src/hmfast/data/nz_lens_bin1.txt",
         "subdir": "auxiliary_files",
         "filename": "nz_lens_bin1.txt"
     },
     {
-        "url": "https://raw.githubusercontent.com/CLASS-SZ/class_sz/master/class-sz/class_sz_auxiliary_files/includes/nz_source_normalized_bin4.txt",
+        "url": "https://raw.githubusercontent.com/hmfast/hmfast/refs/heads/main/src/hmfast/data/nz_source_normalized_bin4.txt",
         "subdir": "auxiliary_files",
         "filename": "nz_source_normalized_bin4.txt"
     }

@@ -4,7 +4,7 @@ from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.defaults import merge_with_defaults
-from hmfast.literature import c_D08, shmf_TW10
+from hmfast.literature import shmf_TW10
 from jax.scipy.special import sici, erf 
 from hmfast.tools.lambertw import lambertw
 

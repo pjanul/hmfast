@@ -1,10 +1,10 @@
 import jax
 import jax.numpy as jnp
+
 from hmfast.emulator import Emulator
+from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
-from hmfast.literature import c_D08
-
 
 
 
@@ -12,17 +12,17 @@ class TSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, cosmo_model=0, x=None, concentration_relation=c_D08):
-        
+    def __init__(self, halo_model=HaloModel(), x=None):
+
+        # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
         self.hankel = HankelTransform(self.x, nu=0.5)
-        self.concentration_relation = concentration_relation
         self.profile = self.gnfw_pressure_profile
-
-        # Load emulator and make sure the required files are loaded outside of jitted functions
-        self.emulator = Emulator(cosmo_model=0)
-        self.emulator._load_emulator("DAZ")
-        self.emulator._load_emulator("HZ")
+        
+        # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
+        self.halo_model = halo_model
+        self.halo_model.emulator._load_emulator("DAZ")
+        self.halo_model.emulator._load_emulator("HZ")
         
 
     def gnfw_pressure_profile(self, z, m, params = None):
@@ -34,11 +34,11 @@ class TSZTracer(BaseTracer):
     
         # Pull needed parameters
         H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0GNFW", "alphaGNFW", "betaGNFW", "gammaGNFW", "B")) 
-        c_delta = 1.156  #self.concentration_relation(z, m) #
+        c_delta = 1.156  #self.halo_model.concentration_relation(z, m) #
         
         # Compute helper variables and the final value of Pe
         h = H0 / 100.0 
-        H = self.emulator.hubble_parameter(z, params=params) * 299792.458  # multiply by speed of light in km/s 
+        H = self.halo_model.emulator.hubble_parameter(z, params=params) * 299792.458  # multiply by speed of light in km/s 
         m_delta_tilde = (m / B) # convert to M_sun 
         C = 1.65 * (h / 0.7)**2 * (H / H0)**(8 / 3) * (m_delta_tilde / (0.7 * 3e14))**(2 / 3 + 0.12) * (0.7/h)**1.5 # eV cm^-3
         scaled_x = c_delta * x
@@ -52,9 +52,10 @@ class TSZTracer(BaseTracer):
         Compute tSZ prefactor.
         """
         params = merge_with_defaults(params)
-        h, B, delta = params['H0']/100, params['B'], params['delta']
-        d_A = self.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.emulator.r_delta(z, m, delta, params=params) / B**(1/3)
+        h, B = params['H0']/100, params['B']
+        delta = self.halo_model.delta
+        d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
+        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params) / B**(1/3)
         ell_delta = d_A / r_delta
 
         m_e, sigma_T, mpc_per_h_to_cm = 510998.95, 6.6524587321e-25, 3.085677581e24 / h

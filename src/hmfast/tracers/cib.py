@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 from hmfast.emulator import Emulator
+from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.defaults import merge_with_defaults
 from hmfast.literature import c_D08, shmf_TW10
@@ -25,16 +26,15 @@ class CIBTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, cosmo_model=0, nu=100, concentration_relation=c_D08, subhalo_mass_function=shmf_TW10):        
+    def __init__(self, nu=100, halo_model=HaloModel(), subhalo_mass_function=shmf_TW10):        
 
         self.nu = nu
-        self.concentration_relation = concentration_relation
-        self.subhalo_mass_function = subhalo_mass_function
+        self.subhalo_mass_function = subhalo_mass_function # Might eventually want to move this to halo_model
 
-        # Load emulator and make sure the required files are loaded outside of jitted functions
-        self.emulator = Emulator(cosmo_model=cosmo_model)
-        self.emulator._load_emulator("DAZ")
-        self.emulator._load_emulator("HZ")
+        # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
+        self.halo_model = halo_model
+        self.halo_model.emulator._load_emulator("DAZ")
+        self.halo_model.emulator._load_emulator("HZ")
 
 
     
@@ -160,10 +160,10 @@ class CIBTracer(BaseTracer):
         """
 
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         
         h = params["H0"]/100
-        chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
         nu_rest = self.nu * (1 + z)
 
         s_nu_factor = 1 / ((1 + z) * chi**2)

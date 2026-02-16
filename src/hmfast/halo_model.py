@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
-from hmfast.literature import hmf_T08, hbf_T10
+from hmfast.literature import hmf_T08, hbf_T10, c_D08
 from hmfast.emulator import Emulator
 from hmfast.defaults import merge_with_defaults
 import hmfast.tracers as tracers
@@ -25,7 +25,7 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, cosmo_model=0, mass_model = hmf_T08, bias_model = hbf_T10):
+    def __init__(self, cosmo_model=0, delta = 200, mass_model = hmf_T08, bias_model = hbf_T10, concentration_relation=c_D08):
         """
         Initialize the halo model.
         
@@ -41,31 +41,19 @@ class HaloModel:
         
         # Load emulator and make sure the required files are loaded outside of jitted functions
         self.emulator = Emulator(cosmo_model=cosmo_model)
-        self.cosmo_model = cosmo_model
         self.emulator._load_emulator("DAZ")
         self.emulator._load_emulator("HZ")
         self.emulator._load_emulator("PKL")
         
         self.mass_model = mass_model
         self.bias_model = bias_model
+        self.concentration_relation = concentration_relation
+        self.delta = delta
 
         # Create TophatVar instance once to instantiate it
         dummy_k, _ = self.emulator.pk_matter(1., params=None, linear=True)
         self._tophat_instance = partial(TophatVar(dummy_k, lowring=True, backend='jax'), extrap=True)
         self._tophat_instance_dvar = partial(TophatVar(dummy_k, lowring=True, backend='jax', deriv=1))
-
-    
-    def create_tracer(self, tracer: str, x=None):
-        """
-        Create a tracer for this HaloModel using a short string name.
-        Supported: "y" (tSZ), "g" (galaxies/HOD)
-        """
-        if tracer == "y":
-            return tracers.tsz.TSZTracer(cosmo_model=self.cosmo_model, x=x)
-        elif tracer == "g":
-            return tracers.galaxy_hod.GalaxyHODTracer(cosmo_model=self.cosmo_model, x=x)
-        else:
-            raise ValueError(f"Unknown tracer '{tracer}'. Only 'y' (tSZ) and 'g' (galaxies/HOD) are supported.")
            
 
     def _compute_hmf_grid(self, params = None):
@@ -78,7 +66,7 @@ class HaloModel:
 
         z_grid = self.emulator._z_grid_pk
         cparams = self.emulator.get_all_cosmo_params(params)   
-        h, delta = cparams["h"], params['delta'] 
+        h = cparams["h"]
        
         # Power spectra for all redshifts
         P = jax.vmap(lambda zp: self.emulator.pk_matter(zp, params=params, linear=True)[1].flatten())(z_grid).T
@@ -98,7 +86,7 @@ class HaloModel:
         M_grid = 4.0 * jnp.pi / 3.0 * omega0_cb * rho_crit_0 * (R_grid**3) * h**3
     
         # Compute overdensity threshold and then the HMF
-        delta_mean = self.emulator.delta_crit_to_mean(delta, z_grid, params=params)
+        delta_mean = self.emulator.delta_crit_to_mean(self.delta, z_grid, params=params)
         hmf_grid = self.mass_model(sigma_grid, z_grid, delta_mean)
 
         # Compute d n / d ln(M) using d ln(nu) / d ln(R) 
@@ -165,7 +153,7 @@ class HaloModel:
         sigma_M = jnp.exp(_sigma_interp((jnp.log(1.+z), jnp.log(m))))
 
         # Get the delta_mean values and pass it to the bias model
-        delta_mean = self.emulator.delta_crit_to_mean(params["delta"], z, params=params)
+        delta_mean = self.emulator.delta_crit_to_mean(self.delta, z, params=params)
         
         return self.bias_model(sigma_M, z, delta_mean)
 

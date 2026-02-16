@@ -58,11 +58,12 @@ class BaseTracer(ABC):
         """
 
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params=params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params=params)
 
-        h, delta = params['H0']/100, params['delta']
-        d_A = self.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.emulator.r_delta(z, m, delta, params=params) 
+        h = params['H0']/100
+        delta = self.halo_model.delta 
+        d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
+        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params) 
         ell_delta = d_A / r_delta
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
@@ -101,19 +102,19 @@ class BaseTracer(ABC):
             Fourier-space halo profile
         """
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
     
         m = jnp.atleast_1d(m)
         h = cparams["h"]
     
         # Concentration and halo radius
-        delta = params["delta"]
-        c_delta = self.concentration_relation(z, m)
-        r_delta = self.emulator.r_delta(z, m, delta, params=params)
+        delta = self.halo_model.delta
+        c_delta = self.halo_model.concentration_relation(z, m)
+        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params)
         lambda_val = 1.0 #params.get("lambda_HOD", 1.0)
     
         # Convert ell to k
-        chi = self.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * h
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * h
         ell = jnp.atleast_1d(ell)
         k = (ell + 0.5) / chi
 

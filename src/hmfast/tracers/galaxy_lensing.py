@@ -4,11 +4,12 @@ import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
 from jax.scipy.special import sici
-from hmfast.tracers.base_tracer import BaseTracer
+
 from hmfast.emulator import Emulator
+from hmfast.halo_model import HaloModel
+from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
-from hmfast.literature import c_D08
 
 jax.config.update("jax_enable_x64", True)
 
@@ -27,28 +28,31 @@ class GalaxyLensingTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, cosmo_model=0, concentration_relation=c_D08):        
-        
-        self.concentration_relation = concentration_relation
-
-        # Load emulator and make sure the required files are loaded outside of jitted functions
-        self.emulator = Emulator(cosmo_model=cosmo_model)
-        self.emulator._load_emulator("DAZ")
-        self.emulator._load_emulator("HZ")
-
     
-    def load_file_data(self, filename):
-        """
-        Load a two-column redshift distribution file and return the data as a jax array
-    
-        Assumes the file contains two whitespace-separated columns: z  f(z).
-        If `filename` is not an absolute path, it is resolved relative to HMFAST_DATA_PATH.
-        """
-        if not os.path.isabs(filename):
-            filename = os.path.join(get_default_data_path(), "auxiliary_files", filename)
+    def __init__(self, halo_model=HaloModel(), dndz=None, nz_lens=None):        
 
-        data = np.loadtxt(filename)
-        return jnp.array(data)
+        # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
+        self.halo_model = halo_model
+        self.halo_model.emulator._load_emulator("DAZ")
+        self.halo_model.emulator._load_emulator("HZ")
+
+        if dndz is None:
+            dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
+            self.dndz = self.load_file_data(dndz_path)
+        else:
+            self.dndz = dndz
+
+        if nz_lens is None:
+            nz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_lens_bin1.txt")
+            self.nz_lens = self.load_file_data(dndz_path)
+        else: 
+            self.nz_lens = nz_lens
+    
+    def load_file_data(self, dndz_path):
+        data = np.loadtxt(dndz_path)
+        x = data[:, 0]
+        y = data[:, 1]
+        return (jnp.array(x), jnp.array(y))
 
     
     def get_I_g(self, z, params=None):
@@ -62,22 +66,16 @@ class GalaxyLensingTracer(BaseTracer):
         zq = jnp.atleast_1d(jnp.array(z, dtype=jnp.float64))
         h = params["H0"] / 100
         
-        # Load source distribution
-        dndz_data = self.load_file_data(filename="nz_source_normalized_bin4.txt")
-        z_data = dndz_data[:, 0]
-        phi_prime_data = dndz_data[:, 1]
-    
-        # Load lens redshift distribution
-        nz_lens_data = self.load_file_data(filename="nz_lens_bin1.txt")
-        z_s_data = nz_lens_data[:, 0]
-        n_s_data = nz_lens_data[:, 1]
+        # Load source distribution and lens redshift distribution
+        z_data, phi_prime_data = self.dndz
+        z_s_data, n_s_data = self.nz_lens
     
         # Interpolate phi_prime to z_s grid
         phi_prime_at_z_s = jnp.interp(z_s_data, z_data, phi_prime_data, left=0.0, right=0.0)
     
         # Angular distances
-        chi_z_s = self.emulator.angular_diameter_distance(z_s_data) * (1 + z_s_data) * h
-        chi_z = self.emulator.angular_diameter_distance(zq) * (1 + zq) * h
+        chi_z_s = self.halo_model.emulator.angular_diameter_distance(z_s_data) * (1 + z_s_data) * h
+        chi_z = self.halo_model.emulator.angular_diameter_distance(zq) * (1 + zq) * h
     
         # Reshape for broadcasting
         chi_z_s = chi_z_s[:, None]  # (N_s, 1)
@@ -103,7 +101,7 @@ class GalaxyLensingTracer(BaseTracer):
         """
         # Merge default parameters with input
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params=params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params=params)
         zq = jnp.atleast_1d(jnp.array(z, dtype=jnp.float64))  # Ensure z is an array
 
         c_km_s = 299792.458  # Speed of light in km/s
@@ -114,8 +112,8 @@ class GalaxyLensingTracer(BaseTracer):
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
 
         # Compute comoving distance and Hubble parameter
-        chi_z = self.emulator.angular_diameter_distance(zq, params=params) * (1 + zq) * h # Comoving distance in Mpc/h
-        H_z = self.emulator.hubble_parameter(zq, params=params)   # Hubble parameter in km/s/Mpc
+        chi_z = self.halo_model.emulator.angular_diameter_distance(zq, params=params) * (1 + zq) * h # Comoving distance in Mpc/h
+        H_z = self.halo_model.emulator.hubble_parameter(zq, params=params)   # Hubble parameter in km/s/Mpc
     
         I_g = self.get_I_g(zq, params=params) 
     
@@ -140,7 +138,7 @@ class GalaxyLensingTracer(BaseTracer):
         """
 
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         W = self.get_W_kappa_g(z, params=params) 
 
         # Compute u_m_ell from BaseTracer

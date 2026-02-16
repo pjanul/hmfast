@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
+
 from hmfast.emulator import Emulator
+from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
-from hmfast.literature import c_D08
 
 
 
@@ -11,32 +12,33 @@ class KSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, cosmo_model=0, x=None, concentration_relation=c_D08):
+    def __init__(self, halo_model=HaloModel(), x=None):
+
         
+        # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
         self.hankel = HankelTransform(self.x, nu=0.5)
-        self.concentration_relation = concentration_relation
         self.profile = self.b16_density_profile
 
-        # Load emulator and make sure the required files are loaded outside of jitted functions
-        self.emulator = Emulator(cosmo_model=0)
-        self.emulator._load_emulator("DAZ")
-        self.emulator._load_emulator("HZ")
-        self.emulator._load_emulator("PKL")
+        # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
+        self.halo_model = halo_model
+        self.halo_model.emulator._load_emulator("DAZ")
+        self.halo_model.emulator._load_emulator("HZ")
+        self.halo_model.emulator._load_emulator("PKL")
 
          # Compute Pk once instantiate grids and thus avoid tracer errors
-        _, _ = self.emulator.pk_matter(1., params=None, linear=True) 
+        _, _ = self.halo_model.emulator.pk_matter(1., params=None, linear=True) 
 
 
     def nfw_density_profile(self, z, m, params=None):
         params = merge_with_defaults(params)
 
-        cparams = self.emulator.get_all_cosmo_params(params)
-        delta = params["delta"]
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
+        delta = self.halo_model.delta
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]   # Baryon fraction
-        r_delta = self.emulator.r_delta(z, m, delta, params=params)
+        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params)
     
-        c_delta = self.concentration_relation(z, m)
+        c_delta = self.halo_model.concentration_relation(z, m)
         r_s = r_delta / c_delta
     
         x =  jnp.clip(self.x, 1e-8, None) 
@@ -76,11 +78,11 @@ class KSZTracer(BaseTracer):
         
         # Get cosmological parameters
         h = params["H0"] / 100.0
-        cparams = self.emulator.get_all_cosmo_params(params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]   # Baryon fraction
         
         # Critical density at redshift z
-        rho_crit_z = self.emulator.critical_density(z, params=params)
+        rho_crit_z = self.halo_model.emulator.critical_density(z, params=params)
         
         # Battaglia+16 parameters (Table 2: AGN feedback model)
         A_rho0 = 4000.0
@@ -107,7 +109,7 @@ class KSZTracer(BaseTracer):
         
         gamma = -0.2
         xc = 0.5
-        c_delta = self.concentration_relation(z, m) 
+        c_delta = self.halo_model.concentration_relation(z, m) 
         
         # Convert mass to M_sun (not M_sun/h)
         m_200c_msun = m / h
@@ -139,17 +141,17 @@ class KSZTracer(BaseTracer):
         """
 
         params = merge_with_defaults(params)
-        cparams = self.emulator.get_all_cosmo_params(params=params)
+        cparams = self.halo_model.emulator.get_all_cosmo_params(params=params)
 
         # Get relevant quantities
-        h, delta = params['H0']/100, params['delta']
-        d_A = self.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.emulator.r_delta(z, m, delta, params=params) 
+        h = params['H0']/100
+        d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
+        r_delta = self.halo_model.emulator.r_delta(z, m, self.halo_model.delta, params=params) 
         ell_delta = d_A / r_delta
-        chi = self.emulator.angular_diameter_distance(z, params=params) * h * (1 + z)
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h * (1 + z)
 
         # Compute the root mean squared velocity needed for the kSZ prefactor
-        vrms = jnp.sqrt(self.emulator.v_rms_squared(z, params=params))
+        vrms = jnp.sqrt(self.halo_model.emulator.v_rms_squared(z, params=params))
 
         # sigmaT / m_prot in (Mpc/h)**2/(Msun/h) which is required for kSZ
         sigma_T_over_m_p = 8.305907197761162e-17 * h  

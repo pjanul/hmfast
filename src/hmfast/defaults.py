@@ -20,7 +20,6 @@ DEFAULT_PARAMS = {
     # Other cosmological parameters
     'T_cmb': 2.7255,
     'deg_ncdm': 1,
-    'delta': 500,
     'B': 1.4,
 
     

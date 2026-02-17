@@ -14,7 +14,6 @@ class KSZTracer(BaseTracer):
     """
     def __init__(self, halo_model=HaloModel(), x=None):
 
-        
         # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
         self.hankel = HankelTransform(self.x, nu=0.5)

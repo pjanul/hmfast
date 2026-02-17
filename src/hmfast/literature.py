@@ -108,7 +108,7 @@ def shmf_TW10(M_host, M_sub):
 
 
 
-def c_D08(z, m, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
+def c_D08(z, m, D=None, A=5.71, B=-0.084, C=-0.47, M_pivot=2e12):
     """
     Duffy et al. (2008) mass-concentration relation for c200_c.
     A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
@@ -131,7 +131,7 @@ def c_SC14(z, m):
     return c200_c
 
 
-def c_B13(z, m, D):
+def c_B13(D, m):
     """
     Bhattacharya et al. (2013) mass-concentration relation for c200_c.
     Obtained from Table 2, https://arxiv.org/pdf/1112.5479

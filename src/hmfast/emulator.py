@@ -315,7 +315,7 @@ class Emulator:
         """
         Convert critical density to mean density at given redshifts.
         
-        For Δ_crit = 200, we typically get Δ_mean ≈ 200 * Ω_m(z) / Ω_m(0)
+        For Δ_crit = 200, we typically get Δ_mean ≈ 200 / Ω_m(z)
         """
         
         params = self.get_all_cosmo_params(params)
@@ -324,6 +324,22 @@ class Emulator:
         Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
         delta_mean = delta_crit / Omega_m_z
         return delta_mean
+
+    def delta_vir_to_crit(self, z, params=None):
+        """
+        Bryan & Norman (1998) virial overdensity with respect to critical density.
+        Returns Δ_vir,c at redshift z.
+        """
+        params = self.get_all_cosmo_params(params)
+                
+        om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
+        Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
+
+        
+        x = Omega_m_z - 1.0
+        delta_vir = 18 * jnp.pi**2 + 82 * x - 39 * x**2
+        
+        return delta_vir
         
 
     def r_delta(self, z, m, delta, params=None):

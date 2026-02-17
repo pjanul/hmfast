@@ -7,10 +7,12 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
-from hmfast.literature import hmf_T08, hbf_T10, c_D08
+
+from hmfast.literature import hmf_T08, hbf_T10, c_D08, c_B13
 from hmfast.emulator import Emulator
 from hmfast.defaults import merge_with_defaults
 import hmfast.tracers as tracers
+from hmfast.tools.newton_root import newton_root
 
 
 from mcfit import TophatVar
@@ -33,10 +35,14 @@ class HaloModel:
         ----------
         params : dict, optional
             Cosmological parameters. 
+        delta : 
+            The overdensity criterion relative to the background density
         mass_model : function, default hmf_T08 (i.e. the halo mass function model from Tinker et al 2008)
             Mass function to use.
         bias_model : function, default hbf_T10 (i.e. the halo bias function model from Tinker et al 2010)
             Bias function to use.
+        concentration_relation : function, default c_D08 (i.e. the concentration-mass relation from Duffy et al 2008)
+            The concentration-mass relation
         """
         
         # Load emulator and make sure the required files are loaded outside of jitted functions
@@ -279,3 +285,53 @@ class HaloModel:
         return cl_2h
 
 
+    def c_delta(self, z, m):
+        return self.concentration_relation(z, m)
+
+        
+    def delta_conversion_function(self, z, m_new, m_old, delta_old, delta_new, c_old, params=None):
+        """
+        Vectorized version: works for scalar or array inputs for z and m_new/m_old.
+        Returns F(m_new) = m_new / m_old - f_NFW(c_old) / f_NFW(c_old * r_new / r_old)
+        """
+        params = merge_with_defaults(params)
+        
+        r_old = self.emulator.r_delta(z, m_old, delta_old, params=params)
+        r_new = self.emulator.r_delta(z, m_new, delta_new, params=params)
+       
+        
+        def f_nfw(x):
+            return jnp.log1p(x) - x / (1.0 + x)
+        
+        return m_old / m_new - f_nfw(c_old) / f_nfw(c_old * r_new / r_old)
+
+
+    def convert_m_delta(self, z, m, delta_old, delta_new, c_old, x0=None, max_iter=20, params=None):
+        """
+        Solve for m_{Δ'} given m_old, delta_old, delta_new, c_old, and redshift.
+        Fully vectorized: computes all combinations of z, m, and c_old.
+        """
+        params = merge_with_defaults(params)
+        if x0 is None:
+            x0 = m
+    
+        # Make sure 1D arrays
+        z = jnp.atleast_1d(z)
+        m = jnp.atleast_1d(m)
+        c_old = jnp.atleast_1d(c_old)
+    
+        # Broadcast to common shape
+        z, m, c_old, x0 = jnp.broadcast_arrays(z, m, c_old, x0)
+    
+        # Solve for a single set (scalar z, m, c_old, x0)
+        def solve_single(z_i, m_i, c_i, x0_i):
+            F = lambda m_new: self.delta_conversion_function(z_i, m_new, m_i, delta_old, delta_new, c_i, params=params)
+            return newton_root(F, x0=x0_i, max_iter=max_iter)
+    
+        # Vectorize over all elements
+        solve_vec = jax.vmap(solve_single)
+        return solve_vec(z, m, c_old, x0)
+
+
+    
+    

@@ -26,7 +26,7 @@ class CIBTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, nu=100, halo_model=HaloModel(), subhalo_mass_function=shmf_TW10):        
+    def __init__(self, halo_model, nu=100, subhalo_mass_function=shmf_TW10):        
 
         self.nu = nu
         self.subhalo_mass_function = subhalo_mass_function # Might eventually want to move this to halo_model
@@ -175,7 +175,7 @@ class CIBTracer(BaseTracer):
         # Compute u_m_ell from BaseTracer
         ell, u_m = self.u_ell_analytic(z, m, params=params)
 
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] / h**2  
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] 
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)
 

@@ -5,6 +5,7 @@ from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer, HankelTransform
 from hmfast.defaults import merge_with_defaults
+from hmfast.tools.constants import Const
 
 
 
@@ -12,7 +13,7 @@ class TSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, halo_model=HaloModel(), x=None):
+    def __init__(self, halo_model, x=None):
 
         # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
@@ -34,7 +35,7 @@ class TSZTracer(BaseTracer):
     
         # Pull needed parameters
         H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0GNFW", "alphaGNFW", "betaGNFW", "gammaGNFW", "B")) 
-        c_delta = 1.156  #self.halo_model.concentration_relation(z, m) #
+        c_delta = self.halo_model.c_delta(z, m, params=params) 
         
         # Compute helper variables and the final value of Pe
         h = H0 / 100.0 
@@ -55,7 +56,7 @@ class TSZTracer(BaseTracer):
         h, B = params['H0']/100, params['B']
         delta = self.halo_model.delta
         d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params) / B**(1/3)
+        r_delta = self.halo_model.r_delta(z, m, delta, params=params) / B**(1/3)
         ell_delta = d_A / r_delta
 
         m_e, sigma_T, mpc_per_h_to_cm = 510998.95, 6.6524587321e-25, 3.085677581e24 / h

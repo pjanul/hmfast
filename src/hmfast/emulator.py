@@ -5,6 +5,7 @@ from typing import Dict, Union
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
+from hmfast.tools.constants import Const
 
 jax.config.update("jax_enable_x64", True)
 
@@ -42,7 +43,7 @@ class Emulator:
         self._emu = {}
         # cached grids / derived constants
         self._z_grid_bg = jnp.linspace(0.0, 20.0, 5000, dtype=jnp.float64)    # z grid for background quantities such as H(z), d_A(z), sigma8(z)
-        self._z_grid_pk = jnp.linspace(0.0, 5.0, 1000, dtype=jnp.float64)     # z grid for Pk(z)
+        self._z_grid_pk = None     # z grid for Pk(z)
         self._k_grid = None
         self._pk_power_fac = None
         self._setup_pk_grid()                  
@@ -86,21 +87,25 @@ class Emulator:
 
         is_ede_v2 = (self.cosmo_model == 6)
 
-        self.cp_ndspl_k = 1 if is_ede_v2 else 10
-        self.cp_nk      = 1000 if is_ede_v2 else 5000
+        n_downsample_k = 1 if is_ede_v2 else 10
+        n_k            = 1000 if is_ede_v2 else 5000
 
         emu = self._load_emulator("PKL")
-        n_k = len(emu.modes)
+        
 
         k_min = 5e-4 if is_ede_v2 else 1e-4
         k_max = 10.0 if is_ede_v2 else 50.0
 
-        self._k_grid = jnp.geomspace(k_min, k_max, n_k, dtype=jnp.float64)
+        z_max = 20.0 if is_ede_v2 else 5.0
 
+        self._k_grid = jnp.geomspace(k_min, k_max, n_k, dtype=jnp.float64)[::n_downsample_k]
+        self._z_grid_pk = jnp.linspace(0.0, z_max, 100, dtype=jnp.float64)     # z grid for Pk(z)
+
+        
         if is_ede_v2:
             self._pk_power_fac = self._k_grid ** (-3)
         else:
-            ls = jnp.arange(2,self.cp_nk+2)[::self.cp_ndspl_k] # jan 10 ndspl
+            ls = jnp.arange(2,n_k+2)[::n_downsample_k] 
             self._pk_power_fac= (ls*(ls+1.)/2./jnp.pi)**-1
 
     # ------------------------------------------------------------------
@@ -206,25 +211,28 @@ class Emulator:
     
         p = merge_with_defaults(params)
         
-        # Derive additional parameters following classy_szfast.py:308-320
-        p['h'] = p['H0'] / 100.0
-        p['Omega_b'] = p['omega_b'] / p['h']**2
-        p['Omega_cdm'] = p['omega_cdm'] / p['h']**2
+        #p['Rho_crit_0'] = 2.77528234822e11 * p['h']**2  
+
+        c, G, M_sun, sigma_B, Mpc_over_m = Const._c_, Const._G_, Const._M_sun_, Const._sigma_B_, Const._Mpc_over_m_
+
+        # From user-defined parameters (or defaults if none are defined)
+        p['h'] = p['H0']/100.
+        p['Omega_b'] = p['omega_b'] / p['h']**2.
+        p['Omega_cdm'] = p['omega_cdm'] / p['h']**2.
         
-        # Radiation density 
-        sigma_B = 5.6704004737209545e-08  # Stefan-Boltzmann constant
-        p['Omega0_g'] = (4.0 * sigma_B / 2.99792458e10 * (p['T_cmb']**4)) / (3.0 * 2.99792458e10**2 * 1.0e10 * p['h']**2 / 8.262056120185e-10 / 8.0 / jnp.pi / 6.67430e-11)
-        p['Omega0_ur'] = p['N_ur'] * 7.0/8.0 * (4.0/11.0)**(4.0/3.0) * p['Omega0_g']
-        p['Omega0_ncdm'] = p['deg_ncdm'] * p['m_ncdm'] / (93.14 * p['h']**2)
-        p['Omega_Lambda'] = 1.0 - p['Omega0_g'] - p['Omega_b'] - p['Omega_cdm'] - p['Omega0_ncdm'] - p['Omega0_ur']
+        # More cosmological params
+        p['Omega0_g'] = (4. * sigma_B / c * p['T_cmb']**4.) / (3.0 * c**2 * 1e10 * p['h']**2 / Mpc_over_m**2 /8.0 / jnp.pi / G)
+        p['Omega0_ur'] = p['N_ur']* 7.0/8.0 * (4.0/11.0)**(4.0/3.0) * p['Omega0_g']
+        p['Omega0_ncdm'] = p['deg_ncdm'] * p['m_ncdm'] / (93.14 * p['h']**2) ## valid only in standard cases, default T_ncdm etc
+        p['Omega_Lambda'] = 1. - p['Omega0_g'] - p['Omega_b'] - p['Omega_cdm'] - p['Omega0_ncdm'] - p['Omega0_ur']
         p['Omega0_m'] = p['Omega_cdm'] + p['Omega_b'] + p['Omega0_ncdm']
-        p['Omega0_r'] = p['Omega0_ur'] + p['Omega0_g']
+        p['Omega0_r'] = p['Omega0_ur']+p['Omega0_g']
         p['Omega0_m_nonu'] = p['Omega0_m'] - p['Omega0_ncdm']
-        p['Omega0_cb'] = p['Omega0_m_nonu']
-        
-        # Critical density (corrected to match standard cosmological value)
-        # Using standard value: ρ_crit = 2.78e11 h^2 Msun/h per (Mpc/h)^3
-        p['Rho_crit_0'] = 2.77528234822e11 * p['h']**2  
+        p['Omega0_cb'] = p['Omega0_m_nonu'] 
+
+        # Critical density
+        H0 = p['H0'] / (c / 1e3) # Convert to H0 over c (c being in km/s)
+        p['Rho_crit_0'] = (3.0 / (8.0 * jnp.pi * G * M_sun)) * Mpc_over_m * c**2 * H0**2 / p['h']**2
         
         return p
 
@@ -247,13 +255,14 @@ class Emulator:
         """
         
         params = merge_with_defaults(params)
+        
         # Get Hubble parameter    
         H_z = self.hubble_parameter(z, params)
         h = (params["H0"]/100)
         
-        # Convert to critical density
-        # rho_crit = 3 H^2 / (8 pi G) * Mpc_over_m * c**2 
-        rho_crit_factor = (3./ (8. * jnp.pi * (6.67430e-11) * 1.98847e30)) * 3.0856775814913673e22 * (299792458.0)**2 
+        # Get critical density rho_crit = 3 H^2 / (8 pi G) * Mpc_over_m * c**2 
+        c, G, M_sun, sigma_B, Mpc_over_m = Const._c_, Const._G_, Const._M_sun_, Const._sigma_B_, Const._Mpc_over_m_
+        rho_crit_factor = (3.0 / (8.0 * jnp.pi * G * M_sun)) * Mpc_over_m * c**2 
         
         return rho_crit_factor * (H_z/h)**2 
 
@@ -293,6 +302,7 @@ class Emulator:
         """
         v_rms^2(z) from linear growth factor and matter power spectrum.
         """
+        params = merge_with_defaults(params)
         
         z = jnp.atleast_1d(z)
         k_grid = jnp.geomspace(1e-5, 1e1, 1000)
@@ -310,61 +320,6 @@ class Emulator:
     
         return jnp.interp(z, self._z_grid_pk, vrms2_grid)
 
-        
-    def delta_crit_to_mean(self, delta_crit, z, params=None):
-        """
-        Convert critical density to mean density at given redshifts.
-        
-        For Δ_crit = 200, we typically get Δ_mean ≈ 200 / Ω_m(z)
-        """
-        
-        params = self.get_all_cosmo_params(params)
-                
-        om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
-        Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
-        delta_mean = delta_crit / Omega_m_z
-        return delta_mean
-
-    def delta_vir_to_crit(self, z, params=None):
-        """
-        Bryan & Norman (1998) virial overdensity with respect to critical density.
-        Returns Δ_vir,c at redshift z.
-        """
-        params = self.get_all_cosmo_params(params)
-                
-        om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
-        Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
-
-        
-        x = Omega_m_z - 1.0
-        delta_vir = 18 * jnp.pi**2 + 82 * x - 39 * x**2
-        
-        return delta_vir
-        
-
-    def r_delta(self, z, m, delta, params=None):
-        """
-        Compute the halo radius corresponding to a given mass and overdensity at redshift z.
-    
-        Parameters
-        ----------
-        z : float
-            Redshift at which to compute the radius.
-        m : float
-            Halo mass enclosed within the overdensity radius, in the same units as used for rho_crit.
-        delta : float
-            Overdensity parameter relative to the critical density (e.g., 200 for M_200).
-        
-        params : dict, optional
-            Dictionary of cosmological parameters to use when computing the critical density.
-    
-        Returns
-        -------
-        float
-            Radius r_delta (e.g., R_200) within which the average density equals delta * rho_crit(z).
-        """
-        rho_crit = self.critical_density(z,params=params)
-        return (3.0 * m / (4.0 * jnp.pi * delta * rho_crit))**(1./3.)
 
 
     def comoving_volume_element(self, z, params=None):
@@ -383,6 +338,7 @@ class Emulator:
         float
             dV / dz / dOmega in (Mpc/h)^3 / sr
         """
+        params = merge_with_defaults(params)
         cparams = self.get_all_cosmo_params(params)
         h = cparams["h"]
         dAz = self.angular_diameter_distance(z, params=params) * h

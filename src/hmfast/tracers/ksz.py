@@ -12,7 +12,8 @@ class KSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, halo_model=HaloModel(), x=None):
+    def __init__(self, halo_model, x=None):
+
 
         # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(20.0), 512)
@@ -35,9 +36,9 @@ class KSZTracer(BaseTracer):
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         delta = self.halo_model.delta
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]   # Baryon fraction
-        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params)
+        r_delta = self.halo_model.r_delta(z, m, delta, params=params)
     
-        c_delta = self.halo_model.concentration_relation(z, m)
+        c_delta = self.halo_model.c_delta(z, m, params=params)
         r_s = r_delta / c_delta
     
         x =  jnp.clip(self.x, 1e-8, None) 
@@ -108,7 +109,7 @@ class KSZTracer(BaseTracer):
         
         gamma = -0.2
         xc = 0.5
-        c_delta = self.halo_model.concentration_relation(z, m) 
+        c_delta = self.halo_model.c_delta(z, m, params=params)
         
         # Convert mass to M_sun (not M_sun/h)
         m_200c_msun = m / h
@@ -145,7 +146,7 @@ class KSZTracer(BaseTracer):
         # Get relevant quantities
         h = params['H0']/100
         d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.halo_model.emulator.r_delta(z, m, self.halo_model.delta, params=params) 
+        r_delta = self.halo_model.r_delta(z, m, self.halo_model.delta, params=params) 
         ell_delta = d_A / r_delta
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h * (1 + z)
 

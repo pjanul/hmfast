@@ -28,7 +28,7 @@ class GalaxyHODTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, halo_model=HaloModel(), dndz = None):        
+    def __init__(self, halo_model, dndz = None):        
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model

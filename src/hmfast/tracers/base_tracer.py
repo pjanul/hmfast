@@ -63,7 +63,7 @@ class BaseTracer(ABC):
         h = params['H0']/100
         delta = self.halo_model.delta 
         d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params) 
+        r_delta = self.halo_model.r_delta(z, m, delta, params=params) 
         ell_delta = d_A / r_delta
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
@@ -109,8 +109,8 @@ class BaseTracer(ABC):
     
         # Concentration and halo radius
         delta = self.halo_model.delta
-        c_delta = self.halo_model.concentration_relation(z, m)
-        r_delta = self.halo_model.emulator.r_delta(z, m, delta, params=params)
+        c_delta = self.halo_model.c_delta(z, m, params=params)
+        r_delta = self.halo_model.r_delta(z, m, delta, params=params)
         lambda_val = 1.0 #params.get("lambda_HOD", 1.0)
     
         # Convert ell to k

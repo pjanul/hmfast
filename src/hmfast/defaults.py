@@ -16,6 +16,7 @@ DEFAULT_PARAMS = {
     'm_ncdm': 0.06,
     'N_ur': 3.046,
     'w0_fld': -0.95,           # only for wcdm models
+    'c_delta': 1.156,
 
     # Other cosmological parameters
     'T_cmb': 2.7255,

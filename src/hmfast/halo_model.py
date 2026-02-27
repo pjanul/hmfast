@@ -27,7 +27,7 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, cosmo_model=0, delta = 200, mass_model = hmf_T08, bias_model = hbf_T10, concentration_relation=c_D08):
+    def __init__(self, cosmo_model=0, delta = 200, delta_ref = "critical", mass_model = hmf_T08, bias_model = hbf_T10, concentration_relation=c_D08):
         """
         Initialize the halo model.
         
@@ -54,56 +54,195 @@ class HaloModel:
         self.mass_model = mass_model
         self.bias_model = bias_model
         self.concentration_relation = concentration_relation
+        
         self.delta = delta
+        self.delta_ref = delta_ref 
+
 
         # Create TophatVar instance once to instantiate it
         dummy_k, _ = self.emulator.pk_matter(1., params=None, linear=True)
         self._tophat_instance = partial(TophatVar(dummy_k, lowring=True, backend='jax'), extrap=True)
-        self._tophat_instance_dvar = partial(TophatVar(dummy_k, lowring=True, backend='jax', deriv=1))
-           
 
-    def _compute_hmf_grid(self, params = None):
+    # Ensure that delta_ref is only ever critical or mean
+    @property
+    def delta_ref(self):
+        return self._delta_ref
+    
+    @delta_ref.setter
+    def delta_ref(self, value):
+        if value not in ("critical", "mean"):
+            raise ValueError("delta_ref must be either 'critical' or 'mean'")
+        self._delta_ref = value
+
+    
+    def omega_m_z(self, z, params=None):
+        """
+        Compute Ω_m(z) = rho_m(z) / rho_crit(z) without neutrinos.
+    
+        Returns
+        -------
+        omega_m : float or array
+            Dimensionless matter density at redshift z
+        """
+        params = merge_with_defaults(params)
+        params = self.emulator.get_all_cosmo_params(params)
+        om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
+        Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
+        
+        return Omega_m_z
+
+    def convert_delta_ref(self, z, delta, from_ref='critical', to_ref='mean', params=None):
+        """
+        Convert overdensity between 'critical' and 'mean' definitions.
+        
+        Parameters
+        ----------
+        delta : float or array
+        z : float or array
+        from_ref, to_ref : {'critical', 'mean'}
+        """
+        if from_ref == to_ref:
+            return jnp.full_like(z, delta)
+            
+        omega_m = self.omega_m_z(z, params=params)
+        if from_ref == 'critical' and to_ref == 'mean':
+            return delta / omega_m
+        elif from_ref == 'mean' and to_ref == 'critical':
+            return delta * omega_m
+        else:
+            raise ValueError("from_ref and to_ref must be 'critical' or 'mean'")
+
+         
+    def delta_conversion_function(self, z, m_new, m_old, delta_old, delta_new, c_old, params=None):
+        """
+        Vectorized version: works for scalar or array inputs for z and m_new/m_old.
+        Returns F(m_new) = m_new / m_old - f_NFW(c_old) / f_NFW(c_old * r_new / r_old)
+        """
+        params = merge_with_defaults(params)
+        
+        r_old = self.r_delta(z, m_old, delta_old, params=params)
+        r_new = self.r_delta(z, m_new, delta_new, params=params)
+       
+        
+        def f_nfw(x):
+            return jnp.log1p(x) - x / (1.0 + x)
+        
+        return m_old / m_new - f_nfw(c_old) / f_nfw(c_old * r_new / r_old)
+
+
+    @partial(jax.jit, static_argnums=0)
+    def convert_m_delta(self, z, m, delta_old, delta_new, c_old, x0=None, max_iter=20, params=None):
+        """
+        Solve for m_{Δ'} given m_old, delta_old, delta_new, c_old, and redshift.
+        Fully vectorized: computes all combinations of z, m, and c_old.
+        """
+        params = merge_with_defaults(params)
+        if x0 is None:
+            x0 = m
+    
+        # Make sure 1D arrays
+        z = jnp.atleast_1d(z)
+        m = jnp.atleast_1d(m)
+        c_old = jnp.atleast_1d(c_old)
+    
+        # Broadcast to common shape
+        z, m, c_old, x0 = jnp.broadcast_arrays(z, m, c_old, x0)
+    
+        # Solve for a single set (scalar z, m, c_old, x0)
+        def solve_single(z_i, m_i, c_i, x0_i):
+            F = lambda m_new: self.delta_conversion_function(z_i, m_new, m_i, delta_old, delta_new, c_i, params=params)
+            return newton_root(F, x0=x0_i, max_iter=max_iter)
+    
+        # Vectorize over all elements
+        solve_vec = jax.vmap(solve_single)
+        return solve_vec(z, m, c_old, x0)
+
+
+
+    def r_delta(self, z, m, delta, params=None):
+        """
+        Compute the halo radius corresponding to a given mass and overdensity at redshift z.
+    
+        Parameters
+        ----------
+        z : float
+            Redshift at which to compute the radius.
+        m : float
+            Halo mass enclosed within the overdensity radius, in the same units as used for rho_crit.
+        delta : float
+            Overdensity parameter relative to the critical density (e.g., 200 for M_200).
+        
+        params : dict, optional
+            Dictionary of cosmological parameters to use when computing the critical density.
+    
+        Returns
+        -------
+        float
+            Radius r_delta (e.g., R_200) within which the average density equals delta * rho_crit(z).
+        """
+        params = merge_with_defaults(params)
+        rho_crit = self.emulator.critical_density(z, params=params)
+        return (3.0 * m / (4.0 * jnp.pi * delta * rho_crit))**(1./3.)
+
+
+
+    @partial(jax.jit, static_argnums=0)
+    def c_delta(self, z, m, params=None):
+        params = merge_with_defaults(params)
+        return self.concentration_relation(self, z, m, params=params)
+
+
+    def _compute_hmf_grid(self, params=None):
         """
         Compute σ(R, z) for use in halo mass function and bias.
-        Returns:
-            R : array_like, radius grid
-            sigma : array_like, σ(R, z) values
-        """
-
-        z_grid = self.emulator._z_grid_pk
-        cparams = self.emulator.get_all_cosmo_params(params)   
-        h = cparams["h"]
-       
-        # Power spectra for all redshifts
-        P = jax.vmap(lambda zp: self.emulator.pk_matter(zp, params=params, linear=True)[1].flatten())(z_grid).T
-        
-        # Compute σ²(R, z) and dσ²/dR using TophatVar
-        ks, _ = self.emulator.pk_matter(1.0, params=params, linear=True)
-        R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(None, 0))(P)
-        dvar_grid = jax.vmap(lambda pks_col: self._tophat_instance_dvar(pks_col * ks, extrap=True)[1], in_axes=1)(P) 
-
-        # Take square root as the log for numerical stability, though we need sigma_grid for the hmf/hbf calcs
-        ln_sigma_grid = 0.5*jnp.log(var)    
-        sigma_grid = jnp.exp(ln_sigma_grid)
-        
-         # Mass grid
-        rho_crit_0 = cparams["Rho_crit_0"] / h**2
-        omega0_cb = (params['omega_cdm'] + params['omega_b']) / h**2
-        M_grid = 4.0 * jnp.pi / 3.0 * omega0_cb * rho_crit_0 * (R_grid**3) * h**3
     
-        # Compute overdensity threshold and then the HMF
-        delta_mean = self.emulator.delta_crit_to_mean(self.delta, z_grid, params=params)
+        Returns:
+            ln_x : array_like, log(1+z) grid
+            ln_M : array_like, log(M) grid
+            dn_dlnM_grid : array_like, dn/dlnM grid
+            sigma_grid : array_like, σ(R, z) values
+        """
+        params = merge_with_defaults(params)
+        z_grid = self.emulator._z_grid_pk
+        cparams = self.emulator.get_all_cosmo_params(params)
+        h = cparams["h"]
+    
+        # Power spectra for all redshifts, shape: (n_k, n_z)
+        pk_grid = jax.vmap(lambda zp: self.emulator.pk_matter(zp, params=params, linear=True)[1].flatten())(z_grid).T
+    
+        # Compute σ²(R, z) and dσ²/dR using TophatVar
+        R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
+        R_grid = R_grid[0].flatten()  # shape: (n_R,)
+        # var shape: (n_z, n_R)
+    
+        # Compute dσ²/dR for each z, output shape: (n_z, n_R)
+        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var)
+    
+        # Compute σ(R, z)
+        ln_sigma_grid = 0.5 * jnp.log(var)
+        sigma_grid = jnp.exp(ln_sigma_grid)
+    
+        # Mass grid, shape: (n_R,)
+        rho_crit_0 = cparams["Rho_crit_0"]
+        Omega0_cb = cparams['Omega0_cb']
+        M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3) * h ** 3
+    
+        # Overdensity threshold
+        delta_mean = self.convert_delta_ref(z_grid, self.delta, from_ref=self.delta_ref, to_ref='mean', params=params) 
+    
+        # Halo mass function grid, shape: (n_z, n_R)
         hmf_grid = self.mass_model(sigma_grid, z_grid, delta_mean)
-
-        # Compute d n / d ln(M) using d ln(nu) / d ln(R) 
-        dlnnu_dlnR_grid = - dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid  / (4.0 * jnp.pi * R_grid**3 * h**3)
-
-        # Also store the z and M grids to interpolate later on
+    
+        # Compute d n / d ln(M)
+        dlnnu_dlnR_grid = -dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)
+        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
+    
+        # Grids for interpolation
         ln_x = jnp.log(1. + z_grid)
         ln_M = jnp.log(M_grid)
-        
+    
         return ln_x, ln_M, dn_dlnM_grid, sigma_grid
+
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -129,7 +268,7 @@ class HaloModel:
 
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x, ln_M), dn_dlnM_grid)
         hmf = _hmf_interp((jnp.log(1.+z), jnp.log(m)))
-        return hmf
+        return hmf 
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -150,7 +289,6 @@ class HaloModel:
             Halo bias
         """
 
-    
         # Compute the sigma values which sets up the interpolator
         params = merge_with_defaults(params)
         ln_x, ln_M, _, sigma_grid = self._compute_hmf_grid(params=params)
@@ -159,8 +297,7 @@ class HaloModel:
         sigma_M = jnp.exp(_sigma_interp((jnp.log(1.+z), jnp.log(m))))
 
         # Get the delta_mean values and pass it to the bias model
-        delta_mean = self.emulator.delta_crit_to_mean(self.delta, z, params=params)
-        
+        delta_mean = self.convert_delta_ref(z, self.delta, from_ref=self.delta_ref, to_ref='mean', params=params)
         return self.bias_model(sigma_M, z, delta_mean)
 
 
@@ -188,7 +325,7 @@ class HaloModel:
                            m = jnp.geomspace(5e10, 3.5e15, 100), 
                            l = jnp.geomspace(1e2, 3.5e3, 50),
                            params = None, 
-                           kstar_damping_1h = 0.01):
+                           kstar_damping = 0.01):
         """
         Compute the 1-halo term for cl.
         """
@@ -206,10 +343,10 @@ class HaloModel:
         # Perform element-wise multiplication
         integrand = u_l_squared_grid * dndlnm_grid_expanded * comov_vol_expanded  # Shape becomes (dim_z, dim_m, dim_l)
 
-        # Handle 1h damping if requested (i.e. if kstar_damping_1h is not None)
+        # Handle 1h damping if requested (i.e. if kstar_damping is not None)
         chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z)
         k_grid = (l[None, :] + 0.5) / chi[:, None]
-        damping = jax.lax.cond(kstar_damping_1h <= 0.0, lambda _: jnp.ones_like(k_grid), lambda _: 1.0 - jnp.exp(-(k_grid / kstar_damping_1h) ** 2), operand=None)
+        damping = jax.lax.cond(kstar_damping <= 0.0, lambda _: jnp.ones_like(k_grid), lambda _: 1.0 - jnp.exp(-(k_grid / kstar_damping) ** 2), operand=None)
         integrand *= damping[:, None, :]
     
         # Calculate uniform spacings
@@ -284,54 +421,7 @@ class HaloModel:
     
         return cl_2h
 
-
-    def c_delta(self, z, m):
-        return self.concentration_relation(z, m)
-
-        
-    def delta_conversion_function(self, z, m_new, m_old, delta_old, delta_new, c_old, params=None):
-        """
-        Vectorized version: works for scalar or array inputs for z and m_new/m_old.
-        Returns F(m_new) = m_new / m_old - f_NFW(c_old) / f_NFW(c_old * r_new / r_old)
-        """
-        params = merge_with_defaults(params)
-        
-        r_old = self.emulator.r_delta(z, m_old, delta_old, params=params)
-        r_new = self.emulator.r_delta(z, m_new, delta_new, params=params)
-       
-        
-        def f_nfw(x):
-            return jnp.log1p(x) - x / (1.0 + x)
-        
-        return m_old / m_new - f_nfw(c_old) / f_nfw(c_old * r_new / r_old)
-
-
-    def convert_m_delta(self, z, m, delta_old, delta_new, c_old, x0=None, max_iter=20, params=None):
-        """
-        Solve for m_{Δ'} given m_old, delta_old, delta_new, c_old, and redshift.
-        Fully vectorized: computes all combinations of z, m, and c_old.
-        """
-        params = merge_with_defaults(params)
-        if x0 is None:
-            x0 = m
-    
-        # Make sure 1D arrays
-        z = jnp.atleast_1d(z)
-        m = jnp.atleast_1d(m)
-        c_old = jnp.atleast_1d(c_old)
-    
-        # Broadcast to common shape
-        z, m, c_old, x0 = jnp.broadcast_arrays(z, m, c_old, x0)
-    
-        # Solve for a single set (scalar z, m, c_old, x0)
-        def solve_single(z_i, m_i, c_i, x0_i):
-            F = lambda m_new: self.delta_conversion_function(z_i, m_new, m_i, delta_old, delta_new, c_i, params=params)
-            return newton_root(F, x0=x0_i, max_iter=max_iter)
-    
-        # Vectorize over all elements
-        solve_vec = jax.vmap(solve_single)
-        return solve_vec(z, m, c_old, x0)
-
+   
 
     
     

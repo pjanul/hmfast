@@ -28,7 +28,7 @@ class CMBLensingTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, halo_model=HaloModel()):        
+    def __init__(self, halo_model):        
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
@@ -86,7 +86,7 @@ class CMBLensingTracer(BaseTracer):
         # Compute u_m_ell from BaseTracer
         ell, u_m = self.u_ell_analytic(z, m, params=params)
 
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] / cparams["h"]**2  
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)
 

@@ -40,7 +40,7 @@ DEFAULT_PARAMS = {
 
 
 
-     # CIB tracer-specific parameters
+     # CIB tracer-specific parameters (general + Shang model)
     'L0_cib': 6.4e-8,             # Normalisation of L − M relation in [Jy MPc2/Msun]
     'alpha_cib': 0.36,            # redshift evolution of dust temperature
     'beta_cib': 1.75,             # emissivity index of sed
@@ -51,6 +51,13 @@ DEFAULT_PARAMS = {
     'delta_cib': 3.6,             # Redshift evolution of L − M normalisation
     'z_plateau_cib': 1e100,       # see 5.2.1 of https://arxiv.org/pdf/1208.5049.pdf
     'M_min_cib': 10**11.5,
+
+     # CIB tracer-specific parameters (Maniyar model)
+    'maniyar_cib_etamax': 0.4028353504978569,       # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'maniyar_cib_zc': 1.5,                          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'maniyar_cib_tau': 1.2040244128818796,          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'maniyar_cib_fsub': 0.134,                     # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/Cell_cib.py
+  
 
     
 }

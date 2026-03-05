@@ -130,3 +130,42 @@ class TW10SubHaloMass:
         return dN_dlnmu
 
 
+
+class JvB14SubHaloMass:
+    """
+    Jiang & van den Bosch (2014) subhalo mass function (Eq. 21).
+
+    Parameters
+    ----------
+    M_host : float or array_like
+        Host halo mass [Msun]
+    M_sub : float or array_like
+        Subhalo mass [Msun]
+
+    Returns
+    -------
+    dN_dlnmu : float or array_like
+        Number of subhalos per host per dln(mu)
+    """
+    def __init__(self):
+        # Jiang & van den Bosch (2014) parameters
+        self.gamma1 = 0.13
+        self.alpha1 = -0.83
+        self.gamma2 = 1.33
+        self.alpha2 = -0.02
+        self.beta = 5.67
+        self.zeta = 1.19
+
+    def dndlnmu(self, M_host, M_sub):
+        """
+        Compute the subhalo mass function per host halo per ln(mu),
+        where mu = M_sub / M_host.
+        """
+        
+        mu = M_sub / M_host
+        dN_dlnmu = (self.gamma1 * mu**self.alpha1 + self.gamma2 * mu**self.alpha2) * \
+                    jnp.exp(-self.beta * mu**self.zeta)
+        return dN_dlnmu
+
+
+

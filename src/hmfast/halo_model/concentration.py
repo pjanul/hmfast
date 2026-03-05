@@ -3,6 +3,20 @@ import jax.numpy as jnp
 from functools import partial
 
 
+
+class ConstantConcentration:
+    """
+    Constant concentration-mass relation, with the value of c_delta being specified in the parameters.
+    """
+    def __init__(self, c):
+        self.c = c
+        pass
+
+    def c_delta(self, halo_model, z, m, params):
+        return jnp.full_like(m, self.c)
+
+
+
 class D08Concentration:
     """
     Duffy et al. (2008) mass-concentration relation.
@@ -24,7 +38,6 @@ class D08Concentration:
             raise ValueError("The c-M relation c_D08 is incompatible with the chosen definiton of delta. You must select from the following: '200c', '200m', 'vir'.")
     
         return A * (m / M_pivot)**B * (1 + z)**C
-
 
 
 
@@ -58,19 +71,6 @@ class B13Concentration:
         nu = (1.12 * (m / 5e13)**0.3 + 0.53) / D
         c_delta = A * D**B * nu**C
         return c_delta
-
-
-class ConstantConcentration:
-    """
-    Constant concentration-mass relation, with the value of c_delta being specified in the parameters.
-    """
-    def __init__(self, c):
-        self.c = c
-        pass
-
-    def c_delta(self, halo_model, z, m, params):
-        return jnp.full_like(m, self.c)
-
 
 
 

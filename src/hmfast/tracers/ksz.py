@@ -42,7 +42,7 @@ class kSZTracer(BaseTracer):
         c_delta = self.halo_model.c_delta(z, m, params=params)
         r_s = r_delta / c_delta
     
-        x =  jnp.clip(self.x, 1e-8, None) 
+        x =  self.x 
     
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta)
     

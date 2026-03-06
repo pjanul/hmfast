@@ -50,7 +50,7 @@ class CIBTracer(BaseTracer):
 
 
     
-    def sigma(self, z, m, nu, params=None):
+    def sigma(self, m, params=None):
         params = merge_with_defaults(params)
 
         M_eff_cib = params['m_eff_cib']
@@ -63,7 +63,9 @@ class CIBTracer(BaseTracer):
         return Sigma_M
 
 
-    def phi(self, z, m, nu, params=None):
+    def phi(self, z, params=None):
+        ''' 
+        Implementation of Φ(z) = (1 + z)^(δ_CIB) for z < z_plateau, 1 for z >= z_plateau from the Shang model'''
         params = merge_with_defaults(params)
         delta_cib = params["delta_cib"]
         z_p = params["z_plateau_cib"]
@@ -73,9 +75,7 @@ class CIBTracer(BaseTracer):
         return Phi_z
 
 
-    def theta(self, z, m, nu, params=None):
-
-       
+    def theta(self, z, nu, params=None):
         """Spectral energy distribution function Theta(nu,z) for CIB, analogous to class_sz."""
         params = merge_with_defaults(params)
         T0 = params["T0_cib"]
@@ -110,10 +110,10 @@ class CIBTracer(BaseTracer):
 
 
     def m_dot(self, z, m, params=None):
+        ''' Mdot =  46.1(1 + 1.11z)E(z)(m /10^12Msun)^1.1 from the Maniyar model'''
 
         params = merge_with_defaults(params)
         c_km_s = Const._c_ / 1e3
-        
         E_z = self.halo_model.emulator.hubble_parameter(z, params=params) * c_km_s / params["H0"]
         
         return 46.1 * (1.0 + 1.11 * z) * E_z * (m / 1e12) ** 1.1
@@ -128,43 +128,25 @@ class CIBTracer(BaseTracer):
         L_gal : array
             Galaxy luminosity [Lsun] per halo
         """
+
+        # Gather all relevant parameters 
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
-        
-        # General CIB parameters
-        M_eff = params["m_eff_cib"]
-        sigma2_LM = params["sigma2_LM_cib"]
-
-        # Maniyar-specific parameters
-        etamax = params["maniyar_cib_etamax"]
-        tau = params["maniyar_cib_tau"]
-        z_c = params["maniyar_cib_zc"]
-        f_sub = params["maniyar_cib_fsub"]
-
-    
-        # Halo accretion rate and baryon fraction
-        Mdot = self.m_dot(z, m, params=params)
-        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
-    
-        # Log-normal width with redshift evolution
-        logM = jnp.log(m)
-        logMeff = jnp.log(M_eff)
+        M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = (params[k] for k in ["m_eff_cib", "sigma2_LM_cib", "maniyar_cib_etamax", "maniyar_cib_tau", "maniyar_cib_zc", "maniyar_cib_fsub"])
     
         # sigma^2 depends on whether M < M_eff or > M_eff
-        sigma2_lnM = jnp.where(
-            m < M_eff,
-            sigma2_LM,
-            (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z)),
-        )
+        sigma2_lnM = jnp.where(m < M_eff,sigma2_LM, (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z))**2,)
+
+        # Get the halo accretion rate, baryon fraction, and also take log of relevant quantities
+        Mdot = self.m_dot(z, m, params=params)
+        logM = jnp.log(m)
+        logMeff = jnp.log(M_eff)
+        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
     
-        # Log-normal efficiency
-        sfr_c = etamax * jnp.exp(- ((logM - logMeff)**2) / (2.0 * sigma2_lnM))
-    
-        # Galaxy luminosity in L_sun (includes Kennicutt constant 1e10)
+        # Get SFR_c and then use that to get SFR
+        sfr_c = eta_max * jnp.exp(- ((logM - logMeff)**2) / (2.0 * sigma2_lnM))
         sfr = 1e10 * Mdot * f_b * sfr_c
 
-        #print("z, m, m, Mdot, f_b, logM, logMeff, sigma_lnM, sfr_c, sfr =", z, m, m, Mdot, f_b, logM, logMeff, sigma2_lnM, sfr_c, sfr)
-    
         return sfr
 
     def s_nu_maniyar(self, z, nu, params=None):
@@ -177,67 +159,65 @@ class CIBTracer(BaseTracer):
 
     def l_gal(self, z, m, nu, params=None):
         params = merge_with_defaults(params)
-
-        if self.cib_model == "shang":
-      
-            # Note that Theta takes nu*(1+z) for SED instead of nu
-            L0 = params["L0_cib"]
-            Phi = self.phi(z, m, nu, params)
-            Theta = self.theta(z, m, nu, params)  
-            Sigma = self.sigma(z, m, nu, params)
+        model_idx = {"shang": 0, "maniyar": 1}.get(self.cib_model, -1)
     
-            return L0 * Phi * Sigma * Theta
-            
-
-        elif self.cib_model == "maniyar":
-            s_nu = self.s_nu_maniyar(z, nu, params=None)
-            sfr = self.sfr_maniyar(z, m, params=params)
-    
-            return 4 * jnp.pi * s_nu * sfr
-
-        else:
+        if model_idx == -1:
             raise ValueError(f"Unknown CIB model: {self.cib_model}. Please select either 'shang' or 'maniyar'")
-        
+
+        L_gal = jax.lax.switch(
+            model_idx,
+            [
+                lambda: params["L0_cib"] * self.phi(z, params=params) * self.sigma(m, params=params) * self.theta(z, nu * (1 + z), params=params),
+                lambda: 4 * jnp.pi * self.s_nu_maniyar(z, nu, params=params) * self.sfr_maniyar(z, m, params=params)
+            ])
+    
+        return L_gal
+
 
 
     def l_sat(self, z, m, nu, params=None):
         params = merge_with_defaults(params)
-        
-        # Use a small fraction of host mass or a fixed value for min subhalo mass
-        Ms_min = 1e5  # or Ms_min = 1e-4 * M_host - should eventually be a free parameter
-        ngrid = 100   # Reasonable default for integration grid
+        Ms_min = 10**11.5
+        ngrid = 100
     
-        Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
-        dlnMs = jnp.log(Ms_grid[1]/Ms_grid[0])
+        # Maniyar: upper bound is m * (1 - f_sub)
+        if self.cib_model == "maniyar":
+            f_sub = params["maniyar_cib_fsub"]
+            Ms_max = m * (1 - f_sub)
+            M_host_eff = Ms_max
+            Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
+            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
+            L_gal_I = self.l_gal(z, Ms_grid, nu, params=params)
+            L_gal_host = self.l_gal(z, M_host_eff, nu, params=params)
+            L_gal_II = L_gal_host * Ms_grid / M_host_eff
+            L_gal = jnp.minimum(L_gal_I, L_gal_II)
+            
+        else:
+            Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
+            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
+            L_gal = self.l_gal(z, Ms_grid, nu, params=params)
     
-        # Subhalo mass function per dlnMs
-        dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-    
-        # Galaxy luminosity for each subhalo mass
-        L_gal = self.l_gal(z, Ms_grid, nu, params=params)
-    
-        # Integrate over ln(Ms)
+        dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
         integrand = dN_dlnMs * L_gal
         L_sat = jnp.sum(integrand * dlnMs)
         return L_sat
-        
+
 
     def l_cen(self, z, m, nu, params=None):
-         params = merge_with_defaults(params)
 
-         M_min = params["M_min_cib"]
+        # Get required parameters
+        params = merge_with_defaults(params)
+        M_min, f_sub = params["M_min_cib"], params["maniyar_cib_fsub"]
 
-         if self.cib_model == "maniyar":
-             f_sub = params["maniyar_cib_fsub"]
-             m *= (1 - f_sub)
-         
-             
-         N_cen = jnp.where(m > M_min, 1.0, 0.0)
-
-         # Galaxy luminosity for each subhalo mass
-         L_gal = self.l_gal(z, m, nu, params=params)
-         L_cen = N_cen * L_gal
-         return L_cen
+        # For the Maniyar model, mass becomes m * (1 - f_sub); for Shang model it is unchanged
+        m = jax.lax.cond(self.cib_model == "maniyar", lambda x: x * (1 - f_sub), lambda x: x, m)
+        
+        # Get N_cen and galaxy luminosity for each subhalo mass
+        N_cen = jnp.where(m > M_min, 1.0, 0.0)
+        L_gal = self.l_gal(z, m, nu, params=params)
+    
+        L_cen = N_cen * L_gal
+        return L_cen
 
    
 
@@ -257,12 +237,13 @@ class CIBTracer(BaseTracer):
         
         h = params["H0"]/100
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h 
-        nu_rest = self.nu * (1 + z)
 
-        s_nu_factor = jnp.sqrt(1 + z) / ((1 + z) * chi**2) 
         
-        Ls = self.l_sat(z, m, nu_rest, params=params) 
-        Lc = self.l_cen(z, m, nu_rest, params=params) 
+        nu = self.nu #* (1 + z) if self.cib_model=='shang' else self.nu
+        s_nu_factor =if self.cib_model=='shang' else 1
+        
+        Ls = self.l_sat(z, m, nu, params=params) 
+        Lc = self.l_cen(z, m, nu, params=params) 
         
 
         # Compute u_m_ell from BaseTracer
@@ -277,16 +258,11 @@ class CIBTracer(BaseTracer):
         #u_m *= m_over_rho_mean
     
         moment_funcs = [
-            lambda _: 1 / h**2      / (4*jnp.pi)          * (Lc + Ls * u_m)                           * s_nu_factor        ,
+            lambda _: 1 / h**2      / (4*jnp.pi)          * (Lc + Ls * u_m)                           * s_nu_factor**1     ,
             lambda _: 1 / h**4      / (4*jnp.pi)**2       * (Ls**2 * u_m**2 + 2 * Ls * Lc * u_m)      * s_nu_factor**2     ,
         ]
 
 
-        #moment_funcs = [
-        #    lambda _: 1 / h**4      / (4*jnp.pi)          * (Lc + Ls * u_m)                                                ,
-        #    lambda _: 1 / h**8      / (4*jnp.pi)**2       * (Ls**2 * u_m**2 + 2 * Ls * Lc * u_m)                           ,
-        #]
-    
         u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
     
         return ell, u_ell

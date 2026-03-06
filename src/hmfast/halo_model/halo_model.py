@@ -482,7 +482,5 @@ class HaloModel:
     
         return cl_2h
 
-   
 
-    
     

@@ -20,6 +20,7 @@ class Const:
     _sigma_T_ = 6.6524587e-29     # Thomson cross-section in m^2
     _m_e_ = 9.1093837015e-31      # Electron mass in kg
     _m_p_ = 1.67262192369e-27     # Proton mass in kg
+    _L_sun_ = 3.828e26            # Solar luminosity in Watts (1 kg·m²/s³)
 
     # parameters entering in Stefan-Boltzmann constant sigma_B 
     _k_B_ = 1.3806504e-23

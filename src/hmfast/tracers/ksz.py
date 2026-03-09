@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import jax.scipy as jscipy
 
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
@@ -31,7 +32,7 @@ class kSZTracer(BaseTracer):
         _, _ = self.halo_model.emulator.pk_matter(1., params=None, linear=True) 
 
 
-    def nfw_density_profile(self, z, m, params=None):
+    def nfw_density_profile(self, z, m, x, params=None):
         params = merge_with_defaults(params)
 
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
@@ -42,7 +43,6 @@ class kSZTracer(BaseTracer):
         c_delta = self.halo_model.c_delta(z, m, params=params)
         r_s = r_delta / c_delta
     
-        x =  self.x 
     
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta)
     
@@ -52,7 +52,7 @@ class kSZTracer(BaseTracer):
         return rho_gas 
 
 
-    def b16_density_profile(self, z, m, params=None):
+    def b16_density_profile(self, z, m, x, params=None):
         """
         Battaglia et al. 2016 gas density profile.
         https://arxiv.org/pdf/1607.02442
@@ -75,7 +75,6 @@ class kSZTracer(BaseTracer):
             Same shape as self.x
         """
         params = merge_with_defaults(params)
-        x = self.x
         
         # Get cosmological parameters
         h = params["H0"] / 100.0
@@ -162,35 +161,81 @@ class kSZTracer(BaseTracer):
         a = 1.0 / (1.0 + z)
         mu_e = 1.14
         f_free = 1
-        prefactor =  4 * jnp.pi * r_delta**3 * a * sigma_T_over_m_p * f_free / mu_e * (1 + z)**3 / chi**2 * vrms
+        prefactor =  4 * jnp.pi * r_delta**3 * f_free / mu_e * (1 + z)**3 / chi**2 * vrms
 
         return prefactor
 
+        
 
-    def get_u_ell(self, z, m, moment=1, params=None):
+    # def get_u_ell(self, z, m, ell, moment=1, params=None):
+    #     """
+    #     Compute either the first or second moment of the kSZ power spectrum tracer u_ell.
+    #     For kSZ:
+    #         1st moment:  u_ell
+    #         2nd moment:  u_ell^2
+    #     """
+    #     params = merge_with_defaults(params)
+        
+    #     # Get prefactor and perform Hankel transform from BaseTracer 
+    #     prefactor = self.prefactor(z, m, params=params)
+    #     ell, u_ell = self.u_ell_hankel(z, m, ell, self.x, params=params)
+        
+    #     u_ell_base = prefactor[:, None] * u_ell
+    
+    #     # Select moment using JAX-safe branching
+    #     moment_funcs = [
+    #         lambda _: u_ell_base,          # moment = 1
+    #         lambda _: u_ell_base**2,       # moment = 2
+    #     ]
+    #     u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
+
+    #     return ell, u_ell
+
+        
+    def kernel(self, z, params=None):
+        # sigmaT / m_prot in (Mpc/h)**2/(Msun/h) which is required for kSZ
+        params = merge_with_defaults(params)
+        sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_ * params["H0"] / 100
+        return sigma_T_over_m_p * 1 / (1.0 + z)
+        
+
+    def get_u_ell(self, z, m, ell, moment=1, params=None):
         """
-        Compute either the first or second moment of the tSZ power spectrum tracer u_ell.
-        For tSZ:
+        Compute either the first or second moment of the kSZ power spectrum tracer u_ell.
+        For kSZ:
             1st moment:  u_ell
             2nd moment:  u_ell^2
         """
-        
         params = merge_with_defaults(params)
         
         # Get prefactor and perform Hankel transform from BaseTracer 
         prefactor = self.prefactor(z, m, params=params)
-        ell, u_ell = self.u_ell_hankel(z, m, self.x, params=params)
+        k_native, u_k_native = self.u_k_hankel(z, m, params=params)
+
+        delta = self.halo_model.delta 
+        d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * params['H0'] / 100
+        r_delta = self.halo_model.r_delta(z, m, delta, params=params) 
+        ell_delta = d_A / r_delta
+
+
+        u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[None, :]))
+        ell_native = k_native[None, :] * ell_delta[:, None] 
         
-        u_ell_base = prefactor[:, None] * u_ell
+        u_ell_base = prefactor[:, None] * u_ell_native
     
         # Select moment using JAX-safe branching
         moment_funcs = [
             lambda _: u_ell_base,          # moment = 1
             lambda _: u_ell_base**2,       # moment = 2
         ]
-    
         u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
     
-        return ell, u_ell
+        # Interpolate onto input ell for all masses
+        def interpolate_single(ell_row, u_ell_row):
+            interpolator = jscipy.interpolate.RegularGridInterpolator((ell_row,), u_ell_row, method='linear', bounds_error=False, fill_value=None)
+            return interpolator(ell)
+        u_ell_interp = jax.vmap(interpolate_single)(ell_native, u_ell)
+    
+        return ell, u_ell_interp
 
 

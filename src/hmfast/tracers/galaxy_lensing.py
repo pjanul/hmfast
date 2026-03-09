@@ -130,7 +130,7 @@ class GalaxyLensingTracer(BaseTracer):
 
     
 
-    def get_u_ell(self, z, m, moment=1, params=None):
+    def get_u_ell(self, z, m, ell, moment=1, params=None):
         """ 
         Compute either the first or second moment of the CMB lensing tracer u_ell.
         For galaxy lensing:, 
@@ -143,7 +143,9 @@ class GalaxyLensingTracer(BaseTracer):
         W = self.kernel(z, params=params) 
 
         # Compute u_m_ell from BaseTracer
-        ell, u_m = self.u_ell_analytic(z, m, params=params)
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * cparams["h"]
+        k = (ell + 0.5) / chi
+        ell, u_m = self.u_k_matter(z, m, k, params=params)
 
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] 
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
@@ -151,8 +153,8 @@ class GalaxyLensingTracer(BaseTracer):
         u_m *= m_over_rho_mean
     
         moment_funcs = [
-            lambda _:  W[:, None] * u_m,
-            lambda _: (W**2)[:, None] * u_m**2,
+            lambda _:  u_m,
+            lambda _:  u_m**2,
         ]
     
         u_ell = jax.lax.switch(moment - 1, moment_funcs, None)

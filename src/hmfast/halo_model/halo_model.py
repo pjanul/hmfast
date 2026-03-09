@@ -362,22 +362,93 @@ class HaloModel:
             raise ValueError("order must be either 1 or 2")
 
 
-    def interpolate_tracer(self, tracer, z, m, l_eval, moment=1, params = None):
-        """
-        Interpolate u_l values onto a uniform l grid for multiple m values. 
-        """
+    #def interpolate_tracer(self, tracer, z, m, l_eval, moment=1, params = None):
+    #    """
+    #    Interpolate u_l values onto a uniform l grid for multiple m values. 
+    #    """
     
-        ls, u_ls = tracer.get_u_ell(z, m, moment=moment, params=params)
+    #    ls, u_ls = tracer.get_u_ell(z, m, l_eval, moment=moment, params=params)
             
         # Interpolator function for a single m
-        def interpolate_single(l, u_l):
-            interpolator = jscipy.interpolate.RegularGridInterpolator((l,), u_l, method='linear', bounds_error=False, fill_value=None)
-            return interpolator(l_eval)
+    #    def interpolate_single(l, u_l):
+    #        interpolator = jscipy.interpolate.RegularGridInterpolator((l,), u_l, method='linear', bounds_error=False, fill_value=None)
+    #        return interpolator(l_eval)
     
         # Vectorize the interpolation across all m and interpolate
-        u_l_eval = jax.vmap(interpolate_single, in_axes=(0, 0), out_axes=0)(ls, u_ls)
+    #    u_l_eval = jax.vmap(interpolate_single, in_axes=(0, 0), out_axes=0)(ls, u_ls)
     
-        return l_eval, u_l_eval
+    #    return l_eval, u_l_eval
+
+  #      return ls, u_ls
+
+    @partial(jax.jit, static_argnums=(0, 1))
+    def p_mm_1h(self, tracer,
+                z=jnp.geomspace(0.005, 3.0, 100),
+                m=jnp.geomspace(5e10, 3.5e15, 100),
+                k=jnp.geomspace(1e-3, 10., 100),
+                params=None, 
+                kstar_damping = 0.01):
+    
+        params = merge_with_defaults(params)
+        
+    
+        # u(k|M,z)^2
+        u_k_sq = jax.vmap(lambda zp: tracer.u_k_matter(zp, m, k, params=params)[1])(z)**2                       # (nz, nm, nk)
+        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(zp, m, params=params))(z)                       # (nz, nm)
+        damping = jax.lax.cond(kstar_damping <= 0.0, lambda _: jnp.ones_like(k), lambda _: 1.0 - jnp.exp(-(k / kstar_damping) ** 2), operand=None)
+
+        # Broadcast to the correct shape and define the integrand
+        dndlnm = dndlnm[:, :, None]
+        damping = damping[None, None, :]
+        integrand = u_k_sq * dndlnm * damping
+    
+        logm = jnp.log(m)
+        dx_m = logm[1] - logm[0]
+    
+        P_1h = jnp.trapezoid(integrand, x=logm, dx=dx_m, axis=1)  # (nz, nk)
+
+       
+        return P_1h
+
+
+    @partial(jax.jit, static_argnums=(0, 1))
+    def p_mm_2h(self, tracer,
+                z=jnp.geomspace(0.005, 3.0, 100),
+                m=jnp.geomspace(5e10, 3.5e15, 100),
+                k=jnp.geomspace(1e-3, 10., 100),
+                params=None):
+        """
+        Compute the 2-halo term for the 3D matter power spectrum.
+        """
+        params = merge_with_defaults(params)
+        h = params["H0"] / 100
+    
+        # Compute mass function and bias
+        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(zp, m, params=params))(z)  # (nz, nm)
+        bias = jax.vmap(lambda zp: self.halo_bias(zp, m, params=params))(z)            # (nz, nm)
+        u_k = jax.vmap(lambda zp: tracer.u_k_matter(zp, m, k, params=params)[1])(z)   # (nz, nm, nk)
+    
+        # Integrate over mass for each z and k
+        logm = jnp.log(m)
+        dx_m = logm[1] - logm[0]
+    
+        # Mass integral for each z and k
+        integrand = dndlnm[:, :, None] * bias[:, :, None] * u_k  # (nz, nm, nk)
+        mass_integral = jnp.trapezoid(integrand, x=logm, dx=dx_m, axis=1)  # (nz, nk)
+    
+        # Square the mass integral for each z, k
+        mass_integral_sq = mass_integral**2  # (nz, nk)
+    
+        # Linear power spectrum at each z, k
+        def P_lin_for_z(z_idx):
+            ks, P_z = self.emulator.pk_matter(z[z_idx], params=params, linear=True)
+            return jnp.interp(k, ks, P_z)
+        P_lin_at_k = jax.vmap(P_lin_for_z)(jnp.arange(len(z))) * h**3  # (nz, nk)
+    
+        # 2-halo term
+        p_2h = mass_integral_sq * P_lin_at_k  # (nz, nk)
+    
+        return p_2h
 
 
     @partial(jax.jit, static_argnums=(0, 1))
@@ -393,16 +464,19 @@ class HaloModel:
         params = merge_with_defaults(params)
         
         # Vectorize u_l interpolation and mass function over z, and also compute the comoving volume element dVdzdOmega
-        u_l_squared_grid = jax.vmap(lambda zp: self.interpolate_tracer(tracer, zp, m, l, moment=2, params=params)[1])(z)
+        #u_l_squared_grid = jax.vmap(lambda zp: self.interpolate_tracer(tracer, zp, m, l, moment=2, params=params)[1])(z)
+        kernel_grid = tracer.kernel(z, params=params)
+        u_l_squared_grid = jax.vmap(lambda zp: tracer.get_u_ell(zp, m, l, moment=2, params=params)[1])(z)
         dndlnm_grid = jax.vmap(lambda zp: self.halo_mass_function(zp, m, params=params))(z)
         comov_vol = self.emulator.comoving_volume_element(z, params=params)
+        
 
         # Expand grids to align with the shape of `result`
         dndlnm_grid_expanded = dndlnm_grid[:, :, None]  # Shape becomes (100, 100, 1)
         comov_vol_expanded = comov_vol[:, None, None]  # Shape becomes (100, 1, 1)
-    
+        kernel_grid_expanded = kernel_grid[:, None, None]
         # Perform element-wise multiplication
-        integrand = u_l_squared_grid * dndlnm_grid_expanded * comov_vol_expanded  # Shape becomes (dim_z, dim_m, dim_l)
+        integrand = u_l_squared_grid * dndlnm_grid_expanded * comov_vol_expanded * kernel_grid_expanded**2 # Shape becomes (dim_z, dim_m, dim_l)
 
         # Handle 1h damping if requested (i.e. if kstar_damping is not None)
         chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z)
@@ -439,9 +513,11 @@ class HaloModel:
         h = params["H0"] / 100
     
         # Compute mass function and bias
+        kernel_grid = tracer.kernel(z, params=params)
         dndlnm_grid = jax.vmap(lambda z: self.halo_mass_function(z, m, params=params))(z)
         bias_grid = jax.vmap(lambda z: self.halo_bias(z, m, params=params))(z)
-        u_l_grid = jax.vmap(lambda z: self.interpolate_tracer(tracer, z, m, l, moment=1, params=params)[1])(z)
+        #u_l_grid = jax.vmap(lambda z: self.interpolate_tracer(tracer, z, m, l, moment=1, params=params)[1])(z)
+        u_l_grid = jax.vmap(lambda z: tracer.get_u_ell(z, m, l, moment=1, params=params)[1])(z)
         
         # Integrate over mass for each z and l
         logm_grid = jnp.log(m)
@@ -475,7 +551,7 @@ class HaloModel:
         dVdz = self.emulator.comoving_volume_element(z, params=params)  # shape (n_z,)
     
         # Multiply: all shapes now match (n_z, n_l)
-        integrand_z = mass_integral_sq * P_lin_at_k * dVdz[:, None]  # (n_z, n_l)
+        integrand_z = mass_integral_sq * P_lin_at_k * dVdz[:, None]  * kernel_grid[:, None]**2 # (n_z, n_l)
     
         # Integrate over z -> result shape (n_l,)
         cl_2h = jnp.trapezoid(integrand_z, x=z, axis=0)

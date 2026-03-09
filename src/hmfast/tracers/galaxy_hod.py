@@ -125,7 +125,7 @@ class GalaxyHODTracer(BaseTracer):
 
 
 
-    def get_u_ell(self, z, m, moment=1, params=None):
+    def get_u_ell(self, z, m, ell, moment=1, params=None):
         """ 
         Compute either the first or second moment of the galaxy HOD tracer u_ell.
         For galaxy HOD:, 
@@ -141,11 +141,13 @@ class GalaxyHODTracer(BaseTracer):
         W  = self.kernel(z, params=params)
 
         # Compute u_m_ell from BaseTracer
-        ell, u_m = self.u_ell_analytic(z, m, params=params)  
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * params["H0"]/100
+        k = (ell + 0.5) / chi
+        ell, u_m = self.u_k_matter(z, m, k, params=params)  
     
         moment_funcs = [
-            lambda _: (W/ng)[:, None] * (Nc[:, None] + Ns[:, None] * u_m),
-            lambda _: (W**2/ng**2)[:, None] * (Ns[:, None]**2 * u_m**2 + 2*Ns[:, None] * u_m),
+            lambda _: (1/ng)[:, None] * (Nc[:, None] + Ns[:, None] * u_m),
+            lambda _: (1/ng**2)[:, None] * (Ns[:, None]**2 * u_m**2 + 2*Ns[:, None] * u_m),
         ]
     
         u_ell = jax.lax.switch(moment - 1, moment_funcs, None)

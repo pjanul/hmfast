@@ -164,8 +164,8 @@ class HaloModel:
         """
         params = merge_with_defaults(params)
         
-        r_old = self.r_delta(z, m_old, delta_old, params=params)
-        r_new = self.r_delta(z, m_new, delta_new, params=params)
+        r_old = self.r_delta(m_old, z, delta_old, params=params)
+        r_new = self.r_delta(m_new, z, delta_new, params=params)
        
         
         def f_nfw(x):
@@ -175,7 +175,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=0)
-    def convert_m_delta(self, z, m, delta_old, delta_new, c_old, x0=None, max_iter=20, params=None):
+    def convert_m_delta(self, m, z, delta_old, delta_new, c_old, x0=None, max_iter=20, params=None):
         """
         Solve for m_{Δ'} given m_old, delta_old, delta_new, c_old, and redshift.
         Fully vectorized: computes all combinations of z, m, and c_old.
@@ -203,7 +203,7 @@ class HaloModel:
 
 
 
-    def r_delta(self, z, m, delta, params=None):
+    def r_delta(self, m, z, delta, params=None):
         """
         Compute the halo radius corresponding to a given mass and overdensity at redshift z.
     
@@ -240,9 +240,9 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=0)
-    def c_delta(self, z, m, params=None):
+    def c_delta(self, m, z, params=None):
         params = merge_with_defaults(params)
-        return self.concentration_relation.c_delta(self, z, m, params=params)
+        return self.concentration_relation.c_delta(self, m, z, params=params)
 
 
     def _compute_hmf_grid(self, params=None):
@@ -300,7 +300,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def halo_mass_function(self, z = jnp.geomspace(0.005, 3.0, 100), m = jnp.geomspace(5e10, 3.5e15, 100), params = None) -> jnp.ndarray:
+    def halo_mass_function(self, m = jnp.geomspace(5e10, 3.5e15, 100), z = jnp.geomspace(0.005, 3.0, 100), params = None) -> jnp.ndarray:
         """
         Compute the halo mass function.
         
@@ -326,7 +326,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=(0, 3))
-    def halo_bias(self, z = jnp.geomspace(0.005, 3.0, 100), m = jnp.geomspace(5e10, 3.5e15, 100), order=1, params = None) -> jnp.ndarray:
+    def halo_bias(self, m = jnp.geomspace(5e10, 3.5e15, 100), z = jnp.geomspace(0.005, 3.0, 100), order=1, params = None) -> jnp.ndarray:
         """
         Compute the halo bias function.
         
@@ -361,23 +361,21 @@ class HaloModel:
         else:
             raise ValueError("order must be either 1 or 2")
 
-            
-
 
     @partial(jax.jit, static_argnums=(0, 1))
     def pk_1h(self, tracer,
-                z=jnp.geomspace(0.005, 3.0, 100),
-                m=jnp.geomspace(5e10, 3.5e15, 100),
                 k=jnp.geomspace(1e-3, 10., 100),
+                m=jnp.geomspace(5e10, 3.5e15, 100),
+                z=jnp.geomspace(0.005, 3.0, 100),
                 params=None, 
                 kstar_damping = 0.01):
     
         params = merge_with_defaults(params)
-        
+        h = params["H0"] / 100
     
         # u(k|M,z)^2
-        u_k_sq = jax.vmap(lambda zp, kp: tracer.u_k(zp, m, kp, moment=2, params=params)[1])(z, k)                      
-        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(zp, m, params=params))(z)                       # (nz, nm)
+        u_k_sq = jax.vmap(lambda zp, kp: tracer.u_k(kp, m, zp, moment=2, params=params)[1])(z, k)                      
+        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(m, zp, params=params))(z)                       # (nz, nm)
         damping = jax.lax.cond(kstar_damping <= 0.0, lambda _: jnp.ones_like(k), lambda _: 1.0 - jnp.exp(-(k / kstar_damping) ** 2), operand=None)
 
         # Broadcast to the correct shape and define the integrand
@@ -396,13 +394,13 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=(0, 1))
     def cl_1h(self, tracer, 
-                       z=jnp.geomspace(0.005, 3.0, 100), 
-                       m=jnp.geomspace(5e10, 3.5e15, 100), 
                        l=jnp.geomspace(1e2, 3.5e3, 50),
+                       m=jnp.geomspace(5e10, 3.5e15, 100), 
+                       z=jnp.geomspace(0.005, 3.0, 100), 
                        params=None, 
                        kstar_damping=0.01):
         """
-        Compute the 1-halo term for cl using the 3D power spectrum p_mm_1h.
+        Compute the 1-halo term for cl using the 3D power spectrum pk_1h.
         """
         params = merge_with_defaults(params)
         h = params["H0"] / 100
@@ -412,7 +410,7 @@ class HaloModel:
         k_grid = (l[None, :] + 0.5) / chi[:, None]  # (n_z, n_l)
     
         # Compute 3D 1-halo power spectrum for each z, k
-        P_1h = self.pk_1h(tracer, z=z, m=m, k=k_grid, params=params, kstar_damping=kstar_damping)  # (n_z, n_l)
+        P_1h = self.pk_1h(tracer, k=k_grid, m=m, z=z, params=params, kstar_damping=kstar_damping*h)  # (n_z, n_l)
     
         # Compute kernel and comoving volume element
         kernel_grid = tracer.kernel(z, params=params)  # (n_z,)
@@ -423,14 +421,14 @@ class HaloModel:
         cl_1h = jnp.trapezoid(integrand, x=z, axis=0)  # (n_l,)
        
         return cl_1h
-        
+    
 
 
     @partial(jax.jit, static_argnums=(0, 1))
     def pk_2h(self, tracer, 
-              z=jnp.geomspace(0.005, 3.0, 100), 
-              m=jnp.geomspace(5e10, 3.5e15, 100), 
               k=jnp.geomspace(1e-3, 10., 100), # Expects (nz, nk) or (nk,)
+              m=jnp.geomspace(5e10, 3.5e15, 100), 
+              z=jnp.geomspace(0.005, 3.0, 100), 
               params=None):
         """
         Compute the 2-halo term for the 3D power spectrum P(k, z).
@@ -441,10 +439,10 @@ class HaloModel:
         # 1. Compute Ingredients
         # Ensure u_k is sampled at the correct physical scale. 
         # Version 2 uses: (l+0.5) / (chi * h), so we divide k by h here.
-        u_k = jax.vmap(lambda zp, kp: tracer.u_k(zp, m, kp/h, moment=1, params=params)[1])(z, k) 
+        u_k = jax.vmap(lambda zp, kp: tracer.u_k(kp/h, m, zp, moment=1, params=params)[1])(z, k) 
         
-        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(zp, m, params=params))(z) # (nz, nm)
-        bias = jax.vmap(lambda zp: self.halo_bias(zp, m, params=params))(z)           # (nz, nm)
+        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(m, zp, params=params))(z) # (nz, nm)
+        bias = jax.vmap(lambda zp: self.halo_bias(m, zp, params=params))(z)           # (nz, nm)
     
         # 2. Alignment & Integration
         # u_k shape is (nz, nk, nm) or (nz, nm) depending on tracer.u_k internals.
@@ -472,14 +470,15 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=(0, 1))
     def cl_2h(self, tracer, 
+              l=jnp.geomspace(1e2, 3.5e3, 50),
+              m=jnp.geomspace(5e10, 3.5e15, 100),
               z=jnp.geomspace(0.005, 3.0, 100), 
-              m=jnp.geomspace(5e10, 3.5e15, 100), 
-              l=jnp.geomspace(1e2, 3.5e3, 50), 
               params=None):
         """
         Compute the 2-halo term for angular Cl using the modular 3D pk_2h.
         """
         params = merge_with_defaults(params)
+        h = params["H0"] / 100
         
         # 1. Geometry: Comoving distance chi(z)
         chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
@@ -487,7 +486,7 @@ class HaloModel:
     
         # 2. Call the 3D Power Spectrum
         # This now uses the corrected pk_2h above
-        P_2h = self.pk_2h(tracer, z=z, m=m, k=k_grid, params=params) # (nz, nl)
+        P_2h = self.pk_2h(tracer, k=k_grid, m=m, z=z, params=params) # (nz, nl)
     
         # 3. Limber Integration
         kernel_grid = tracer.kernel(z, params=params)

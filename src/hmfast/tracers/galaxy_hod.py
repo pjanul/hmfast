@@ -75,7 +75,7 @@ class GalaxyHODTracer(BaseTracer):
         return  N_c * pow_term
         
 
-    def ng_bar(self, z, m, params = None):
+    def ng_bar(self, m, z, params = None):
         """
         Compute comoving galaxy number density ng(z) = ∫ dlnM [dn/dlnM] [Nc+Ns].
         halo_model: HaloModel instance
@@ -93,7 +93,7 @@ class GalaxyHODTracer(BaseTracer):
         Ntot = Nc + Ns
     
         def ng_bar_single(z_single):
-            dndlnm = self.halo_model.halo_mass_function(z_single, m, params=params)  # shape (n_m,)
+            dndlnm = self.halo_model.halo_mass_function(m, z_single, params=params)  # shape (n_m,)
             integrand = dndlnm * Ntot
             return jnp.trapezoid(integrand, x=logm)
     
@@ -125,7 +125,7 @@ class GalaxyHODTracer(BaseTracer):
 
 
 
-    def u_k(self, z, m, k, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         """ 
         Compute either the first or second moment of the galaxy HOD tracer u_ell.
         For galaxy HOD:, 
@@ -137,13 +137,13 @@ class GalaxyHODTracer(BaseTracer):
         params = merge_with_defaults(params)
         Ns = self.n_sat(m, params=params)
         Nc = self.n_cen(m, params=params)
-        ng = self.ng_bar(z, m, params=params) * (params["H0"]/100)**3
+        ng = self.ng_bar(m, z, params=params) * (params["H0"]/100)**3
         W  = self.kernel(z, params=params)
 
         # Compute u_m_ell from BaseTracer
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * params["H0"]/100
         #k = (ell + 0.5) / chi
-        _, u_m = self.u_k_matter(z, m, k, params=params)  
+        _, u_m = self.u_k_matter(k, m, z, params=params)  
     
         moment_funcs = [
             lambda _: (1/ng)[:, None] * (Nc[:, None] + Ns[:, None] * u_m),

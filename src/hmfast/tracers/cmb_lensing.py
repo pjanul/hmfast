@@ -71,7 +71,7 @@ class CMBLensingTracer(BaseTracer):
 
 
         
-    def u_k(self, z, m, k, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         """ 
         Compute either the first or second moment of the CMB lensing tracer u_ell.
         For CMB lensing:, 
@@ -86,7 +86,7 @@ class CMBLensingTracer(BaseTracer):
         # Compute u_m_ell from BaseTracer
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * cparams["h"]
        
-        ell, u_m = self.u_k_matter(z, m, k, params=params) 
+        ell, u_m = self.u_k_matter(k, m, z, params=params) 
 
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)

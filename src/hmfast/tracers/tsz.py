@@ -27,7 +27,7 @@ class tSZTracer(BaseTracer):
         self.halo_model.emulator._load_emulator("HZ")
         
 
-    def gnfw_pressure_profile(self, z, m, x, params = None):
+    def gnfw_pressure_profile(self, x, m, z, params = None):
         """
         GNFW pressure profile as a function of dimensionless scaled radius x = r/r_delta.
         """ 
@@ -36,7 +36,7 @@ class tSZTracer(BaseTracer):
     
         # Pull needed parameters
         H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0GNFW", "alphaGNFW", "betaGNFW", "gammaGNFW", "B")) 
-        c_delta = self.halo_model.c_delta(z, m, params=params) 
+        c_delta = self.halo_model.c_delta(m, z, params=params) 
         
         # Compute helper variables and the final value of Pe
         h = H0 / 100.0 
@@ -50,7 +50,7 @@ class tSZTracer(BaseTracer):
         return Pe
         
 
-    def prefactor(self, z, m, params=None):
+    def prefactor(self, m, z, params=None):
         """
         Compute tSZ prefactor.
         """
@@ -58,7 +58,7 @@ class tSZTracer(BaseTracer):
         h, B = params['H0']/100, params['B']
         delta = self.halo_model.delta
         d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.halo_model.r_delta(z, m, delta, params=params) / B**(1/3)
+        r_delta = self.halo_model.r_delta(m, z, delta, params=params) / B**(1/3)
         ell_delta = d_A / r_delta
 
         # Get electon mass in eV, Thomson cross section in cm^2, and Mpc/h in cm
@@ -81,7 +81,7 @@ class tSZTracer(BaseTracer):
         return (sigma_T / m_e) / (1+z) # Check this
     
 
-    def u_k(self, z, m, k, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         """
         Compute either the first or second moment of the tSZ power spectrum tracer u_ell.
         For tSZ:
@@ -89,19 +89,19 @@ class tSZTracer(BaseTracer):
             2nd moment:  u_k^2
         """
         params = merge_with_defaults(params)
-        prefactor = self.prefactor(z, m, params=params)
+        prefactor = self.prefactor(m, z, params=params)
     
         h, B = params['H0']/100, params['B']
         delta = self.halo_model.delta
         d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        r_delta = self.halo_model.r_delta(z, m, delta, params=params) / B**(1/3)
+        r_delta = self.halo_model.r_delta(m, z, delta, params=params) / B**(1/3)
         ell_delta = d_A / r_delta
 
         # This code currently converts k back into l via Limber to then use the l/l_delta definition, but there's probably a better solution
         chi = d_A * (1 + z)
         ell = k * chi - 0.5
     
-        k_native, u_k_native = self.u_k_hankel(z, m, params=params)
+        k_native, u_k_native = self.u_k_hankel(m, z, params=params)
     
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[None, :]))
         ell_native = k_native[None, :] * ell_delta[:, None]

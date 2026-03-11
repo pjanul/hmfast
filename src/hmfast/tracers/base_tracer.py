@@ -40,7 +40,7 @@ class BaseTracer(ABC):
         """
 
 
-    def u_k_hankel(self, z, m, k=None, params=None):
+    def u_k_hankel(self, m, z, params=None):
         """
         Hankel-transform a 3D halo/tracer profile to u_ell for halo model use.
     
@@ -66,44 +66,24 @@ class BaseTracer(ABC):
         x = self.x
 
         h = params['H0']/100
-        #delta = self.halo_model.delta 
-        #d_A = self.halo_model.emulator.angular_diameter_distance(z, params=params) * h
-        #r_delta = self.halo_model.r_delta(z, m, delta, params=params) 
-        #ell_delta = d_A / r_delta
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m(m_val):
-            profile = self.profile(z, m_val, self.x, params=params)
+            profile = self.profile(self.x, m_val, z, params=params)
             return x**0.5 * profile * W_x
             
         hankel_integrand = jax.vmap(single_m)(m)
         k_native, u_k_native = self.hankel.transform(hankel_integrand)
 
  
-       
-
-            
-        #u_ell = u_k * jnp.sqrt(jnp.pi / (2 * k[None, :]))
-        #ell = k[None, :] * ell_delta[:, None] 
-
-
-        # def interpolate_single(l, u_l):
-        #     interpolator = jscipy.interpolate.RegularGridInterpolator((l,), u_l, method='linear', bounds_error=False, fill_value=None)
-        #     return interpolator(l_eval)
-    
-        # # Vectorize the interpolation across all m and interpolate
-        # u_l_eval = jax.vmap(interpolate_single, in_axes=(0, 0), out_axes=0)(ell, u_ell)
-    
-        # return l_eval, u_l_eval
-
         return k_native, u_k_native
 
 
     
-    def u_k_matter(self, z, m, k, params=None):
+    def u_k_matter(self, k, m, z, params=None):
         """
-        Calculate u_k^m(z, M) via the analytic method using a provided array of k.
+        Calculate u^m(k, M, z) via the analytic method using a provided array of k.
 
          Parameters
         ----------
@@ -129,8 +109,8 @@ class BaseTracer(ABC):
     
         # Concentration and halo radius
         delta = self.halo_model.delta
-        c_delta = self.halo_model.c_delta(z, m, params=params)
-        r_delta = self.halo_model.r_delta(z, m, delta, params=params)
+        c_delta = self.halo_model.c_delta(m, z, params=params)
+        r_delta = self.halo_model.r_delta(m, z, delta, params=params)
         lambda_val = 1.0 #params.get("lambda_HOD", 1.0)
     
         k = jnp.atleast_1d(k)
@@ -161,8 +141,6 @@ class BaseTracer(ABC):
 
     
    
-
-
     @abstractmethod
     def kernel(self, z, params=None):
         """
@@ -171,7 +149,7 @@ class BaseTracer(ABC):
         pass 
    
     @abstractmethod
-    def u_k(self, z, m, k, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         """
         Compute the tracer's profile u_k(z,m,k). All child classes must have a version of this function implemented.
         """

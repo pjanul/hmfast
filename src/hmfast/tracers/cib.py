@@ -118,7 +118,7 @@ class CIBTracer(BaseTracer):
         return Theta
 
 
-    def m_dot(self, z, m, params=None):
+    def m_dot(self, m, z, params=None):
         ''' Mdot =  46.1(1 + 1.11z)E(z)(m /10^12Msun)^1.1 from the Maniyar model'''
 
         params = merge_with_defaults(params)
@@ -128,7 +128,7 @@ class CIBTracer(BaseTracer):
         return 46.1 * (1.0 + 1.11 * z) * E_z * (m / 1e12) ** 1.1
 
 
-    def sfr_maniyar(self, z, m, params=None):
+    def sfr_maniyar(self, m, z, params=None):
         """
         Compute Maniyar et al. CIB galaxy luminosity from halo mass and redshift.
     
@@ -147,7 +147,7 @@ class CIBTracer(BaseTracer):
         sigma2_lnM = jnp.where(m < M_eff,sigma2_LM, (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z))**2,)
 
         # Get the halo accretion rate, baryon fraction, and also take log of relevant quantities
-        Mdot = self.m_dot(z, m, params=params)
+        Mdot = self.m_dot(m, z, params=params)
         logM = jnp.log(m)
         logMeff = jnp.log(M_eff)
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
@@ -166,7 +166,7 @@ class CIBTracer(BaseTracer):
 
         
 
-    def l_gal(self, z, m, nu, params=None):
+    def l_gal(self, m, z, nu, params=None):
         params = merge_with_defaults(params)
         model_idx = {"shang": 0, "maniyar": 1}.get(self.cib_model, -1)
     
@@ -177,14 +177,14 @@ class CIBTracer(BaseTracer):
             model_idx,
             [
                 lambda: params["L0_cib"] * self.phi(z, params=params) * self.sigma(m, params=params) * self.theta(z, nu * (1 + z), params=params),
-                lambda: 4 * jnp.pi * self.s_nu_maniyar(z, nu, params=params) * self.sfr_maniyar(z, m, params=params)
+                lambda: 4 * jnp.pi * self.s_nu_maniyar(z, nu, params=params) * self.sfr_maniyar(m, z, params=params)
             ])
     
         return L_gal
 
 
 
-    def l_sat(self, z, m, nu, params=None, idx=50):
+    def l_sat(self, m, z, nu, params=None, idx=50):
         params = merge_with_defaults(params)
         Ms_min = params["M_min_cib"] #10**11.5
         ngrid = 100000
@@ -196,15 +196,15 @@ class CIBTracer(BaseTracer):
             M_host_eff = Ms_max
             Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
             dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-            SFR_I = self.l_gal(z, Ms_grid, nu, params=params)
-            SFR_II = self.l_gal(z, M_host_eff, nu, params=params) * Ms_grid / M_host_eff
+            SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
+            SFR_II = self.l_gal(M_host_eff, z, nu, params=params) * Ms_grid / M_host_eff
             L_gal = jnp.minimum(SFR_I, SFR_II)
             #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, SFR_I={SFR_I[idx]:.5e}, SFR_II={SFR_II[idx]:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
             
         else:
             Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
             dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-            L_gal = self.l_gal(z, Ms_grid, nu, params=params)
+            L_gal = self.l_gal(Ms_grid, z, nu, params=params)
             #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
     
         dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
@@ -218,7 +218,7 @@ class CIBTracer(BaseTracer):
         return L_sat
 
 
-    def l_cen(self, z, m, nu, params=None):
+    def l_cen(self, m, z, nu, params=None):
 
         # Get required parameters
         params = merge_with_defaults(params)
@@ -229,7 +229,7 @@ class CIBTracer(BaseTracer):
         
         # Get N_cen and galaxy luminosity for each subhalo mass
         N_cen = jnp.where(m > M_min, 1.0, 0.0)
-        L_gal = self.l_gal(z, m, nu, params=params)
+        L_gal = self.l_gal(m, z, nu, params=params)
     
         L_cen = N_cen * L_gal
         return L_cen
@@ -245,7 +245,7 @@ class CIBTracer(BaseTracer):
         
         return 1 / (1 + z)  * s_nu_factor
 
-    def get_u_ell(self, z, m, ell, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         """ 
         Compute either the first or second moment of the CIB tracer u_ell.
         For CIB:, 
@@ -273,16 +273,16 @@ class CIBTracer(BaseTracer):
 
         # Compute the physical mass for Ls and Lc
         m_physical = m/h
-        Ls = self.l_sat(z, m_physical, nu, params=params)
-        Lc = self.l_cen(z, m_physical, nu, params=params)
+        Ls = self.l_sat(m_physical, z, nu, params=params)
+        Lc = self.l_cen(m_physical, z, nu, params=params)
 
         Lc = jnp.atleast_1d(Lc)[:, None]
         Ls = jnp.atleast_1d(Ls)[:, None]
         
 
         # Compute u_m_ell from BaseTracer
-        k = (ell + 0.5) / chi
-        k, u_m = self.u_k_matter(z, m, k, params=params)
+        #k = (ell + 0.5) / chi
+        _, u_m = self.u_k_matter(k, m, z, params=params)
 
         Hz = self.halo_model.emulator.hubble_parameter(z, params=params)
 
@@ -296,6 +296,6 @@ class CIBTracer(BaseTracer):
 
         u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
     
-        return ell, u_ell
+        return k, u_ell
 
     

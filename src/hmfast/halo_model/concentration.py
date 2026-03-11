@@ -12,7 +12,7 @@ class ConstantConcentration:
         self.c = c
         pass
 
-    def c_delta(self, halo_model, z, m, params):
+    def c_delta(self, halo_model, m, z, params):
         return jnp.full_like(m, self.c)
 
 
@@ -26,7 +26,7 @@ class D08Concentration:
         pass
 
 
-    def c_delta(self, halo_model, z, m, params):
+    def c_delta(self, halo_model, m, z, params):
         # Probably a prettier way of doing this
         if halo_model.delta == 200 and halo_model.delta_ref == "critical":
             A, B, C, M_pivot = 5.71, -0.084, -0.47, 2e12
@@ -53,7 +53,7 @@ class B13Concentration:
         pass
 
 
-    def c_delta(self, halo_model, z, m, params):
+    def c_delta(self, halo_model, m, z, params):
         # Use the nu as defined in the B13 paper and pivot mass in Msun/h
         D = halo_model.emulator.growth_factor(z, params=params)
     
@@ -83,7 +83,7 @@ class SC14Concentration:
         pass
 
     
-    def c_delta(self, halo_model, z, m, params=None):
+    def c_delta(self, halo_model, m, z, params=None):
         # Coefficients from Eq. 1
         if halo_model.delta == 200 and halo_model.delta_ref == "critical":
             c_array = jnp.array([37.5153, -1.5093, 1.636e-2, 3.66e-4, -2.89237e-5, 5.32e-7])

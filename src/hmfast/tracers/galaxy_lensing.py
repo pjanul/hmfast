@@ -129,13 +129,13 @@ class GalaxyLensingTracer(BaseTracer):
         return W_kappa_g 
 
 
-    def u_k(self, z, m, k, moment=1, params=None):
+    def u_k(self, k, m, z, moment=1, params=None):
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         W = self.kernel(z, params=params)
     
         # z is scalar, m and ell are arrays
-        ell, u_m = self.u_k_matter(z, m, k, params=params)
+        ell, u_m = self.u_k_matter(k, m, z, params=params)
     
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)

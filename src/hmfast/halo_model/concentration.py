@@ -13,7 +13,11 @@ class ConstantConcentration:
         pass
 
     def c_delta(self, halo_model, m, z, params):
-        return jnp.full_like(m, self.c)
+
+        m = jnp.atleast_1d(m)[:, None]  # shape (Nm, 1)
+        z = jnp.atleast_1d(z)[None, :]  # shape (1, Nz)
+        
+        return jnp.full((m.shape[0], z.shape[1]), self.c)
 
 
 
@@ -27,6 +31,10 @@ class D08Concentration:
 
 
     def c_delta(self, halo_model, m, z, params):
+
+        m = jnp.atleast_1d(m)[:, None]  # shape (Nm, 1)
+        z = jnp.atleast_1d(z)[None, :]  # shape (1, Nz)
+        
         # Probably a prettier way of doing this
         if halo_model.delta == 200 and halo_model.delta_ref == "critical":
             A, B, C, M_pivot = 5.71, -0.084, -0.47, 2e12
@@ -54,6 +62,10 @@ class B13Concentration:
 
 
     def c_delta(self, halo_model, m, z, params):
+
+        m = jnp.atleast_1d(m)[:, None]  # shape (Nm, 1)
+        z = jnp.atleast_1d(z)[None, :]  # shape (1, Nz)
+        
         # Use the nu as defined in the B13 paper and pivot mass in Msun/h
         D = halo_model.emulator.growth_factor(z, params=params)
     
@@ -84,13 +96,18 @@ class SC14Concentration:
 
     
     def c_delta(self, halo_model, m, z, params=None):
+
+        m = jnp.atleast_1d(m)[:, None]  # shape (Nm, 1)
+        z = jnp.atleast_1d(z)[None, :]  # shape (1, Nz)
+        
         # Coefficients from Eq. 1
         if halo_model.delta == 200 and halo_model.delta_ref == "critical":
             c_array = jnp.array([37.5153, -1.5093, 1.636e-2, 3.66e-4, -2.89237e-5, 5.32e-7])
             logM = jnp.log10(m)
-            powers = jnp.array([logM**i for i in range(6)])
-            poly = jnp.sum(c_array[:, None] * powers, axis=0)
-            c_delta = poly * (1 + z) ** -1
+            powers = jnp.stack([logM**i for i in range(6)], axis=0)  # (6, Nm, 1)
+            c_array_reshaped = c_array[:, None, None]                 # (6, 1, 1)
+            poly = jnp.sum(c_array_reshaped * powers, axis=0)        # (Nm, 1)
+            c_delta = poly * (1 + z) ** -1                            # (Nm, Nz)
     
         else: 
             raise ValueError("The c-M relation c_SC14 is incompatible with the chosen definiton of delta. You must select from the following: '200c'.")

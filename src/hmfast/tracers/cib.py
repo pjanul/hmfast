@@ -289,13 +289,13 @@ class CIBTracer(BaseTracer):
         #u_m *= m_over_rho_mean
     
         moment_funcs = [
-            lambda _: h_factor**1        / (4*jnp.pi)          * (Lc + Ls * u_m )                               ,
-            lambda _: h_factor**2        / (4*jnp.pi)**2       * (Ls**2 * u_m**2 + 2 * Ls * Lc * u_m )          ,
+            lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                               ,
+            lambda _: h_factor**2        / (4*jnp.pi)**2       * (Ls[None, :, :]**2 * u_m**2 + 2 * Ls[None, :, :] * Lc[None, :, :] * u_m )          ,
         ]
 
 
-        u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
+        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
     
-        return k, u_ell
+        return k, u_k
 
     

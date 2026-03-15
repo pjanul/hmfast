@@ -132,10 +132,10 @@ class GalaxyLensingTracer(BaseTracer):
     def u_k(self, k, m, z, moment=1, params=None):
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
-        W = self.kernel(z, params=params)
-    
-        # z is scalar, m and ell are arrays
-        ell, u_m = self.u_k_matter(k, m, z, params=params)
+
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+
+        k, u_m = self.u_k_matter(k, m, z, params=params)
     
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
@@ -146,8 +146,8 @@ class GalaxyLensingTracer(BaseTracer):
             lambda _: u_m,
             lambda _: u_m**2,
         ]
-        u_ell = jax.lax.switch(moment - 1, moment_funcs, None)
-        return ell, u_ell
+        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
+        return k, u_k
       
   
 

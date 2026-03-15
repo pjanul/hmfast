@@ -91,14 +91,12 @@ class GalaxyHODTracer(BaseTracer):
         Nc = self.n_cen(m, params=params)
         Ns = self.n_sat(m, params=params)
         Ntot = Nc + Ns
-    
-        def ng_bar_single(z_single):
-            dndlnm = self.halo_model.halo_mass_function(m, z_single, params=params)  # shape (n_m,)
-            integrand = dndlnm * Ntot
-            return jnp.trapezoid(integrand, x=logm)
-    
-        # vectorize over z
-        return jax.vmap(ng_bar_single)(z)
+
+        # shape (N_m, N_z)
+        dndlnm = self.halo_model.halo_mass_function(m, z, params=params)
+        integrand = dndlnm * Ntot[:, None]
+
+        return jnp.trapezoid(integrand, x=logm, axis=0)
         
 
     def kernel(self, z, params=None):
@@ -138,16 +136,12 @@ class GalaxyHODTracer(BaseTracer):
         Ns = self.n_sat(m, params=params)
         Nc = self.n_cen(m, params=params)
         ng = self.ng_bar(m, z, params=params) * (params["H0"]/100)**3
-        W  = self.kernel(z, params=params)
 
-        # Compute u_m_ell from BaseTracer
-        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z) * params["H0"]/100
-        #k = (ell + 0.5) / chi
         _, u_m = self.u_k_matter(k, m, z, params=params)  
     
         moment_funcs = [
-            lambda _: (1/ng)[:, None] * (Nc[:, None] + Ns[:, None] * u_m),
-            lambda _: (1/ng**2)[:, None] * (Ns[:, None]**2 * u_m**2 + 2*Ns[:, None] * u_m),
+            lambda _: (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m),
+            lambda _: (1/ng**2) * (Ns[None, :, None]**2 * u_m**2 + 2*Ns[None, :, None] * u_m),
         ]
     
         u_k = jax.lax.switch(moment - 1, moment_funcs, None)

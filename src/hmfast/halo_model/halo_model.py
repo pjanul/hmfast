@@ -227,6 +227,9 @@ class HaloModel:
         params = merge_with_defaults(params)
         #cparams = get_all_cosmo_params(params)
 
+        m = jnp.atleast_1d(m)[:, None]  # (Nm, 1)
+        z = jnp.atleast_1d(z)[None, :]  # (1, Nz)
+
         # Define your reference density. Default is rho_crit
         rho_ref = self.emulator.critical_density(z, params=params)
 
@@ -298,174 +301,171 @@ class HaloModel:
         return ln_x, ln_M, dn_dlnM_grid, sigma_grid
 
 
-
     @partial(jax.jit, static_argnums=(0,))
-    def halo_mass_function(self, m = jnp.geomspace(5e10, 3.5e15, 100), z = jnp.geomspace(0.005, 3.0, 100), params = None) -> jnp.ndarray:
+    def halo_mass_function(self, m=jnp.geomspace(5e10, 3.5e15, 100), z=jnp.geomspace(0.005, 3.0, 100), params=None) -> jnp.ndarray:
         """
-        Compute the halo mass function.
-        
-        Parameters
-        ----------
-        z : float
-            Redshift
-        M : jnp.ndarray
-            Halo mass array [Msun/h]
-        Returns
-        -------
-        jnp.ndarray
-            Mass function dn/dlnM [h^3/Mpc^3/Msun]
+        Compute the halo mass function for arbitrary m and z shapes.
+        Returns: dn/dlnM with shape (len(z), len(m))
         """
-
-        # Compute the hmf values which sets up the interpolator
         params = merge_with_defaults(params)
-        ln_x, ln_M, dn_dlnM_grid, _ = self._compute_hmf_grid(params=params)
+        ln_x_grid, ln_M_grid, dn_dlnM_grid, _ = self._compute_hmf_grid(params=params)
 
-        _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x, ln_M), dn_dlnM_grid)
-        hmf = _hmf_interp((jnp.log(1.+z), jnp.log(m)))
-        return hmf 
-
+        # Create the interpolator
+        _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
+        
+        # Create a meshgrid for the input points
+        # indexing='ij' ensures output shape is (len(z), len(m))
+        zz, mm = jnp.meshgrid(jnp.atleast_1d(z), jnp.atleast_1d(m), indexing='ij')
+        
+        # Reshape for the interpolator: (N_points, 2)
+        pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
+        
+        return _hmf_interp(pts).T
 
     @partial(jax.jit, static_argnums=(0, 3))
-    def halo_bias(self, m = jnp.geomspace(5e10, 3.5e15, 100), z = jnp.geomspace(0.005, 3.0, 100), order=1, params = None) -> jnp.ndarray:
-        """
-        Compute the halo bias function.
-        
-        Parameters
-        ----------
-        z : float
-            Redshift
-        M : jnp.ndarray
-            Halo mass array [Msun/h]
-            
-        Returns
-        -------
-        jnp.ndarray
-            Halo bias
-        """
-
-        # Compute the sigma values which sets up the interpolator
+    def halo_bias(self, m=jnp.geomspace(5e10, 3.5e15, 100), z=jnp.geomspace(0.005, 3.0, 100), order=1, params=None) -> jnp.ndarray:
         params = merge_with_defaults(params)
-        ln_x, ln_M, _, sigma_grid = self._compute_hmf_grid(params=params)
+        
+        # Ensure inputs are at least 1D for consistent indexing
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+        
+        ln_x_grid, ln_M_grid, _, sigma_grid = self._compute_hmf_grid(params=params)
+        _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid))
+        
+        zz, mm = jnp.meshgrid(z, m, indexing='ij')
+        pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
+        sigma_M = jnp.exp(_sigma_interp(pts))
 
-        _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x, ln_M), jnp.log(sigma_grid))
-        sigma_M = jnp.exp(_sigma_interp((jnp.log(1.+z), jnp.log(m))))
-
-        # Get the delta_mean values and pass it to the bias model
+        # Handle delta values
         delta_numeric = self._delta_numeric(z, params=params)
         delta_mean = self.convert_delta_ref(z, delta_numeric, from_ref=self.delta_ref, to_ref='mean', params=params)
+        
+        # Ensure delta_mean is 1D before indexing
+        delta_mean = jnp.atleast_1d(delta_mean)
+        delta_mean_2d = delta_mean[:, None] 
+        
+        # Broadcast to (nz, nm)
+        delta_mean_broad = jnp.broadcast_to(delta_mean_2d, sigma_M.shape)
 
         if order == 1: 
-            return self.bias_model.b1_nu(sigma_M, z, delta_mean)
+            return self.bias_model.b1_nu(sigma_M, zz, delta_mean_broad).T
         elif order == 2:
-            return self.bias_model.b2_nu(sigma_M, z, delta_mean)
+            return self.bias_model.b2_nu(sigma_M, zz, delta_mean_broad).T
         else:
             raise ValueError("order must be either 1 or 2")
+            
 
-
-    @partial(jax.jit, static_argnums=(0, 1))
-    def pk_1h(self, tracer,
-                k=jnp.geomspace(1e-3, 10., 100),
-                m=jnp.geomspace(5e10, 3.5e15, 100),
-                z=jnp.geomspace(0.005, 3.0, 100),
-                params=None, 
-                kstar_damping = 0.01):
+    def pk_1h(self, tracer, k, m, z, params=None, kstar_damping=0.01):
+        # u_k: (nk, nm, nz)
+        _, u_k_sq = tracer.u_k(k, m, z, moment=2, params=params)
+        
+        # hmf: (nz, nm) -> transpose to (nm, nz) -> add k-dim: (1, nm, nz)
+        hmf = self.halo_mass_function(m, z, params=params)[None, ...]
+        
+        # Damping: (nk,) -> (nk, 1, 1)
+        # Using jnp.where avoids the boolean tracer error without needing lax.cond
+        mask = kstar_damping > 0
+        d_vals = 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2)
+        damping = jnp.where(mask, d_vals, 1.0)[:, None, None]
     
-        params = merge_with_defaults(params)
-        h = params["H0"] / 100
-    
-        # u(k|M,z)^2
-        u_k_sq = jax.vmap(lambda zp, kp: tracer.u_k(kp, m, zp, moment=2, params=params)[1])(z, k)                      
-        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(m, zp, params=params))(z)                       # (nz, nm)
-        damping = jax.lax.cond(kstar_damping <= 0.0, lambda _: jnp.ones_like(k), lambda _: 1.0 - jnp.exp(-(k / kstar_damping) ** 2), operand=None)
-
-        # Broadcast to the correct shape and define the integrand
-        dndlnm = dndlnm[:, :, None]
-        damping = damping[:, None, :]
-        integrand = u_k_sq * dndlnm * damping
-    
-        logm = jnp.log(m)
-        dx_m = logm[1] - logm[0]
-    
-        P_1h = jnp.trapezoid(integrand, x=logm, dx=dx_m, axis=1)  # (nz, nk)
-
-       
-        return P_1h
-
+        # Integrate over mass (axis 1)
+        # (nk, nm, nz) * (1, nm, nz) * (nk, 1, 1) -> (nk, nm, nz)
+        integrand = u_k_sq * hmf * damping
+        return jnp.trapezoid(integrand, x=jnp.log(m), axis=1) # Result: (nk, nz)
+        
 
     @partial(jax.jit, static_argnums=(0, 1))
     def cl_1h(self, tracer, 
-                       l=jnp.geomspace(1e2, 3.5e3, 50),
-                       m=jnp.geomspace(5e10, 3.5e15, 100), 
-                       z=jnp.geomspace(0.005, 3.0, 100), 
-                       params=None, 
-                       kstar_damping=0.01):
+              l=jnp.geomspace(1e2, 3.5e3, 50),
+              m=jnp.geomspace(5e10, 3.5e15, 100), 
+              z=jnp.geomspace(0.005, 3.0, 100), 
+              params=None, 
+              kstar_damping=0.01):
         """
-        Compute the 1-halo term for cl using the 3D power spectrum pk_1h.
+        Compute the 1-halo term for angular Cl by mapping l to k 
+        at each redshift slice within a vmap.
         """
         params = merge_with_defaults(params)
         h = params["H0"] / 100
-    
-        # Compute comoving distance for each z
-        chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h  # (n_z,)
-        k_grid = (l[None, :] + 0.5) / chi[:, None]  # (n_z, n_l)
-    
-        # Compute 3D 1-halo power spectrum for each z, k
-        P_1h = self.pk_1h(tracer, k=k_grid, m=m, z=z, params=params, kstar_damping=kstar_damping*h)  # (n_z, n_l)
-    
-        # Compute kernel and comoving volume element
-        kernel_grid = tracer.kernel(z, params=params)  # (n_z,)
-        comov_vol = self.emulator.comoving_volume_element(z, params=params)  # (n_z,)
-    
-        # Limber projection: integrate over z
-        integrand = P_1h * comov_vol[:, None] * kernel_grid[:, None]**2  # (n_z, n_l)
-        cl_1h = jnp.trapezoid(integrand, x=z, axis=0)  # (n_l,)
-       
-        return cl_1h
-    
 
+        # Define the slice function to map l -> k for a specific z
+        def get_pk_slice(zi):
+            # 1. Compute chi for this specific redshift slice
+            # Result: scalar chi_i
+            chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) * h
+            
+            # 2. Map the global l array to a local k array for this slice
+            # Result: (nl,) array
+            ki = (l + 0.5) / chi_i
+            
+            # 3. Call pk_1h with the 1D k-vector
+            # .flatten() ensures we return (nl,) even if pk_1h returns (1, nl)
+            pk = self.pk_1h(tracer, k=ki, m=m, z=jnp.atleast_1d(zi), 
+                            params=params, kstar_damping=kstar_damping)
+            return pk.flatten()
+
+        # 4. Use vmap to build the (nz, nl) power spectrum grid
+        P_1h_grid = jax.vmap(get_pk_slice)(z)
+
+        # 5. Limber Projection
+        kernel_grid = tracer.kernel(z, params=params)        # (nz,)
+        comov_vol = self.emulator.comoving_volume_element(z, params=params) # (nz,)
+
+        # Integrate over redshift (axis 0) to get (nl,)
+        # Weight P_1h_grid (nz, nl) by the kernels (nz, 1)
+        integrand = P_1h_grid * (comov_vol[:, None] * kernel_grid[:, None]**2)
+        
+        return jnp.trapezoid(integrand, x=z, axis=0)
+    
 
     @partial(jax.jit, static_argnums=(0, 1))
     def pk_2h(self, tracer, 
-              k=jnp.geomspace(1e-3, 10., 100), # Expects (nz, nk) or (nk,)
+              k=jnp.geomspace(1e-3, 10., 100), 
               m=jnp.geomspace(5e10, 3.5e15, 100), 
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None):
         """
-        Compute the 2-halo term for the 3D power spectrum P(k, z).
+        Compute the 2-halo term for the 3D power spectrum P(k, z) using 3D grids.
         """
         params = merge_with_defaults(params)
-        h = params["H0"] / 100
-    
-        # 1. Compute Ingredients
-        # Ensure u_k is sampled at the correct physical scale. 
-        # Version 2 uses: (l+0.5) / (chi * h), so we divide k by h here.
-        u_k = jax.vmap(lambda zp, kp: tracer.u_k(kp/h, m, zp, moment=1, params=params)[1])(z, k) 
+        cparams = self.emulator.get_all_cosmo_params(params)
+        h = cparams["h"]
         
-        dndlnm = jax.vmap(lambda zp: self.halo_mass_function(m, zp, params=params))(z) # (nz, nm)
-        bias = jax.vmap(lambda zp: self.halo_bias(m, zp, params=params))(z)           # (nz, nm)
-    
-        # 2. Alignment & Integration
-        # u_k shape is (nz, nk, nm) or (nz, nm) depending on tracer.u_k internals.
-        # To match Version 2, we treat u_k as (nz, nk, nm) and integrate over m (axis 1).
-        # We use [:, :, None] on dndlnm and bias to align (nz, nm, 1) with (nz, nm, nk)
-        integrand = u_k * dndlnm[:, :, None] * bias[:, :, None]
+        k = jnp.atleast_1d(k)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
         
-        logm = jnp.log(m)
-        dx_m = logm[1] - logm[0]
+        # 1. Compute u_k: (nk, nm, nz)
+        # moment=1 is required for the 2-halo term
+        _, u_k = tracer.u_k(k/h, m, z, moment=1, params=params)
         
-        # Integrate over the mass axis
-        halo_integral = jnp.trapezoid(integrand, x=logm, dx=dx_m, axis=1) # (nz, nk)
-    
-        # 3. Linear Power Spectrum Interpolation
-        def P_at_k_for_z(z_idx):
-            ks, P_z = self.emulator.pk_matter(z[z_idx], params=params, linear=True)
-            # Interpolate at the specific k-grid for this redshift slice
-            return jnp.interp(k[z_idx] if k.ndim > 1 else k, ks, P_z)
-    
-        P_lin_at_k = jax.vmap(P_at_k_for_z)(jnp.arange(z.shape[0])) * h**3 
-    
+        # 2. Get Halo Ingredients: (nz, nm)
+        dndlnm = self.halo_mass_function(m, z, params=params) 
+        bias = self.halo_bias(m, z, params=params)           
+        
+        # 3. Alignment for 3D Integration
+        # u_k is (nk, nm, nz). We need HMF and Bias as (1, nm, nz)
+        # Transpose (nz, nm) -> (nm, nz) then add k-axis
+        hmf_aligned = dndlnm[None, ...]
+        bias_aligned = bias[None, ...]
+        
+        # 4. Integrate over lnM (axis 1)
+        # (nk, nm, nz) * (1, nm, nz) * (1, nm, nz) -> (nk, nm, nz)
+        integrand = u_k * hmf_aligned * bias_aligned
+        halo_integral = jnp.trapezoid(integrand, x=jnp.log(m), axis=1) # (nk, nz)
+        
+        # 5. Linear Power Spectrum (Interp to k for each z)
+        def P_at_k_for_z(zi):
+            ks, P_z = self.emulator.pk_matter(zi, params=params, linear=True)
+            # Assuming pk_matter returns in h-units, adjust if necessary
+            return jnp.interp(k, ks, P_z) 
+        
+        # Map over z, returning (nz, nk) then Transpose to (nk, nz)
+        P_lin_at_k = jax.vmap(P_at_k_for_z)(z).T * h**3
+        
+        # Final P_2h (nk, nz)
         return P_lin_at_k * (halo_integral**2)
-
 
 
     @partial(jax.jit, static_argnums=(0, 1))
@@ -474,26 +474,28 @@ class HaloModel:
               m=jnp.geomspace(5e10, 3.5e15, 100),
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None):
-        """
-        Compute the 2-halo term for angular Cl using the modular 3D pk_2h.
-        """
+        
         params = merge_with_defaults(params)
         h = params["H0"] / 100
-        
-        # 1. Geometry: Comoving distance chi(z)
-        chi = self.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
-        k_grid = (l[None, :] + 0.5) / chi[:, None] # (nz, nl)
+
+        # Note: We only vmap over z. 'l' remains a fixed 1D array inside.
+        def get_pk_slice(zi):
+            # Calculate chi specifically for this redshift slice
+            chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) 
+            # Compute k for all ls at this zi
+            ki = (l + 0.5) / chi_i
+            # pk_2h will return a (1, nl) or (nl,) array
+            pk = self.pk_2h(tracer, k=ki, m=m, z=jnp.atleast_1d(zi), params=params) 
+            return pk.flatten()
     
-        # 2. Call the 3D Power Spectrum
-        # This now uses the corrected pk_2h above
-        P_2h = self.pk_2h(tracer, k=k_grid, m=m, z=z, params=params) # (nz, nl)
+        # This produces (nz, nl)
+        P_2h_grid = jax.vmap(get_pk_slice)(z) 
     
-        # 3. Limber Integration
         kernel_grid = tracer.kernel(z, params=params)
         comov_vol = self.emulator.comoving_volume_element(z, params=params)
     
-        # Weight P_2h by the kernels and volume element
-        integrand = P_2h * comov_vol[:, None] * (kernel_grid[:, None]**2)
+        # Align (nz, 1) weights with (nz, nl) power spectrum
+        integrand = P_2h_grid * (comov_vol[:, None] * kernel_grid[:, None]**2)
         
         return jnp.trapezoid(integrand, x=z, axis=0)
     

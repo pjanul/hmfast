@@ -69,76 +69,64 @@ class BaseTracer(ABC):
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
-        def single_m(m_val):
-            profile = self.profile(self.x, m_val, z, params=params)
-            return x**0.5 * profile * W_x
-            
-        hankel_integrand = jax.vmap(single_m)(m)
-        k_native, u_k_native = self.hankel.transform(hankel_integrand)
+        def single_m_z(m_val, z_val):
+            profile = jnp.squeeze(self.profile(x, m_val, z_val, params=params))  # remove extra axes
+            return profile * x**0.5 * W_x  # shape (Nx,)
 
+        hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
+            
+        # We need u_k_native to have shape (Nx, Nm, Nz)
+        k_native, u_k_native = self.hankel.transform(hankel_integrand)
+        u_k_native = jnp.swapaxes(u_k_native, 2, 0)
+        u_k_native = jnp.swapaxes(u_k_native, 2, 1)
  
         return k_native, u_k_native
 
 
-    
     def u_k_matter(self, k, m, z, params=None):
         """
-        Calculate u^m(k, M, z) via the analytic method using a provided array of k.
-
-         Parameters
-        ----------
-        z : float or array_like
-            Redshift(s).
-        m : float or array_like
-            Halo mass(es).
-        k : array_like
-            k values at which to evaluate u_k.
-        params : dict, optional
-            Parameter dictionary
+        Calculate u^m(k, M, z) supporting independent dimensions for k, m, and z.
         
-        Returns k, u_k_m
-        -------
-        u_k_m : array
-            Fourier-space halo profile
+        Returns u_k_m with shape (N_k, N_m, N_z).
         """
         params = merge_with_defaults(params)
-        cparams = self.halo_model.emulator.get_all_cosmo_params(params)
-    
+        
+        # 1. Ensure all inputs are 1D arrays
+        k = jnp.atleast_1d(k)
         m = jnp.atleast_1d(m)
-        h = cparams["h"]
-    
-        # Concentration and halo radius
+        z = jnp.atleast_1d(z)
+        
+        # 2. Create open meshes for broadcasting: (N_k, 1, 1), (1, N_m, 1), (1, 1, N_z)
+        # This allows every k to see every m and every z.
+        #k_mesh, m_mesh, z_mesh = jnp.ix_(k, m, z)
+        
+        # 3. Calculate halo properties
+        # Assuming halo_model functions support broadcasting/vectorization
         delta = self.halo_model.delta
         c_delta = self.halo_model.c_delta(m, z, params=params)
         r_delta = self.halo_model.r_delta(m, z, delta, params=params)
-        lambda_val = 1.0 #params.get("lambda_HOD", 1.0)
-    
-        k = jnp.atleast_1d(k)
-    
-        # Broadcast arrays
-        k_mat = k[None, :]                        # (1, N_ell)
-        r_mat = r_delta[:, None]                  # (N_m, 1)
-        c_mat = jnp.atleast_1d(c_delta)[:, None]  # (N_m, 1)
-    
-        # Si/Ci terms
-        q = k_mat * r_mat / c_mat * (1 + z)
-        q_scaled = (1 + lambda_val * c_mat) * q
+        lambda_val = 1.0 
+        
+        # 4. Analytical profile terms (all broadcasted to 3D)
+        # q shape: (N_k, N_m, N_z)
+        q = k[:, None, None] * r_delta[None, :, :] / c_delta[None, :, :] * (1 + z[None, None, :])
+        q_scaled = (1 + lambda_val * c_delta[None, :, :]) * q
+        
         Si_q, Ci_q = sici(q)
         Si_q_scaled, Ci_q_scaled = sici(q_scaled)
-    
-        # NFW normalization
+        
+        # 5. NFW normalization
         f_nfw = lambda x: 1.0 / (jnp.log1p(x) - x / (1 + x))
-        f_nfw_val = f_nfw(lambda_val * c_mat)
-    
-        # Fourier-space profile
+        f_nfw_val = f_nfw(lambda_val * c_delta)
+        f_nfw_val = f_nfw_val[None, :, :]  
+        
+        # 6. Final Fourier-space profile calculation
         u_k_m = (jnp.cos(q) * (Ci_q_scaled - Ci_q)
                    + jnp.sin(q) * (Si_q_scaled - Si_q)
-                   - jnp.sin(lambda_val * c_mat * q) / q_scaled) * f_nfw_val 
-
+                   - jnp.sin(lambda_val * c_delta[None,:,:] * q) / q_scaled) * f_nfw_val 
     
         return k, u_k_m
-
-
+    
     
    
     @abstractmethod
@@ -151,7 +139,7 @@ class BaseTracer(ABC):
     @abstractmethod
     def u_k(self, k, m, z, moment=1, params=None):
         """
-        Compute the tracer's profile u_k(z,m,k). All child classes must have a version of this function implemented.
+        Compute the tracer's profile u_k(k, m, z). All child classes must have a version of this function implemented.
         """
         pass 
 

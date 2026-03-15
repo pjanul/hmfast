@@ -122,10 +122,11 @@ class CIBTracer(BaseTracer):
         ''' Mdot =  46.1(1 + 1.11z)E(z)(m /10^12Msun)^1.1 from the Maniyar model'''
 
         params = merge_with_defaults(params)
+        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
-        E_z = self.halo_model.emulator.hubble_parameter(z, params=params) * c_km_s / params["H0"]
+        E_z = jnp.atleast_1d(self.halo_model.emulator.hubble_parameter(z, params=params)) * c_km_s / params["H0"]
         
-        return 46.1 * (1.0 + 1.11 * z) * E_z * (m / 1e12) ** 1.1
+        return 46.1 * (1.0 + 1.11 * z[None, :]) * E_z[None, :] * (m[:, None] / 1e12) ** 1.1
 
 
     def sfr_maniyar(self, m, z, params=None):
@@ -142,13 +143,14 @@ class CIBTracer(BaseTracer):
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = (params[k] for k in ["m_eff_cib", "sigma2_LM_cib", "maniyar_cib_etamax", "maniyar_cib_tau", "maniyar_cib_zc", "maniyar_cib_fsub"])
+        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # sigma^2 depends on whether M < M_eff or > M_eff
-        sigma2_lnM = jnp.where(m < M_eff,sigma2_LM, (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z))**2,)
+        sigma2_lnM = jnp.where(m[:, None] < M_eff,sigma2_LM, (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z[None, :]))**2,)
 
         # Get the halo accretion rate, baryon fraction, and also take log of relevant quantities
         Mdot = self.m_dot(m, z, params=params)
-        logM = jnp.log(m)
+        logM = jnp.log(m)[:, None]
         logMeff = jnp.log(M_eff)
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
     
@@ -169,6 +171,7 @@ class CIBTracer(BaseTracer):
     def l_gal(self, m, z, nu, params=None):
         params = merge_with_defaults(params)
         model_idx = {"shang": 0, "maniyar": 1}.get(self.cib_model, -1)
+        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         if model_idx == -1:
             raise ValueError(f"Unknown CIB model: {self.cib_model}. Please select either 'shang' or 'maniyar'")
@@ -176,53 +179,104 @@ class CIBTracer(BaseTracer):
         L_gal = jax.lax.switch(
             model_idx,
             [
-                lambda: params["L0_cib"] * self.phi(z, params=params) * self.sigma(m, params=params) * self.theta(z, nu * (1 + z), params=params),
-                lambda: 4 * jnp.pi * self.s_nu_maniyar(z, nu, params=params) * self.sfr_maniyar(m, z, params=params)
+                lambda: params["L0_cib"] *  jnp.atleast_1d(self.phi(z, params=params))[None, :] * 
+                                            jnp.atleast_1d(self.sigma(m, params=params))[:, None] * 
+                                            jnp.atleast_1d(self.theta(z, nu * (1 + z), params=params))[None, :],
+                
+                lambda: 4 * jnp.pi * self.s_nu_maniyar(z, nu, params=params)[None, :] * self.sfr_maniyar(m, z, params=params)
             ])
     
         return L_gal
 
 
 
-    def l_sat(self, m, z, nu, params=None, idx=50):
-        params = merge_with_defaults(params)
-        Ms_min = params["M_min_cib"] #10**11.5
-        ngrid = 100000
+    # def l_sat(self, m, z, nu, params=None, idx=50):
+    #     params = merge_with_defaults(params)
+    #     Ms_min = params["M_min_cib"] #10**11.5
+    #     m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+    #     ngrid = 100000
     
-        # Maniyar: upper bound is m * (1 - f_sub)
-        if self.cib_model == "maniyar":
-            f_sub = params["maniyar_cib_fsub"]
-            Ms_max = m * (1 - f_sub)
-            M_host_eff = Ms_max
-            Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
-            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-            SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
-            SFR_II = self.l_gal(M_host_eff, z, nu, params=params) * Ms_grid / M_host_eff
-            L_gal = jnp.minimum(SFR_I, SFR_II)
-            #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, SFR_I={SFR_I[idx]:.5e}, SFR_II={SFR_II[idx]:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
+    #     # Maniyar: upper bound is m * (1 - f_sub)
+    #     if self.cib_model == "maniyar":
+    #         f_sub = params["maniyar_cib_fsub"]
+    #         Ms_max = m * (1 - f_sub)
+    #         M_host_eff = Ms_max
+    #         Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
+    #         dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
+    #         SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
+    #         SFR_II = self.l_gal(M_host_eff, z, nu, params=params) * Ms_grid / M_host_eff
+    #         L_gal = jnp.minimum(SFR_I, SFR_II)
+    #         #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, SFR_I={SFR_I[idx]:.5e}, SFR_II={SFR_II[idx]:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
             
-        else:
-            Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
-            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-            L_gal = self.l_gal(Ms_grid, z, nu, params=params)
-            #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
+    #     else:
+    #         Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
+    #         dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
+    #         L_gal = self.l_gal(Ms_grid, z, nu, params=params)
+    #         #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
     
-        dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
-        integrand = dN_dlnMs * L_gal
+    #     dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
+    #     integrand = dN_dlnMs * L_gal
 
-        #print(f"integrand={integrand[idx]:.5e}")
+    #     #print(f"integrand={integrand[idx]:.5e}")
             
-        L_sat = jnp.sum(integrand * dlnMs)
-        #L_sat = jnp.trapezoid(integrand, x=jnp.log(Ms_grid))
+    #     L_sat = jnp.sum(integrand * dlnMs)
+    #     #L_sat = jnp.trapezoid(integrand, x=jnp.log(Ms_grid))
         
-        return L_sat
+    #     return L_sat
 
+    def l_sat(self, m, z, nu, params=None):
+        params = merge_with_defaults(params)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+    
+        def integrate_single_halo(m_single):
+            """Perform the subhalo integration for a single host halo mass."""
+            Ms_min = params["M_min_cib"]
+            ngrid = 200 # 100,000 is likely overkill and will slow down JIT significantly
+            
+            # Determine upper bound based on model
+            Ms_max = jax.lax.cond(
+                self.cib_model == "maniyar",
+                lambda x: x * (1 - params["maniyar_cib_fsub"]),
+                lambda x: x,
+                m_single
+            )
+    
+            # Create integration grid for this specific host mass
+            Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
+            dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
+            
+            # Subhalo mass function (Shape: ngrid,)
+            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m_single, Ms_grid)
+            
+            # Galaxy luminosity for subhalos
+            # Ms_grid is (ngrid,), z is (Nz,) -> l_gal returns (ngrid, Nz)
+            if self.cib_model == "maniyar":
+                SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
+                # SFR_II uses the host efficiency scaled by subhalo mass
+                M_host_eff = Ms_max
+                SFR_II = self.l_gal(M_host_eff, z, nu, params=params) * Ms_grid[:, None] / M_host_eff
+                L_gal_grid = jnp.minimum(SFR_I, SFR_II)
+            else:
+                L_gal_grid = self.l_gal(Ms_grid, z, nu, params=params)
+    
+            # Integrate over Ms_grid (the 0th axis of L_gal_grid)
+            # result shape: (Nz,)
+            return jnp.sum(dN_dlnMs[:, None] * L_gal_grid * dlnMs, axis=0)
+    
+        # Vectorize integrate_single_halo over the input host mass array m
+        # in_axes=(0,) means we map over the first dimension of m
+        # out_axes=0 means the results are stacked into shape (Nm, Nz)
+        L_sat_matrix = jax.vmap(integrate_single_halo, in_axes=(0,))(m)
+        
+        return L_sat_matrix
 
     def l_cen(self, m, z, nu, params=None):
 
         # Get required parameters
         params = merge_with_defaults(params)
         M_min, f_sub = params["M_min_cib"], params["maniyar_cib_fsub"]
+        m = jnp.atleast_1d(m)
 
         # For the Maniyar model, mass becomes m * (1 - f_sub); for Shang model it is unchanged
         m = jax.lax.cond(self.cib_model == "maniyar", lambda x: x * (1 - f_sub), lambda x: x, m)
@@ -231,7 +285,7 @@ class CIBTracer(BaseTracer):
         N_cen = jnp.where(m > M_min, 1.0, 0.0)
         L_gal = self.l_gal(m, z, nu, params=params)
     
-        L_cen = N_cen * L_gal
+        L_cen = N_cen[:, None] * L_gal
         return L_cen
 
     def kernel(self, z, params=None):
@@ -241,9 +295,9 @@ class CIBTracer(BaseTracer):
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h
 
         
-        s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else  1
+        s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else (1/((1+z)*chi**2))**0 # ones for maniyar
         
-        return 1 / (1 + z)  * s_nu_factor
+        return s_nu_factor
 
     def u_k(self, k, m, z, moment=1, params=None):
         """ 
@@ -261,32 +315,22 @@ class CIBTracer(BaseTracer):
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         
         h = params["H0"]/100
-        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h 
-
        
-        nu = self.nu #* (1 + z) if self.cib_model=='shang' else self.nu
-        s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else 1
-        h_factor = h**2 if self.cib_model=='shang' else 1
 
-        #L_sun_to_watts = Const._L_sun_
-        #chi_in_m = chi * Const._Mpc_over_m_
+        nu = self.nu 
+        h_factor = h**2 if self.cib_model=='shang' else 1
 
         # Compute the physical mass for Ls and Lc
         m_physical = m/h
         Ls = self.l_sat(m_physical, z, nu, params=params)
         Lc = self.l_cen(m_physical, z, nu, params=params)
 
-        Lc = jnp.atleast_1d(Lc)[:, None]
-        Ls = jnp.atleast_1d(Ls)[:, None]
         
 
         # Compute u_m_ell from BaseTracer
-        #k = (ell + 0.5) / chi
         _, u_m = self.u_k_matter(k, m, z, params=params)
 
-        Hz = self.halo_model.emulator.hubble_parameter(z, params=params)
-
-        #u_m *= m_over_rho_mean
+       
     
         moment_funcs = [
             lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                               ,

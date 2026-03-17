@@ -6,8 +6,8 @@ from .cmb_lensing import CMBLensingTracer
 from .cib import CIBTracer
 
 __all__ = [
-    "TSZTracer",
-    "KSZTracer",
+    "tSZTracer",
+    "kSZTracer",
     "GalaxyHODTracer",
     "GalaxyLensingTracer",
     "CMBLensingTracer",

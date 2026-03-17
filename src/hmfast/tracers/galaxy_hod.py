@@ -38,9 +38,24 @@ class GalaxyHODTracer(BaseTracer):
 
         if dndz is None:
             dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "normalised_dndz_cosmos_0.txt")
-            self.dndz = self.load_file_data(dndz_path)
-        else:
-            self.dndz = dndz
+            dndz = self.load_file_data(dndz_path)
+
+        self.dndz = dndz
+
+    @property
+    def dndz(self):
+        """Access the normalized dndz: tracer.dndz"""
+        return self._dndz_data
+
+    @dndz.setter
+    def dndz(self, value):
+        """
+        Intercepts any attempt to set dndz (initially or later) and forces it to be a normalized JAX array tuple.
+        """
+        z_raw = jnp.atleast_1d(jnp.array(value[0]))
+        phi_raw = jnp.atleast_1d(jnp.array(value[1]))
+        norm = jnp.trapezoid(phi_raw, x=z_raw)
+        self._dndz_data = (z_raw, phi_raw / norm)
             
 
     def load_file_data(self, dndz_path):

@@ -30,27 +30,27 @@ class GalaxyLensingTracer(BaseTracer):
     """
 
     
-    def __init__(self, halo_model, dndz=None, nz_lens=None):        
+    def __init__(self, halo_model, dndz_source=None, dndz_lens=None):        
 
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
 
-        if dndz is None:
-            dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
-            self.dndz = self.load_file_data(dndz_path)
+        if dndz_source is None:
+            dndz_source_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
+            self.dndz_source = self.load_file_data(dndz_source_path)
         else:
-            self.dndz = dndz
+            self.dndz_source = dndz_source
 
-        if nz_lens is None:
-            nz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_lens_bin1.txt")
-            self.nz_lens = self.load_file_data(dndz_path)
+        if dndz_lens is None:
+            dndz_lens_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_lens_bin1.txt")
+            self.dndz_lens = self.load_file_data(dndz_lens_path)
         else: 
-            self.nz_lens = nz_lens
+            self.dndz_lens = dndz_lens
     
-    def load_file_data(self, dndz_path):
-        data = np.loadtxt(dndz_path)
+    def load_file_data(self, path):
+        data = np.loadtxt(path)
         x = data[:, 0]
         y = data[:, 1]
         return (jnp.array(x), jnp.array(y))
@@ -59,7 +59,7 @@ class GalaxyLensingTracer(BaseTracer):
     def get_I_g(self, z, params=None):
         """
         Return I_g at requested z.
-        Uses pre-loaded dndz_data = [z, phi_prime].
+        Uses pre-loaded dndz_source_data = [z, phi_prime].
         Integrates only over sources behind the lens (z_s > z).
         """
         
@@ -68,8 +68,8 @@ class GalaxyLensingTracer(BaseTracer):
         h = params["H0"] / 100
         
         # Load source distribution and lens redshift distribution
-        z_data, phi_prime_data = self.dndz
-        z_s_data, n_s_data = self.nz_lens
+        z_data, phi_prime_data = self.dndz_source
+        z_s_data, n_s_data = self.dndz_lens
     
         # Interpolate phi_prime to z_s grid
         phi_prime_at_z_s = jnp.interp(z_s_data, z_data, phi_prime_data, left=0.0, right=0.0)

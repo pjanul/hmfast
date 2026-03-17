@@ -18,13 +18,24 @@ class tSZTracer(BaseTracer):
 
         # Set tracer parameters
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256)
-        self.hankel = HankelTransform(self.x, nu=0.5)
         self.profile = self.gnfw_pressure_profile
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, value):
+        """
+        Whenever x is modified, immediately rebuild the hankel transform object
+        """
+        self._x = value
+        self._hankel = HankelTransform(self._x, nu=0.5)
         
 
     def gnfw_pressure_profile(self, x, m, z, params=None):
@@ -86,16 +97,11 @@ class tSZTracer(BaseTracer):
 
 
     def u_k(self, k, m, z, moment=1, params=None):
+        
         params = merge_with_defaults(params)
-    
-        m = jnp.atleast_1d(m)
-        z = jnp.atleast_1d(z)
-        k = jnp.atleast_1d(k)
-        
-        Nk, Nm, Nz = len(k), len(m), len(z)
-        
         h, B = params['H0']/100, params['B']
         delta = self.halo_model.delta
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         r_delta = self.halo_model.r_delta(m, z, delta, params=params) / B**(1/3) # (Nm, Nz)
         d_A = jnp.atleast_1d(self.halo_model.emulator.angular_diameter_distance(z, params=params)) * h
@@ -108,8 +114,7 @@ class tSZTracer(BaseTracer):
         chi = d_A * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5 
         
-        # Get native Hankel transform outputs
-        # Assuming u_k_native is (Nk_native, Nm, Nz)
+        # Get native Hankel transform outputs, which may not align with the k from this function's input
         k_native, u_k_native = self.u_k_hankel(m, z, params=params)  
         
         # Calculate native u_ell and the native ell grid
@@ -120,17 +125,10 @@ class tSZTracer(BaseTracer):
         u_ell_base = prefactor[None, :, :] * u_ell_native # (Nk_native, Nm, Nz)
         u_ell_val = jax.lax.select(moment == 1, u_ell_base, u_ell_base**2)
     
-        # --- VECTORIZED INTERPOLATION ---
-        # We want to interpolate over the native k-axis (axis 0) 
-        # for every combination of m and z.
-        
+        # Interpolate over the native k-axis (axis 0) for every combination of m and z    
         def interp_at_z(ell_t, ell_n, u_n):
-            # ell_t: (Nk,), ell_n: (Nk_n,), u_n: (Nk_n,)
             return jnp.interp(ell_t, ell_n, u_n)
-    
-        # Vmap over Nz (axis 2) and Nm (axis 1)
-        # in_axes: ell_target is (Nk, Nz), so we map over axis 1
-        # ell_native and u_ell_val are (Nk_native, Nm, Nz), so we map over axis 2 then 1
+       
         vmap_interp = jax.vmap(
             jax.vmap(interp_at_z, in_axes=(None, 1, 1), out_axes=1), 
             in_axes=(1, 2, 2), out_axes=2

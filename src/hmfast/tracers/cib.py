@@ -189,41 +189,6 @@ class CIBTracer(BaseTracer):
         return L_gal
 
 
-
-    # def l_sat(self, m, z, nu, params=None, idx=50):
-    #     params = merge_with_defaults(params)
-    #     Ms_min = params["M_min_cib"] #10**11.5
-    #     m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-    #     ngrid = 100000
-    
-    #     # Maniyar: upper bound is m * (1 - f_sub)
-    #     if self.cib_model == "maniyar":
-    #         f_sub = params["maniyar_cib_fsub"]
-    #         Ms_max = m * (1 - f_sub)
-    #         M_host_eff = Ms_max
-    #         Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
-    #         dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-    #         SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
-    #         SFR_II = self.l_gal(M_host_eff, z, nu, params=params) * Ms_grid / M_host_eff
-    #         L_gal = jnp.minimum(SFR_I, SFR_II)
-    #         #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, SFR_I={SFR_I[idx]:.5e}, SFR_II={SFR_II[idx]:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
-            
-    #     else:
-    #         Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(m), ngrid)
-    #         dN_dlnMs = self.subhalo_mass_function.dndlnmu(m, Ms_grid)
-    #         L_gal = self.l_gal(Ms_grid, z, nu, params=params)
-    #         #print(f"z={z:.5e}, m={m:.5e}, Ms_grid={Ms_grid[idx]:.5e}, nu={nu:.5e}, L_gal={L_gal[idx]:.5e}, dN_dlnMs={dN_dlnMs[idx]:.5e}")
-    
-    #     dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
-    #     integrand = dN_dlnMs * L_gal
-
-    #     #print(f"integrand={integrand[idx]:.5e}")
-            
-    #     L_sat = jnp.sum(integrand * dlnMs)
-    #     #L_sat = jnp.trapezoid(integrand, x=jnp.log(Ms_grid))
-        
-    #     return L_sat
-
     def l_sat(self, m, z, nu, params=None):
         params = merge_with_defaults(params)
         m = jnp.atleast_1d(m)
@@ -310,13 +275,11 @@ class CIBTracer(BaseTracer):
         Note that  W_I_nu = a(z) * jnu_bar, so  W_I_nu / jnu_bar = a(z)
         """
        
-
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         
         h = params["H0"]/100
        
-
         nu = self.nu 
         h_factor = h**2 if self.cib_model=='shang' else 1
 
@@ -325,13 +288,10 @@ class CIBTracer(BaseTracer):
         Ls = self.l_sat(m_physical, z, nu, params=params)
         Lc = self.l_cen(m_physical, z, nu, params=params)
 
-        
-
         # Compute u_m_ell from BaseTracer
         _, u_m = self.u_k_matter(k, m, z, params=params)
 
        
-    
         moment_funcs = [
             lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                               ,
             lambda _: h_factor**2        / (4*jnp.pi)**2       * (Ls[None, :, :]**2 * u_m**2 + 2 * Ls[None, :, :] * Lc[None, :, :] * u_m )          ,

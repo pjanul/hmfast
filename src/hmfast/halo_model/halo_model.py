@@ -248,6 +248,7 @@ class HaloModel:
         return self.concentration_relation.c_delta(self, m, z, params=params)
 
 
+
     def _compute_hmf_grid(self, params=None):
         """
         Compute σ(R, z) for use in halo mass function and bias.
@@ -310,29 +311,24 @@ class HaloModel:
         params = merge_with_defaults(params)
         ln_x_grid, ln_M_grid, dn_dlnM_grid, _ = self._compute_hmf_grid(params=params)
 
-        # Create the interpolator
+        # Create the interpolator, the meshgrid, and then stack the points
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
-        
-        # Create a meshgrid for the input points
-        # indexing='ij' ensures output shape is (len(z), len(m))
-        zz, mm = jnp.meshgrid(jnp.atleast_1d(z), jnp.atleast_1d(m), indexing='ij')
-        
-        # Reshape for the interpolator: (N_points, 2)
+        mm, zz = jnp.meshgrid(jnp.atleast_1d(m), jnp.atleast_1d(z), indexing='ij')
         pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
         
-        return _hmf_interp(pts).T
+        return _hmf_interp(pts)
+        
+       
 
     @partial(jax.jit, static_argnums=(0, 3))
     def halo_bias(self, m=jnp.geomspace(5e10, 3.5e15, 100), z=jnp.geomspace(0.005, 3.0, 100), order=1, params=None) -> jnp.ndarray:
+        
         params = merge_with_defaults(params)
-        
-        # Ensure inputs are at least 1D for consistent indexing
-        m = jnp.atleast_1d(m)
-        z = jnp.atleast_1d(z)
-        
+        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         ln_x_grid, ln_M_grid, _, sigma_grid = self._compute_hmf_grid(params=params)
-        _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid))
-        
+
+        # Create the interpolator, the meshgrid, and then stack the points
+        _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid)) 
         zz, mm = jnp.meshgrid(z, m, indexing='ij')
         pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
         sigma_M = jnp.exp(_sigma_interp(pts))
@@ -356,146 +352,149 @@ class HaloModel:
             raise ValueError("order must be either 1 or 2")
             
 
-    def pk_1h(self, tracer, k, m, z, params=None, kstar_damping=0.01):
-        # u_k: (nk, nm, nz)
-        _, u_k_sq = tracer.u_k(k, m, z, moment=2, params=params)
+    @partial(jax.jit, static_argnums=(0, 1, 2))
+    def pk_1h(self, tracer1, tracer2=None, 
+              k=jnp.geomspace(1e-3, 10., 100), 
+              m=jnp.geomspace(5e10, 3.5e15, 100), 
+              z=jnp.geomspace(0.005, 3.0, 100), 
+              params=None, 
+              kstar_damping=0.01):
+
+        """
+        Compute the 1-halo term for the 3D power spectrum P(k, z).
+        """
         
-        # hmf: (nz, nm) -> transpose to (nm, nz) -> add k-dim: (1, nm, nz)
+        params = merge_with_defaults(params)
+        h = params["H0"] / 100
+        
+        # Compute the hmf (Nm, Nz) and the tracer profile u_k (Nk, Nm, Nz)
         hmf = self.halo_mass_function(m, z, params=params)[None, ...]
-        
-        # Damping: (nk,) -> (nk, 1, 1)
-        # Using jnp.where avoids the boolean tracer error without needing lax.cond
+
+        # Implement damping for the 1 halo term
         mask = kstar_damping > 0
         d_vals = 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2)
         damping = jnp.where(mask, d_vals, 1.0)[:, None, None]
-    
-        # Integrate over mass (axis 1)
-        # (nk, nm, nz) * (1, nm, nz) * (nk, 1, 1) -> (nk, nm, nz)
+
+        # Handle both auto-correlations vs cross-correlations
+        is_auto = (tracer2 is None) or (tracer1 == tracer2)
+        tracer2 = tracer1 if tracer2 is None else tracer2
+
+        if is_auto:
+            _, u_k_sq = tracer1.u_k(k/h, m, z, moment=2, params=params)
+
+        else:
+            _, u_k1 = tracer1.u_k(k/h, m, z, moment=1, params=params)
+            _, u_k2 = tracer2.u_k(k/h, m, z, moment=1, params=params)
+            u_k_sq = u_k1 * u_k2
+            
+
+        # Integrate over mass 
         integrand = u_k_sq * hmf * damping
-        return jnp.trapezoid(integrand, x=jnp.log(m), axis=1) # Result: (nk, nz)
+        return jnp.trapezoid(integrand, x=jnp.log(m), axis=1) 
         
 
-    @partial(jax.jit, static_argnums=(0, 1))
-    def cl_1h(self, tracer, 
-              l=jnp.geomspace(1e2, 3.5e3, 50),
+    @partial(jax.jit, static_argnums=(0, 1, 2))
+    def cl_1h(self, tracer1, tracer2=None, 
+              l=jnp.geomspace(1e2, 3.5e3, 50), 
               m=jnp.geomspace(5e10, 3.5e15, 100), 
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None, 
               kstar_damping=0.01):
         """
-        Compute the 1-halo term for angular Cl by mapping l to k 
-        at each redshift slice within a vmap.
+        Compute the 1-halo term for angular Cl.
         """
         params = merge_with_defaults(params)
         h = params["H0"] / 100
 
+        tracer2 = tracer1 if tracer2 is None else tracer2
+
         # Define the slice function to map l -> k for a specific z
         def get_pk_slice(zi):
-            # 1. Compute chi for this specific redshift slice
-            # Result: scalar chi_i
-            chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) * h
-            
-            # 2. Map the global l array to a local k array for this slice
-            # Result: (nl,) array
+            chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) 
             ki = (l + 0.5) / chi_i
-            
-            # 3. Call pk_1h with the 1D k-vector
-            # .flatten() ensures we return (nl,) even if pk_1h returns (1, nl)
-            pk = self.pk_1h(tracer, k=ki, m=m, z=jnp.atleast_1d(zi), 
-                            params=params, kstar_damping=kstar_damping)
+            pk = self.pk_1h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi), params=params, kstar_damping=kstar_damping)
             return pk.flatten()
 
-        # 4. Use vmap to build the (nz, nl) power spectrum grid
+        # Get the halo model pk_1h, the kernel, and the comoving volume
         P_1h_grid = jax.vmap(get_pk_slice)(z)
+        kernel1 = tracer1.kernel(z, params=params)  
+        kernel2 = tracer2.kernel(z, params=params)  
+        comov_vol = self.emulator.comoving_volume_element(z, params=params) 
 
-        # 5. Limber Projection
-        kernel_grid = tracer.kernel(z, params=params)        # (nz,)
-        comov_vol = self.emulator.comoving_volume_element(z, params=params) # (nz,)
-
-        # Integrate over redshift (axis 0) to get (nl,)
-        # Weight P_1h_grid (nz, nl) by the kernels (nz, 1)
-        integrand = P_1h_grid * (comov_vol[:, None] * kernel_grid[:, None]**2)
+        # Integrate over redshift
+        integrand = P_1h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
         
         return jnp.trapezoid(integrand, x=z, axis=0)
     
 
-    @partial(jax.jit, static_argnums=(0, 1))
-    def pk_2h(self, tracer, 
+
+    @partial(jax.jit, static_argnums=(0, 1, 2))
+    def pk_2h(self, tracer1, tracer2=None, 
               k=jnp.geomspace(1e-3, 10., 100), 
               m=jnp.geomspace(5e10, 3.5e15, 100), 
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None):
         """
-        Compute the 2-halo term for the 3D power spectrum P(k, z) using 3D grids.
+        Compute the 2-halo term for the 3D cross-power spectrum P_12(k, z).
         """
         params = merge_with_defaults(params)
         cparams = self.emulator.get_all_cosmo_params(params)
         h = cparams["h"]
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+            
+        # Shared ingredients: HMF and Bias
+        dndlnm = self.halo_mass_function(m, z, params=params)  # (Nm, Nz)
+        bias = self.halo_bias(m, z, params=params)            # (Nm, Nz)
+
+        def get_I(tracer):
+            _, uk = tracer.u_k(k/h, m, z, moment=1, params=params) # (Nk, Nm, Nz)
+            return jnp.trapezoid(uk * dndlnm[None, :, :] * bias[None, :, :], x=jnp.log(m), axis=1)
+
+        # Handle autocorrelation case
+        tracer2 = tracer1 if tracer2 is None else tracer2
+        I1 = get_I(tracer1)
+        I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
+            
+        # Linear Power Spectrum mapping
+        P_lin_at_k = jax.vmap(lambda zi: jnp.interp(k, *self.emulator.pk_matter(zi, params=params, linear=True)))(z).T * h**3
         
-        k = jnp.atleast_1d(k)
-        m = jnp.atleast_1d(m)
-        z = jnp.atleast_1d(z)
-        
-        # 1. Compute u_k: (nk, nm, nz)
-        # moment=1 is required for the 2-halo term
-        _, u_k = tracer.u_k(k/h, m, z, moment=1, params=params)
-        
-        # 2. Get Halo Ingredients: (nz, nm)
-        dndlnm = self.halo_mass_function(m, z, params=params) 
-        bias = self.halo_bias(m, z, params=params)           
-        
-        # 3. Alignment for 3D Integration
-        # u_k is (nk, nm, nz). We need HMF and Bias as (1, nm, nz)
-        # Transpose (nz, nm) -> (nm, nz) then add k-axis
-        hmf_aligned = dndlnm[None, ...]
-        bias_aligned = bias[None, ...]
-        
-        # 4. Integrate over lnM (axis 1)
-        # (nk, nm, nz) * (1, nm, nz) * (1, nm, nz) -> (nk, nm, nz)
-        integrand = u_k * hmf_aligned * bias_aligned
-        halo_integral = jnp.trapezoid(integrand, x=jnp.log(m), axis=1) # (nk, nz)
-        
-        # 5. Linear Power Spectrum (Interp to k for each z)
-        def P_at_k_for_z(zi):
-            ks, P_z = self.emulator.pk_matter(zi, params=params, linear=True)
-            # Assuming pk_matter returns in h-units, adjust if necessary
-            return jnp.interp(k, ks, P_z) 
-        
-        # Map over z, returning (nz, nk) then Transpose to (nk, nz)
-        P_lin_at_k = jax.vmap(P_at_k_for_z)(z).T * h**3
-        
-        # Final P_2h (nk, nz)
-        return P_lin_at_k * (halo_integral**2)
+        return P_lin_at_k * I1 * I2
 
 
-    @partial(jax.jit, static_argnums=(0, 1))
-    def cl_2h(self, tracer, 
+    @partial(jax.jit, static_argnums=(0, 1, 2))
+    def cl_2h(self, tracer1, tracer2=None,
               l=jnp.geomspace(1e2, 3.5e3, 50),
               m=jnp.geomspace(5e10, 3.5e15, 100),
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None):
-        
+        """
+        Compute the 2-halo term for angular cross-power spectrum Cl_12.
+        """
         params = merge_with_defaults(params)
-        h = params["H0"] / 100
+        
+        tracer2 = tracer1 if tracer2 is None else tracer2
 
-        # Note: We only vmap over z. 'l' remains a fixed 1D array inside.
+        # Define the slice function for Limber integration
         def get_pk_slice(zi):
-            # Calculate chi specifically for this redshift slice
+            # Comoving distance chi(z)
             chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) 
-            # Compute k for all ls at this zi
             ki = (l + 0.5) / chi_i
-            # pk_2h will return a (1, nl) or (nl,) array
-            pk = self.pk_2h(tracer, k=ki, m=m, z=jnp.atleast_1d(zi), params=params) 
+            # Get the 3D cross-power spectrum at this k(l, z)
+            pk = self.pk_2h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi), params=params) 
             return pk.flatten()
     
-        # This produces (nz, nl)
+        # Map over redshift to get P(k=l/chi, z)
         P_2h_grid = jax.vmap(get_pk_slice)(z) 
-    
-        kernel_grid = tracer.kernel(z, params=params)
+        
+        # Get individual kernels
+        kernel1 = tracer1.kernel(z, params=params)
+        kernel2 = tracer2.kernel(z, params=params)
+        
         comov_vol = self.emulator.comoving_volume_element(z, params=params)
     
-        # Align (nz, 1) weights with (nz, nl) power spectrum
-        integrand = P_2h_grid * (comov_vol[:, None] * kernel_grid[:, None]**2)
+        # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]
+        # We multiply kernels: kernel1 * kernel2
+        integrand = P_2h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
         
         return jnp.trapezoid(integrand, x=z, axis=0)
     

@@ -15,7 +15,7 @@ class HankelTransform:
     Reusable Hankel transform wrapper for JAX-based computation.
     """
     def __init__(self, x, nu=0.5):
-        #self._x_grid = jnp.logspace(jnp.log10(x_min), jnp.log10(x_max), num=x_npoints)
+        
         self._hankel = mcfit.Hankel(x, nu=nu, lowring=True, backend='jax')
         self._hankel_jit = jax.jit(functools.partial(self._hankel, extrap=False))
 
@@ -76,7 +76,7 @@ class BaseTracer(ABC):
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
             
         # We need u_k_native to have shape (Nx, Nm, Nz)
-        k_native, u_k_native = self.hankel.transform(hankel_integrand)
+        k_native, u_k_native = self._hankel.transform(hankel_integrand)
         u_k_native = jnp.swapaxes(u_k_native, 2, 0)
         u_k_native = jnp.swapaxes(u_k_native, 2, 1)
  
@@ -91,36 +91,28 @@ class BaseTracer(ABC):
         """
         params = merge_with_defaults(params)
         
-        # 1. Ensure all inputs are 1D arrays
-        k = jnp.atleast_1d(k)
-        m = jnp.atleast_1d(m)
-        z = jnp.atleast_1d(z)
+        # Ensure all inputs are 1D arrays
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
-        # 2. Create open meshes for broadcasting: (N_k, 1, 1), (1, N_m, 1), (1, 1, N_z)
-        # This allows every k to see every m and every z.
-        #k_mesh, m_mesh, z_mesh = jnp.ix_(k, m, z)
-        
-        # 3. Calculate halo properties
-        # Assuming halo_model functions support broadcasting/vectorization
+        # Get c_delta and r_delta
         delta = self.halo_model.delta
         c_delta = self.halo_model.c_delta(m, z, params=params)
         r_delta = self.halo_model.r_delta(m, z, delta, params=params)
         lambda_val = 1.0 
         
-        # 4. Analytical profile terms (all broadcasted to 3D)
-        # q shape: (N_k, N_m, N_z)
+        # Compute analytical profile q terms with shape: (N_k, N_m, N_z)
         q = k[:, None, None] * r_delta[None, :, :] / c_delta[None, :, :] * (1 + z[None, None, :])
         q_scaled = (1 + lambda_val * c_delta[None, :, :]) * q
         
         Si_q, Ci_q = sici(q)
         Si_q_scaled, Ci_q_scaled = sici(q_scaled)
         
-        # 5. NFW normalization
+        # NFW normalization
         f_nfw = lambda x: 1.0 / (jnp.log1p(x) - x / (1 + x))
         f_nfw_val = f_nfw(lambda_val * c_delta)
         f_nfw_val = f_nfw_val[None, :, :]  
         
-        # 6. Final Fourier-space profile calculation
+        # Fourier-space profile calculation
         u_k_m = (jnp.cos(q) * (Ci_q_scaled - Ci_q)
                    + jnp.sin(q) * (Si_q_scaled - Si_q)
                    - jnp.sin(lambda_val * c_delta[None,:,:] * q) / q_scaled) * f_nfw_val 

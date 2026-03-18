@@ -25,10 +25,10 @@ DEFAULT_PARAMS = {
 
     
     # tSZ tracer-specific parameters
-    'P0GNFW': 8.130,
-    'alphaGNFW': 1.0620,
-    'betaGNFW': 5.4807,
-    'gammaGNFW': 0.3292,
+    'P0_GNFW': 8.130,
+    'alpha_GNFW': 1.0620,
+    'beta_GNFW': 5.4807,
+    'gamma_GNFW': 0.3292,
 
     
     # HOD tracer-specific parameters
@@ -53,10 +53,10 @@ DEFAULT_PARAMS = {
     'M_min_cib': 10**11.5,
 
      # CIB tracer-specific parameters (Maniyar model)
-    'maniyar_cib_etamax': 0.4028353504978569,       # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'maniyar_cib_zc': 1.5,                          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'maniyar_cib_tau': 1.2040244128818796,          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'maniyar_cib_fsub': 0.134,                     # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/Cell_cib.py
+    'eta_max_cib': 0.4028353504978569,       # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'zc_cib': 1.5,                          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'tau_cib': 1.2040244128818796,          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    'fsub_cib': 0.134,                     # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/Cell_cib.py
   
 
     

@@ -52,7 +52,7 @@ class tSZTracer(BaseTracer):
     
         # Retrieve all required parameters and ensure all inputs are 1D  
         params = merge_with_defaults(params)
-        H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0GNFW", "alphaGNFW", "betaGNFW", "gammaGNFW", "B"))
+        H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0_GNFW", "alpha_GNFW", "beta_GNFW", "gamma_GNFW", "B"))
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z) 
        
         # Helper variables for normalization

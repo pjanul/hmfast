@@ -27,7 +27,8 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, emulator=Emulator(cosmo_model=0), delta = 200, delta_ref = "critical", mass_model = T08HaloMass(), bias_model = T10HaloBias(), concentration_relation=D08Concentration()):
+    def __init__(self, emulator=Emulator(cosmo_model=0), delta = 200, delta_ref = "critical", 
+                 mass_model = T08HaloMass(), bias_model = T10HaloBias(), concentration_relation=D08Concentration()):
         """
         Initialize the halo model.
         
@@ -250,7 +251,7 @@ class HaloModel:
 
     def counter_terms(self, m, z, params=None):
         """
-        Compute n_min, b1_min, b2_min counter terms for halo model consistency.
+        Compute n_min, b1_min, b2_min counter terms for halo model consistency (class_sz convention).
     
         Args:
             z: array-like, redshift(s)
@@ -265,16 +266,25 @@ class HaloModel:
         params = merge_with_defaults(params)
         m = jnp.atleast_1d(m)
         logm = jnp.log(m)
+        cparams = self.emulator.get_all_cosmo_params(params)
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
         # Compute dn/dlnM and bias for each z
         dn_dlnm = self.halo_mass_function(m=m, z=z, params=params)  # (Nm, Nz)
         b1 = self.halo_bias(m=m, z=z, order=1, params=params)      # (Nm, Nz)
         b2 = self.halo_bias(m=m, z=z, order=2, params=params)      # (Nm, Nz)
     
-        # Integrate over mass (axis=0) for each z
-        n_min = jnp.trapezoid(dn_dlnm, x=logm, axis=0)      # (Nz,)
-        b1_min = jnp.trapezoid(b1 * dn_dlnm, x=logm, axis=0)
-        b2_min = jnp.trapezoid(b2 * dn_dlnm, x=logm, axis=0)
+        # Compute integrals I0, I1, I2
+        I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
+        I1 = jnp.trapezoid(b1 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
+        I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
+    
+        # Apply class_sz formulas
+        m_min = m[0]
+        n_min = (1.0 - I0) * rho_mean_0 / m_min
+        b1_min = 1.0 - I1
+        b2_min = -I2
     
         return n_min, b1_min, b2_min
 

@@ -67,7 +67,7 @@ class GalaxyLensingTracer(BaseTracer):
         self._dndz_lens_data = self._normalize_dndz(value)
 
     
-    def get_I_g(self, z, params=None):
+    def I_g(self, z, params=None):
         """
         Return I_g at requested z.
         Uses pre-loaded dndz_source_data = [z, phi_prime].
@@ -127,7 +127,7 @@ class GalaxyLensingTracer(BaseTracer):
         chi_z = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h # Comoving distance in Mpc/h
         H_z = self.halo_model.emulator.hubble_parameter(z, params=params)   # Hubble parameter in km/s/Mpc
     
-        I_g = self.get_I_g(z, params=params) 
+        I_g = self.I_g(z, params=params) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (

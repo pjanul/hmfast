@@ -22,10 +22,10 @@ class GalaxyHODTracer(BaseTracer):
 
     Parameters
     ----------
-    emulator : 
-        Cosmological emulator used to compute cosmological quantities
-    x : array
-        The x array used to define the radial profile over which the tracer will be evaluated
+    halo_model : 
+        Halo model used to compute relevant quantities
+    dndz :
+        The redshift distribution of the galaxy population. This distribution will be normalized if it is not already done.
     """
 
     def __init__(self, halo_model, dndz = None):        
@@ -100,8 +100,15 @@ class GalaxyHODTracer(BaseTracer):
         # shape (N_m, N_z)
         dndlnm = self.halo_model.halo_mass_function(m, z, params=params)
         integrand = dndlnm * Ntot[:, None]
+        ng_bar = jnp.trapezoid(integrand, x=logm, axis=0)
 
-        return jnp.trapezoid(integrand, x=logm, axis=0)
+        if self.halo_model.hm_consistency:
+            n_min, _, _ = self.halo_model.counter_terms(m, z, params=params)  # (Nz,)
+            Ntot_min = Ntot[0]  # (Nz,)
+            ng_bar += n_min * Ntot_min
+
+
+        return ng_bar
         
 
     def kernel(self, z, params=None):
@@ -111,19 +118,19 @@ class GalaxyHODTracer(BaseTracer):
         """
         
         params = merge_with_defaults(params)
-        zq = jnp.atleast_1d(jnp.array(z, dtype=jnp.float64))
+        z = jnp.atleast_1d(z)
     
         # Extract precomputed phi_prime
-        z_data, phi_prime_data = self.dndz
+        z_g, phi_prime_g = self.dndz
     
         # Interpolate phi_prime to requested z
-        phi_prime_at_z = jnp.interp(zq, z_data, phi_prime_data, left=0.0, right=0.0)
+        phi_prime_g_at_z = jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
     
-        H_grid = self.halo_model.emulator.hubble_parameter(zq, params=params)  # 1/Mpc
-        chi_grid = self.halo_model.emulator.angular_diameter_distance(zq, params=params) * (1.0 + zq)  # Mpc comov
+        H_grid = self.halo_model.emulator.hubble_parameter(z, params=params)  # 1/Mpc
+        chi_grid = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1.0 + z)  # Mpc comov
 
         # Assemble W_g on the grid
-        W_g = H_grid * (phi_prime_at_z / chi_grid**2)
+        W_g = H_grid * (phi_prime_g_at_z / chi_grid**2)
         return W_g
 
 

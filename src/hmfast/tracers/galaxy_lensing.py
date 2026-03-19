@@ -22,55 +22,43 @@ class GalaxyLensingTracer(BaseTracer):
 
     Parameters
     ----------
-    emulator : 
-        Cosmological emulator used to compute cosmological quantities
-     x : array
-        The x array used to define the radial profile over which the tracer will be evaluated
+    halo_model : 
+        Halo model used to compute relevant quantities
+    dndz :
+        The redshift distribution of the galaxy population. This distribution will be normalized if it is not already done.
+     
     """
 
     
-    def __init__(self, halo_model, dndz_source=None, dndz_lens=None):        
+    def __init__(self, halo_model, dndz=None):        
 
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
 
-        if dndz_source is None:
+        if dndz is None:
             # Call _load_dndz_data from BaseTracer
-            dndz_source_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
-            self.dndz_source = self._load_dndz_data(dndz_source_path)
+            dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
+            self.dndz = self._load_dndz_data(dndz_path)
         else:
-            self.dndz_source = dndz_source
-
-        if dndz_lens is None:
-            # Call _load_dndz_data from BaseTracer
-            dndz_lens_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_lens_bin1.txt")
-            self.dndz_lens = self._load_dndz_data(dndz_lens_path)
-        else: 
-            self.dndz_lens = dndz_lens
+            self.dndz = dndz
+            
 
     @property
-    def dndz_source(self):
-        return self._dndz_source_data
+    def dndz(self):
+        return self._dndz_data
 
-    @dndz_source.setter
-    def dndz_source(self, value):
-        self._dndz_source_data = self._normalize_dndz(value)
+    @dndz.setter
+    def dndz(self, value):
+        self._dndz_data = self._normalize_dndz(value)
 
-    @property
-    def dndz_lens(self):
-        return self._dndz_lens_data
-
-    @dndz_lens.setter
-    def dndz_lens(self, value):
-        self._dndz_lens_data = self._normalize_dndz(value)
 
     
-    def I_g(self, z, params=None):
+    def I_s(self, z, params=None):
         """
-        Return I_g at requested z.
-        Uses pre-loaded dndz_source_data = [z, phi_prime].
+        Return I_s at requested z.
+        Uses pre-loaded dndz_data = [z, phi_prime].
         Integrates only over sources behind the lens (z_s > z).
         """
         
@@ -78,16 +66,12 @@ class GalaxyLensingTracer(BaseTracer):
         z = jnp.atleast_1d(z)
         h = params["H0"] / 100
         
-        # Load source distribution and lens redshift distribution
-        z_data, phi_prime_data = self.dndz_source
-        z_s_data, n_s_data = self.dndz_lens
-    
-        # Interpolate phi_prime to z_s grid
-        phi_prime_at_z_s = jnp.interp(z_s_data, z_data, phi_prime_data, left=0.0, right=0.0)
-    
+        # Load source distribution       
+        z_s, phi_prime_s = self.dndz
+        
         # Angular distances
-        chi_z_s = self.halo_model.emulator.angular_diameter_distance(z_s_data, params=params) * (1 + z_s_data) * h
-        chi_z = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h
+        chi_z_s = self.halo_model.emulator.angular_diameter_distance(z_s, params=params) * (1 + z_s) 
+        chi_z = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
     
         # Reshape for broadcasting
         chi_z_s = chi_z_s[:, None]  # (N_s, 1)
@@ -97,13 +81,13 @@ class GalaxyLensingTracer(BaseTracer):
         chi_diff = (chi_z_s - chi_z) / chi_z_s
     
         # Mask: only include sources behind the lens
-        mask = (z_s_data[:, None] > z[None, :])  # (N_s, N_z)
+        mask = (z_s[:, None] > z[None, :])  # (N_s, N_z)
         chi_diff_masked = chi_diff * mask
     
         # Integrate over z_s using trapezoid
-        I_g = jnp.trapezoid(phi_prime_at_z_s[:, None] * chi_diff_masked, x=z_s_data, axis=0)
+        I_s = jnp.trapezoid(phi_prime_s[:, None] * chi_diff_masked, x=z_s, axis=0)
     
-        return I_g
+        return I_s
 
 
 
@@ -127,14 +111,14 @@ class GalaxyLensingTracer(BaseTracer):
         chi_z = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h # Comoving distance in Mpc/h
         H_z = self.halo_model.emulator.hubble_parameter(z, params=params)   # Hubble parameter in km/s/Mpc
     
-        I_g = self.I_g(z, params=params) 
+        I_s = self.I_s(z, params=params) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (
             (3.0 / 2.0) * Omega_m * 
             (H0/c_km_s)**2 / h**2 *
             (1 + z) / chi_z  *
-            I_g 
+            I_s 
         ) 
     
         return W_kappa_g 

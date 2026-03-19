@@ -27,7 +27,7 @@ class HaloModel:
     with automatic differentiation capabilities.
     """
     
-    def __init__(self, emulator=Emulator(cosmo_model=0), delta = 200, delta_ref = "critical", 
+    def __init__(self, emulator=Emulator(cosmo_model=0), delta = 200, delta_ref = "critical", hm_consistency=True,
                  mass_model = T08HaloMass(), bias_model = T10HaloBias(), concentration_relation=D08Concentration()):
         """
         Initialize the halo model.
@@ -60,6 +60,8 @@ class HaloModel:
         self._delta_ref = None
         self.delta_ref = delta_ref
         self.delta = delta
+
+        self.hm_consistency = hm_consistency
 
 
         # Create TophatVar instance once to instantiate it
@@ -248,10 +250,11 @@ class HaloModel:
         params = merge_with_defaults(params)
         return self.concentration_relation.c_delta(self, m, z, params=params)
 
-
+    
+    @partial(jax.jit, static_argnums=0)
     def counter_terms(self, m, z, params=None):
         """
-        Compute n_min, b1_min, b2_min counter terms for halo model consistency (class_sz convention).
+        Compute n_min, b1_min, b2_min counter terms for halo model consistency.
     
         Args:
             z: array-like, redshift(s)
@@ -267,7 +270,7 @@ class HaloModel:
         m = jnp.atleast_1d(m)
         logm = jnp.log(m)
         cparams = self.emulator.get_all_cosmo_params(params)
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]   # Omega0_m without neutrinos
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
         # Compute dn/dlnM and bias for each z
@@ -281,14 +284,14 @@ class HaloModel:
         I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
     
         # Apply class_sz formulas
-        m_min = m[0]
-        n_min = (1.0 - I0) * rho_mean_0 / m_min
-        b1_min = 1.0 - I1
-        b2_min = -I2
+        m_min =  m[0]
+        n_min =  (1.0 - I0) * rho_mean_0 / m_min
+        b1_min = (1.0 - I1) * rho_mean_0 / m_min / n_min
+        b2_min = -I2 * rho_mean_0 / m_min / n_min
     
         return n_min, b1_min, b2_min
 
-
+    @partial(jax.jit, static_argnums=0)
     def _compute_hmf_grid(self, params=None):
         """
         Compute σ(R, z) for use in halo mass function and bias.
@@ -410,11 +413,6 @@ class HaloModel:
         # Compute the hmf (Nm, Nz) and the tracer profile u_k (Nk, Nm, Nz)
         hmf = self.halo_mass_function(m, z, params=params)[None, ...]
 
-        # Implement damping for the 1 halo term
-        mask = kstar_damping > 0
-        d_vals = 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2)
-        damping = jnp.where(mask, d_vals, 1.0)[:, None, None]
-
         # Handle both auto-correlations vs cross-correlations
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
         tracer2 = tracer1 if tracer2 is None else tracer2
@@ -426,11 +424,8 @@ class HaloModel:
             sat_term1, cen_term1 = tracer1.sat_and_cen_contribution(k/h, m, z, params=params)
             sat_term2, cen_term2 = tracer2.sat_and_cen_contribution(k/h, m, z, params=params)
 
-            u_k_sq =  sat_term1 * sat_term2   +  \
-                      sat_term1 * cen_term2   +  \
-                      sat_term2 * cen_term1
+            u_k_sq =  sat_term1 * sat_term2   +  sat_term1 * cen_term2   +  sat_term2 * cen_term1
 
-        
         else:
             _, u_k1 = tracer1.u_k(k/h, m, z, moment=1, params=params)
             _, u_k2 = tracer2.u_k(k/h, m, z, moment=1, params=params)
@@ -438,8 +433,26 @@ class HaloModel:
             
 
         # Integrate over mass 
-        integrand = u_k_sq * hmf * damping
-        return jnp.trapezoid(integrand, x=jnp.log(m), axis=1) 
+        integrand = u_k_sq * hmf #* damping
+
+        pk1h = jnp.trapezoid(integrand, x=jnp.log(m), axis=1)
+
+        # Add counter term for consistency
+        if self.hm_consistency:
+            N_min, *_ = self.counter_terms(m, z, params=params)
+            #u_k at m_min (lowest mass in grid)
+            u_k_min = u_k_sq[:, 0, :]  # shape: (Nk, Nz)
+            pk1h += N_min * u_k_min
+
+
+        # Implement damping for the 1 halo term
+        mask = kstar_damping > 0
+        d_vals = 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2)
+        damping = jnp.where(mask, d_vals, 1.0)[:, None]
+
+        return pk1h * damping
+        
+       
         
 
     @partial(jax.jit, static_argnums=(0, 1, 2))
@@ -496,8 +509,15 @@ class HaloModel:
         bias = self.halo_bias(m, z, params=params)            # (Nm, Nz)
 
         def get_I(tracer):
-            _, uk = tracer.u_k(k/h, m, z, moment=1, params=params) # (Nk, Nm, Nz)
-            return jnp.trapezoid(uk * dndlnm[None, :, :] * bias[None, :, :], x=jnp.log(m), axis=1)
+            _, uk = tracer.u_k(k/h, m, z, moment=1, params=params)  # (Nk, Nm, Nz)
+            integral = jnp.trapezoid(uk * dndlnm[None, :, :] * bias[None, :, :], x=jnp.log(m), axis=1)
+            
+            if self.hm_consistency:
+                n_min, b1_min, _ = self.counter_terms(m, z, params=params)  # (Nz,)
+                correction = b1_min[None, :] * n_min[None, :] * uk[:, 0, :]  # uk[:, 0, :] is uk at m_min
+                integral += correction
+            
+            return integral
 
         # Handle autocorrelation case
         tracer2 = tracer1 if tracer2 is None else tracer2

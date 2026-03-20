@@ -85,7 +85,7 @@ class GalaxyHODTracer(BaseTracer):
         Compute comoving galaxy number density ng(z) = ∫ dlnM [dn/dlnM] [Nc+Ns].
         halo_model: HaloModel instance
         tracer: GalaxyHODTracer instance (provides HOD via helper funcs)
-        z: scalar redshift
+        z: redshift
         params: parameter dict 
         """
         
@@ -102,10 +102,8 @@ class GalaxyHODTracer(BaseTracer):
         integrand = dndlnm * Ntot[:, None]
         ng_bar = jnp.trapezoid(integrand, x=logm, axis=0)
 
-        if self.halo_model.hm_consistency:
-            n_min, _, _ = self.halo_model.counter_terms(m, z, params=params)  # (Nz,)
-            Ntot_min = Ntot[0]  # (Nz,)
-            ng_bar += n_min * Ntot_min
+        # Add the halo model consistency counter terms if hm_consistency is set to True, otherwise do not change anything
+        ng_bar = jax.lax.cond(self.halo_model.hm_consistency, lambda x: x + self.halo_model.counter_terms(m, z, params=params)[0] * Ntot[0], lambda x: x, ng_bar)
 
 
         return ng_bar

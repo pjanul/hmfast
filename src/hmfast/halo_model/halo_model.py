@@ -283,7 +283,7 @@ class HaloModel:
         I1 = jnp.trapezoid(b1 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
         I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
     
-        # Apply class_sz formulas
+        # Apply formulas
         m_min =  m[0]
         n_min =  (1.0 - I0) * rho_mean_0 / m_min
         b1_min = (1.0 - I1) * rho_mean_0 / m_min / n_min
@@ -291,6 +291,7 @@ class HaloModel:
     
         return n_min, b1_min, b2_min
 
+        
     @partial(jax.jit, static_argnums=0)
     def _compute_hmf_grid(self, params=None):
         """
@@ -393,7 +394,7 @@ class HaloModel:
             return self.bias_model.b2_nu(sigma_M, zz, delta_mean_broad).T
         else:
             raise ValueError("order must be either 1 or 2")
-            
+    
 
     @partial(jax.jit, static_argnums=(0, 1, 2))
     def pk_1h(self, tracer1, tracer2=None, 
@@ -402,56 +403,57 @@ class HaloModel:
               z=jnp.geomspace(0.005, 3.0, 100), 
               params=None, 
               kstar_damping=0.01):
-
-        """
-        Compute the 1-halo term for the 3D power spectrum P(k, z).
-        """
-        
+    
         params = merge_with_defaults(params)
         h = params["H0"] / 100
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
-        # Compute the hmf (Nm, Nz) and the tracer profile u_k (Nk, Nm, Nz)
-        hmf = self.halo_mass_function(m, z, params=params)[None, ...]
-
-        # Handle both auto-correlations vs cross-correlations
+        # Weights and Setup
+        logm = jnp.log(m)
+        dm = jnp.diff(logm)
+        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        
+        dndlnm = self.halo_mass_function(m, z, params=params)
+        total_weights = dndlnm * w[:, None] # (Nm, Nz)
+    
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
         tracer2 = tracer1 if tracer2 is None else tracer2
-
-        if is_same_tracer:
-            _, u_k_sq = tracer1.u_k(k/h, m, z, moment=2, params=params)
-
-        elif tracer1.has_central_contribution and tracer2.has_central_contribution:
-            sat_term1, cen_term1 = tracer1.sat_and_cen_contribution(k/h, m, z, params=params)
-            sat_term2, cen_term2 = tracer2.sat_and_cen_contribution(k/h, m, z, params=params)
-
-            u_k_sq =  sat_term1 * sat_term2   +  sat_term1 * cen_term2   +  sat_term2 * cen_term1
-
-        else:
-            _, u_k1 = tracer1.u_k(k/h, m, z, moment=1, params=params)
-            _, u_k2 = tracer2.u_k(k/h, m, z, moment=1, params=params)
-            u_k_sq = u_k1 * u_k2
-            
-
-        # Integrate over mass 
-        integrand = u_k_sq * hmf #* damping
-
-        pk1h = jnp.trapezoid(integrand, x=jnp.log(m), axis=1)
-
-        # Add counter term for consistency
-        if self.hm_consistency:
-            N_min, *_ = self.counter_terms(m, z, params=params)
-            #u_k at m_min (lowest mass in grid)
-            u_k_min = u_k_sq[:, 0, :]  # shape: (Nk, Nz)
-            pk1h += N_min * u_k_min
-
-
-        # Implement damping for the 1 halo term
+    
+        # Process a single mass bin at a time and extract the uk^2 at the lowest mass for the halo model consistency term
+        def process_bin(i):
+            # We need the profiles for index 'i' while squaring uk if the user is doing an autocorrelation
+            if is_same_tracer:
+                _, uk_sq_full = tracer1.u_k(k/h, m, z, moment=2, params=params)
+                uk_sq_row = uk_sq_full[:, i, :]
+            elif tracer1.has_central_contribution and tracer2.has_central_contribution:
+                s1, c1 = tracer1.sat_and_cen_contribution(k/h, m, z, params=params)
+                s2, c2 = tracer2.sat_and_cen_contribution(k/h, m, z, params=params)
+                # Pull only row i
+                uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
+            else:
+                _, u1 = tracer1.u_k(k/h, m, z, moment=1, params=params)
+                _, u2 = tracer2.u_k(k/h, m, z, moment=1, params=params)
+                uk_sq_row = u1[:, i, :] * u2[:, i, :]
+    
+            return uk_sq_row * total_weights[i], uk_sq_row
+    
+        # vmap through the mass bins
+        integrand_rows, all_sq_profiles = jax.vmap(process_bin)(jnp.arange(len(m)))
+    
+        pk1h = jnp.sum(integrand_rows, axis=0)
+    
+        # Apply halo model consistency correction: n_min * uk_sq_min 
+        uk_sq_min = all_sq_profiles[0] 
+        n_min, _, _ = self.counter_terms(m, z, params=params)
+        correction = n_min[None, :] * uk_sq_min
+        pk1h = pk1h + self.hm_consistency * correction
+    
+        # Apply damping
         mask = kstar_damping > 0
-        d_vals = 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2)
-        damping = jnp.where(mask, d_vals, 1.0)[:, None]
-
-        return pk1h * damping
-        
+        damping = jnp.where(mask, 1.0 - jnp.exp(-(k / jnp.where(mask, kstar_damping, 1.0))**2), 1.0)
+    
+        return pk1h * damping[:, None]
+            
        
         
 
@@ -492,42 +494,50 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=(0, 1, 2))
     def pk_2h(self, tracer1, tracer2=None, 
-              k=jnp.geomspace(1e-3, 10., 100), 
-              m=jnp.geomspace(5e10, 3.5e15, 100), 
-              z=jnp.geomspace(0.005, 3.0, 100), 
-              params=None):
-        """
-        Compute the 2-halo term for the 3D cross-power spectrum P_12(k, z).
-        """
+                k=jnp.geomspace(1e-3, 10., 100), 
+                m=jnp.geomspace(5e10, 3.5e15, 100), 
+                z=jnp.geomspace(0.005, 3.0, 100), 
+                params=None):
+        
         params = merge_with_defaults(params)
         cparams = self.emulator.get_all_cosmo_params(params)
-        h = cparams["h"]
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-            
-        # Shared ingredients: HMF and Bias
-        dndlnm = self.halo_mass_function(m, z, params=params)  # (Nm, Nz)
-        bias = self.halo_bias(m, z, params=params)            # (Nm, Nz)
-
-        def get_I(tracer):
-            _, uk = tracer.u_k(k/h, m, z, moment=1, params=params)  # (Nk, Nm, Nz)
-            integral = jnp.trapezoid(uk * dndlnm[None, :, :] * bias[None, :, :], x=jnp.log(m), axis=1)
-            
-            if self.hm_consistency:
-                n_min, b1_min, _ = self.counter_terms(m, z, params=params)  # (Nz,)
-                correction = b1_min[None, :] * n_min[None, :] * uk[:, 0, :]  # uk[:, 0, :] is uk at m_min
-                integral += correction
-            
-            return integral
-
-        # Handle autocorrelation case
+        h, k, m, z = cparams["h"], jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         tracer2 = tracer1 if tracer2 is None else tracer2
+    
+        # Weights and Ingredients
+        logm = jnp.log(m)
+        dm = jnp.diff(logm)
+        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+
+        # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
+        dndlnm = self.halo_mass_function(m, z, params=params)
+        bias = self.halo_bias(m, z, params=params)
+        total_weights = dndlnm * bias * w[:, None]
+    
+        def get_I(tracer):
+            # This function processes a single index 'i' of the mass axis
+            def process_bin(i):
+                _, uk_full = tracer.u_k(k/h, m, z, moment=1, params=params)
+                uk_slice = uk_full[:, i, :] 
+                return uk_slice * total_weights[i], uk_slice
+    
+            # Vmap over the indices 0...Nm-1, then integrate and pluck index 0 for hm consistency
+            integrand_rows, all_profiles = jax.vmap(process_bin)(jnp.arange(len(m)))
+            integral = jnp.sum(integrand_rows, axis=0)
+            u_k_min = all_profiles[0] # vmap output is (Nm, Nk, Nz)
+    
+            n_min, b1_min, _ = self.counter_terms(m, z, params=params)
+            correction = b1_min[None, :] * n_min[None, :] * u_k_min
+            
+            return integral + self.hm_consistency * correction
+    
+        # Final Power Spectrum
         I1 = get_I(tracer1)
         I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
-            
-        # Linear Power Spectrum mapping
-        P_lin_at_k = jax.vmap(lambda zi: jnp.interp(k, *self.emulator.pk_matter(zi, params=params, linear=True)))(z).T * h**3
         
-        return P_lin_at_k * I1 * I2
+        P_lin = jax.vmap(lambda zi: jnp.interp(k, *self.emulator.pk_matter(zi, params=params, linear=True)))(z).T * h**3
+        
+        return P_lin * I1 * I2
 
 
     @partial(jax.jit, static_argnums=(0, 1, 2))
@@ -545,12 +555,10 @@ class HaloModel:
 
         # Define the slice function for Limber integration
         def get_pk_slice(zi):
-            # Comoving distance chi(z)
+            # Map l to k using the Limber approximation and then get the pk_2h  
             chi_i = self.emulator.angular_diameter_distance(zi, params=params) * (1 + zi) 
             ki = (l + 0.5) / chi_i
-            # Get the 3D cross-power spectrum at this k(l, z)
-            pk = self.pk_2h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi), params=params) 
-            return pk.flatten()
+            return self.pk_2h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi), params=params).flatten()
     
         # Map over redshift to get P(k=l/chi, z)
         P_2h_grid = jax.vmap(get_pk_slice)(z) 
@@ -562,7 +570,6 @@ class HaloModel:
         comov_vol = self.emulator.comoving_volume_element(z, params=params)
     
         # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]
-        # We multiply kernels: kernel1 * kernel2
         integrand = P_2h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
         
         return jnp.trapezoid(integrand, x=z, axis=0)

@@ -147,7 +147,7 @@ class CIBTracer(BaseTracer):
         # Gather all relevant parameters 
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
-        M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = (params[k] for k in ["m_eff_cib", "sigma2_LM_cib", "maniyar_cib_etamax", "maniyar_cib_tau", "maniyar_cib_zc", "maniyar_cib_fsub"])
+        M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = (params[k] for k in ["m_eff_cib", "sigma2_LM_cib", "eta_max_cib", "tau_cib", "zc_cib", "fsub_cib"])
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # sigma^2 depends on whether M < M_eff or > M_eff
@@ -205,12 +205,7 @@ class CIBTracer(BaseTracer):
             ngrid = 200 # 100,000 is likely overkill and will slow down JIT significantly
             
             # Determine upper bound based on model
-            Ms_max = jax.lax.cond(
-                self.cib_model == "maniyar",
-                lambda x: x * (1 - params["maniyar_cib_fsub"]),
-                lambda x: x,
-                m_single
-            )
+            Ms_max = jax.lax.cond(self.cib_model == "maniyar", lambda x: x * (1 - params["fsub_cib"]), lambda x: x, m_single)
     
             # Create integration grid for this specific host mass
             Ms_grid = jnp.logspace(jnp.log10(Ms_min), jnp.log10(Ms_max), ngrid)
@@ -220,7 +215,6 @@ class CIBTracer(BaseTracer):
             dN_dlnMs = self.subhalo_mass_function.dndlnmu(m_single, Ms_grid)
             
             # Galaxy luminosity for subhalos
-            # Ms_grid is (ngrid,), z is (Nz,) -> l_gal returns (ngrid, Nz)
             if self.cib_model == "maniyar":
                 SFR_I = self.l_gal(Ms_grid, z, nu, params=params)
                 # SFR_II uses the host efficiency scaled by subhalo mass
@@ -234,18 +228,18 @@ class CIBTracer(BaseTracer):
             # result shape: (Nz,)
             return jnp.sum(dN_dlnMs[:, None] * L_gal_grid * dlnMs, axis=0)
     
-        # Vectorize integrate_single_halo over the input host mass array m
-        # in_axes=(0,) means we map over the first dimension of m
-        # out_axes=0 means the results are stacked into shape (Nm, Nz)
+       
         L_sat_matrix = jax.vmap(integrate_single_halo, in_axes=(0,))(m)
         
         return L_sat_matrix
+
+        
 
     def l_cen(self, m, z, nu, params=None):
 
         # Get required parameters
         params = merge_with_defaults(params)
-        M_min, f_sub = params["M_min_cib"], params["maniyar_cib_fsub"]
+        M_min, f_sub = params["M_min_cib"], params["fsub_cib"]
         m = jnp.atleast_1d(m)
 
         # For the Maniyar model, mass becomes m * (1 - f_sub); for Shang model it is unchanged
@@ -258,16 +252,17 @@ class CIBTracer(BaseTracer):
         L_cen = N_cen[:, None] * L_gal
         return L_cen
 
+        
+
     def kernel(self, z, params=None):
         params = merge_with_defaults(params)
-
         h = params["H0"]/100
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h
-
-        
         s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else (1/((1+z)*chi**2))**0 # ones for maniyar
         
         return s_nu_factor
+
+        
 
     def u_k(self, k, m, z, moment=1, params=None):
         """ 
@@ -282,26 +277,19 @@ class CIBTracer(BaseTracer):
        
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
-        
         h = params["H0"]/100
-       
-        nu = self.nu 
         h_factor = h**2 if self.cib_model=='shang' else 1
 
-        # Compute the physical mass for Ls and Lc
+        # Compute the physical mass for Ls and Lc and then u_k_matter from BaseTracer
         m_physical = m/h
-        Ls = self.l_sat(m_physical, z, nu, params=params)
-        Lc = self.l_cen(m_physical, z, nu, params=params)
-
-        # Compute u_m_ell from BaseTracer
+        Ls = self.l_sat(m_physical, z, self.nu , params=params)
+        Lc = self.l_cen(m_physical, z, self.nu , params=params)
         _, u_m = self.u_k_matter(k, m, z, params=params)
 
-       
         moment_funcs = [
-            lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                               ,
+            lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                                           ,
             lambda _: h_factor**2        / (4*jnp.pi)**2       * (Ls[None, :, :]**2 * u_m**2 + 2 * Ls[None, :, :] * Lc[None, :, :] * u_m )          ,
         ]
-
 
         u_k = jax.lax.switch(moment - 1, moment_funcs, None)
     
@@ -309,7 +297,6 @@ class CIBTracer(BaseTracer):
 
 
     def sat_and_cen_contribution(self, k, m, z, params=None):
-
 
         params = merge_with_defaults(params)
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
@@ -319,19 +306,16 @@ class CIBTracer(BaseTracer):
         nu = self.nu 
         h_factor = h**2 if self.cib_model=='shang' else 1
 
-        # Compute the physical mass for Ls and Lc
+        # Compute the physical mass for Ls and Lc and then u_k_matter from BaseTracer
         m_physical = m/h
-        Ls = self.l_sat(m_physical, z, nu, params=params)
-        Lc = self.l_cen(m_physical, z, nu, params=params)
-
-        # Compute u_m_ell from BaseTracer
+        Ls = self.l_sat(m_physical, z, self.nu, params=params)
+        Lc = self.l_cen(m_physical, z, self.nu , params=params)
         _, u_m = self.u_k_matter(k, m, z, params=params)
 
-
+        # Compute central and satellite terms
         sat_term = h_factor**1    / (4*jnp.pi)        * (Ls[None, :, :] * u_m ) 
         cen_term = h_factor**1    / (4*jnp.pi)        * (Lc[None, :, :])       
 
-    
         return sat_term, cen_term
 
     

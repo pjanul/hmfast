@@ -4,9 +4,10 @@ import jax.scipy as jscipy
 
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
-from hmfast.tracers.base_tracer import BaseTracer, HankelTransform
+from hmfast.tracers.base_tracer import BaseTracer#, HankelTransform
 from hmfast.defaults import merge_with_defaults
 from hmfast.utils import Const
+from hmfast.halo_model.profiles import GNFWPressureProfile
 
 jax.config.update("jax_enable_x64", True)
 
@@ -14,66 +15,16 @@ class tSZTracer(BaseTracer):
     """
     tSZ tracer using GNFW profile.
     """
-    def __init__(self, halo_model, x=None):
+    def __init__(self, halo_model, profile=GNFWPressureProfile()):
 
         # Set tracer parameters
-        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256)
-        self.profile = self.gnfw_pressure_profile
+        self.profile = profile #self.gnfw_pressure_profile
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
-
-    @property
-    def x(self):
-        return self._x
-
-    @x.setter
-    def x(self, value):
-        """
-        Whenever x is modified, immediately rebuild the hankel transform object
-        """
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
         
-
-    def gnfw_pressure_profile(self, x, m, z, params=None):
-        """
-        GNFW pressure profile as a function of dimensionless scaled radius x = r/r_delta.
-        
-        Fully vectorized: supports
-            x.shape = (Nx,)
-            m.shape = (Nm,)
-            z.shape = (Nz,)
-        Output shape: (Nx, Nm, Nz)
-        """
-       
-    
-        # Retrieve all required parameters and ensure all inputs are 1D  
-        params = merge_with_defaults(params)
-        H0, P0, alpha, beta, gamma, B = (params[k] for k in ("H0", "P0_GNFW", "alpha_GNFW", "beta_GNFW", "gamma_GNFW", "B"))
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z) 
-       
-        # Helper variables for normalization
-        h = H0 / 100.0
-        c_km_s = Const._c_ / 1e3
-        H = self.halo_model.emulator.hubble_parameter(z, params=params) * c_km_s  # (Nz,)
-        H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
-
-        # Corrected mass given the hydrostatic mass bias
-        m_delta_tilde = (m / B)[None, :, None]  # (1, Nm, 1)
-    
-        C = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m_delta_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
-    
-        # Scaled radius and GNFW formula
-        c_delta = self.halo_model.c_delta(m, z, params=params)  # (Nm, Nz)
-        scaled_x = c_delta[None, :, :] * x[:, None, None]   # (Nx, Nm, Nz)
-        Pe = C * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
-    
-        return Pe  # shape: (Nx, Nm, Nz)
-            
-
 
     def kernel(self, z, params=None):
         params = merge_with_defaults(params)
@@ -105,7 +56,7 @@ class tSZTracer(BaseTracer):
         ell_target = k[:, None] * chi[None, :] - 0.5 
         
         # Get native Hankel transform outputs, which may not align with the k from this function's input
-        k_native, u_k_native = self.u_k_hankel(m, z, params=params)  
+        k_native, u_k_native = self.profile.u_k_hankel(self.halo_model, self.profile.x, m, z, params=params)  
         
         # Calculate native u_ell and the native ell grid
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None])) 

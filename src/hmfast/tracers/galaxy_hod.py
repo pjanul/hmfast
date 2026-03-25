@@ -9,6 +9,7 @@ from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
+from hmfast.halo_model.profiles import NFWMatterProfile
 
 jax.config.update("jax_enable_x64", True)
 
@@ -28,10 +29,11 @@ class GalaxyHODTracer(BaseTracer):
         The redshift distribution of the galaxy population. This distribution will be normalized if it is not already done.
     """
 
-    def __init__(self, halo_model, dndz = None):        
+    def __init__(self, halo_model, profile=NFWMatterProfile(), dndz=None):        
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
+        self.profile = profile
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
 
@@ -105,8 +107,39 @@ class GalaxyHODTracer(BaseTracer):
         # Add the halo model consistency counter terms if hm_consistency is set to True, otherwise do not change anything
         ng_bar = jax.lax.cond(self.halo_model.hm_consistency, lambda x: x + self.halo_model.counter_terms(m, z, params=params)[0] * Ntot[0], lambda x: x, ng_bar)
 
-
         return ng_bar
+        
+
+    def galaxy_bias(self, m, z, params=None):
+        """
+        Compute the large-scale galaxy bias b_g(z).
+        b_g(z) = (1/ng_bar) * ∫ dlnM [dn/dlnM] * b(M, z) * [Nc + Ns]
+        """
+        params = merge_with_defaults(params)
+        logm = jnp.log(m)
+        z = jnp.atleast_1d(z)
+
+        # get number counts
+        Nc = self.n_cen(m, params=params)
+        Ns = self.n_sat(m, params=params)
+        Ntot = Nc + Ns  # Shape: (Nm,)
+
+        # Get ahlo mass and first order bias
+        dndlnm = self.halo_model.halo_mass_function(m, z, params=params)
+        bh = self.halo_model.halo_bias(m, z, order=1, params=params)
+
+        # Compute the number density ng_bar for normalization
+        ng = self.ng_bar(m, z, params=params)
+
+        # Integrate over mass: ∫ dlnM [dn/dlnM * bh * Ntot]
+        integrand = dndlnm * bh * Ntot[:, None]
+        bg_num = jnp.trapezoid(integrand, x=logm, axis=0)
+
+        # Add the halo model consistency counter terms if hm_consistency is set to True, otherwise do not change anything
+        bg_num = jax.lax.cond(self.halo_model.hm_consistency, lambda x: x + self.halo_model.counter_terms(m, z, params=params)[1] * Ntot[0], lambda x: x, bg_num)
+
+        # Large-scale bias is the ratio
+        return bg_num / ng
         
 
     def kernel(self, z, params=None):
@@ -147,7 +180,8 @@ class GalaxyHODTracer(BaseTracer):
         Nc = self.n_cen(m, params=params)
         ng = self.ng_bar(m, z, params=params) * (params["H0"]/100)**3
 
-        _, u_m = self.u_k_matter(k, m, z, params=params)  
+        #_, u_m = self.u_k_matter(k, m, z, params=params)  # Old way
+        _, u_m = self.profile.u_k_matter(self.halo_model, k, m, z, params=params)   # New way
     
         moment_funcs = [
             lambda _: (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m),
@@ -180,5 +214,6 @@ class GalaxyHODTracer(BaseTracer):
         cen_term = (1/ng) * (Nc[None, :, None]**0)
     
         return sat_term, cen_term
+
   
         

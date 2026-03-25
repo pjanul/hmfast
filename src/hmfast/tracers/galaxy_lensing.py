@@ -7,9 +7,11 @@ from jax.scipy.special import sici
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
+from hmfast.halo_model.profiles import NFWMatterProfile
+from hmfast.utils import Const
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
-from hmfast.utils import Const
+
 
 jax.config.update("jax_enable_x64", True)
 
@@ -30,10 +32,11 @@ class GalaxyLensingTracer(BaseTracer):
     """
 
     
-    def __init__(self, halo_model, dndz=None):        
+    def __init__(self, halo_model, profile=NFWMatterProfile(), dndz=None):        
 
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
+        self.profile = profile
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
 
@@ -129,8 +132,9 @@ class GalaxyLensingTracer(BaseTracer):
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        k, u_m = self.u_k_matter(k, m, z, params=params)
-    
+        # k, u_m = self.u_k_matter(k, m, z, params=params)    # Old way 
+        k, u_m = self.profile.u_k_matter(self.halo_model, k, m, z, params=params)      # New way
+        
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)

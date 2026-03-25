@@ -7,10 +7,10 @@ import numpy as np
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
-from hmfast.defaults import merge_with_defaults
-from hmfast.halo_model.mass_function import TW10SubHaloMass
+from hmfast.halo_model.profiles import NFWMatterProfile
 from hmfast.utils import lambertw, Const
 from hmfast.download import get_default_data_path
+from hmfast.defaults import merge_with_defaults
 
 
 jax.config.update("jax_enable_x64", True)
@@ -28,16 +28,17 @@ class CIBTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, halo_model, nu=100, subhalo_mass_function=TW10SubHaloMass(), cib_model="shang", s_nu=None):        
+    def __init__(self, halo_model, profile=NFWMatterProfile(), nu=100, cib_model="shang", s_nu=None):        
 
         self.nu = nu
-        self.subhalo_mass_function = subhalo_mass_function # Might eventually want to move this to halo_model
-
+        self.profile = profile
+        self.cib_model = cib_model
+        
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
-        self.cib_model = cib_model
+        
 
         if s_nu is None:
             s_nu_z_path = os.path.join(get_default_data_path(), "auxiliary_files", "filtered_snu_planck_z_fine.txt")
@@ -212,7 +213,7 @@ class CIBTracer(BaseTracer):
             dlnMs = jnp.log(Ms_grid[1] / Ms_grid[0])
             
             # Subhalo mass function (Shape: ngrid,)
-            dN_dlnMs = self.subhalo_mass_function.dndlnmu(m_single, Ms_grid)
+            dN_dlnMs = self.halo_model.subhalo_mass_model.dndlnmu(m_single, Ms_grid)
             
             # Galaxy luminosity for subhalos
             if self.cib_model == "maniyar":
@@ -258,7 +259,7 @@ class CIBTracer(BaseTracer):
         params = merge_with_defaults(params)
         h = params["H0"]/100
         chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) * h
-        s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else (1/((1+z)*chi**2))**0 # ones for maniyar
+        s_nu_factor = 1/((1+z)*chi**2) if self.cib_model=='shang' else jnp.ones_like(z)# ones for maniyar
         
         return s_nu_factor
 
@@ -279,16 +280,18 @@ class CIBTracer(BaseTracer):
         cparams = self.halo_model.emulator.get_all_cosmo_params(params)
         h = params["H0"]/100
         h_factor = h**2 if self.cib_model=='shang' else 1
+        
 
         # Compute the physical mass for Ls and Lc and then u_k_matter from BaseTracer
         m_physical = m/h
         Ls = self.l_sat(m_physical, z, self.nu , params=params)
         Lc = self.l_cen(m_physical, z, self.nu , params=params)
-        _, u_m = self.u_k_matter(k, m, z, params=params)
+        # _, u_m = self.u_k_matter(k, m, z, params=params)    # Old way
+        _, u_m = self.profile.u_k_matter(self.halo_model, k, m, z, params=params)
 
         moment_funcs = [
-            lambda _: h_factor**1        / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                                           ,
-            lambda _: h_factor**2        / (4*jnp.pi)**2       * (Ls[None, :, :]**2 * u_m**2 + 2 * Ls[None, :, :] * Lc[None, :, :] * u_m )          ,
+            lambda _: h_factor**1       / (4*jnp.pi)          * (Lc[None, :, :] + Ls[None, :, :] * u_m )                                           ,
+            lambda _: h_factor**2       / (4*jnp.pi)**2       * (Ls[None, :, :]**2 * u_m**2 + 2 * Ls[None, :, :] * Lc[None, :, :] * u_m )          ,
         ]
 
         u_k = jax.lax.switch(moment - 1, moment_funcs, None)
@@ -318,4 +321,48 @@ class CIBTracer(BaseTracer):
 
         return sat_term, cen_term
 
+
+    def j_bar_nu(self, m, z, nu, params=None):
+        """
+        Compute the mean comoving emissivity j_bar_nu(z) in [Lsun / Mpc^3].
+        Integral of (L_cen + L_sat) over the halo mass function.
+        """
+        params = merge_with_defaults(params)
+        h = params["H0"] / 100
+
+        # Get the luminosities (ensure physical mass if needed)
+        m_phys = m / h
+        lc = self.l_cen(m_phys, z, nu, params=params) # Shape: (Nm, Nz)
+        ls = self.l_sat(m_phys, z, nu, params=params) # Shape: (Nm, Nz)
+        
+        # Get the halo mass function dn/dlnm 
+        dndlnm = self.halo_model.halo_mass_function(m, z, params=params) # Shape: (Nm, Nz)
+        
+        # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
+        h_factor = h**2 if self.cib_model == 'shang' else 1.0
+        integrand = dndlnm * (lc + ls)
+        j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
+        
+        return j_bar * h_factor / (4 * jnp.pi)
+
+
+    def monopole(self, m, z, nu, params=None):
+        """
+        Compute total CIB intensity I_nu [Jy/sr] using the line-of-sight integral.
+        I_nu = integral [ dchi/dz * a(z) * j_bar_nu(z) ] dz
+        """
+        params = merge_with_defaults(params)
+    
+        # Get the mean comoving emissivity (Shape: Nz)
+        j_bar = self.j_bar_nu(m, z, nu, params=params)
+        
+        # dchi/dz = c / H(z), a(z) = 1/(1+z)
+        dchi_dz = 1.0 / self.halo_model.emulator.hubble_parameter(z, params=params)
+        a = 1.0 / (1.0 + z)
+        
+        # Final Integral over redshift
+        integrand = dchi_dz * a * j_bar
+        intensity = jnp.trapezoid(integrand, x=z) 
+        
+        return intensity
     

@@ -11,6 +11,7 @@ from mcfit import TophatVar
 
 from hmfast.halo_model.mass_function import T08HaloMass
 from hmfast.halo_model.bias import T10HaloBias
+from hmfast.halo_model.mass_function import TW10SubHaloMass
 from hmfast.halo_model.concentration import D08Concentration, B13Concentration
 from hmfast.emulator import Emulator
 from hmfast.defaults import merge_with_defaults
@@ -30,7 +31,10 @@ class HaloModel:
     
     def __init__(self, emulator=Emulator(cosmo_model=0), 
                  mass_definition=MassDefinition(delta=200, reference="critical"), 
-                 mass_model = T08HaloMass(), bias_model = T10HaloBias(), concentration_relation=D08Concentration(), 
+                 mass_model = T08HaloMass(), 
+                 bias_model = T10HaloBias(), 
+                 subhalo_mass_model = TW10SubHaloMass(),
+                 concentration_relation=D08Concentration(), 
                  hm_consistency=True):
         """
         Initialize the halo model.
@@ -57,6 +61,7 @@ class HaloModel:
         
         self.mass_model = mass_model
         self.bias_model = bias_model
+        self.subhalo_mass_model = subhalo_mass_model
         self.concentration_relation = concentration_relation
 
         self.mass_definition = mass_definition

@@ -10,6 +10,7 @@ from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
+from hmfast.halo_model.profiles import NFWMatterProfile
 jax.config.update("jax_enable_x64", True)
 
 
@@ -27,10 +28,11 @@ class CMBLensingTracer(BaseTracer):
         The x array used to define the radial profile over which the tracer will be evaluated
     """
 
-    def __init__(self, halo_model):        
+    def __init__(self, halo_model, profile=NFWMatterProfile()):        
         
         # Load halo model with instantiated emulator and make sure the required files are loaded outside of jitted functions
         self.halo_model = halo_model
+        self.profile = profile
         self.halo_model.emulator._load_emulator("DAZ")
         self.halo_model.emulator._load_emulator("HZ")
         self.halo_model.emulator._load_emulator("DER")
@@ -87,8 +89,9 @@ class CMBLensingTracer(BaseTracer):
         W = self.kernel(z, params=params) 
 
         # Compute u_m_ell from BaseTracer
-        k, u_m = self.u_k_matter(k, m, z, params=params) 
-
+        #k, u_m = self.u_k_matter(k, m, z, params=params) # Old way
+        k, u_m = self.profile.u_k_matter(self.halo_model, k, m, z, params=params) # New way
+        
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)

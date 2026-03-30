@@ -32,11 +32,11 @@ DEFAULT_PARAMS = {
 
     
     # HOD tracer-specific parameters
-    'sigma_log10M_HOD': 0.68,
-    'alpha_s_HOD':    1.30,
-    'M1_prime_HOD': 10**12.7, # msun/h
-    'M_min_HOD': 10**11.8, # msun/h
-    'M0_HOD' :0,
+    #'sigma_log10M_HOD': 0.68,
+    #'alpha_s_HOD':    1.30,
+    #'M1_prime_HOD': 10**12.7, # msun/h
+    #'M_min_HOD': 10**11.8, # msun/h
+    #'M0_HOD' :0,
 
 
 

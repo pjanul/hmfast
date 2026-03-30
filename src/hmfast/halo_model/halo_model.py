@@ -285,7 +285,6 @@ class HaloModel:
         # Compute σ²(R, z) and dσ²/dR using TophatVar
         R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
         R_grid = R_grid[0].flatten()  # shape: (n_R,)
-        # var shape: (n_z, n_R)
     
         # Compute dσ²/dR for each z, output shape: (n_z, n_R)
         dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var)

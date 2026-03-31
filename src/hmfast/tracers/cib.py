@@ -28,7 +28,7 @@ class CIBTracer(BaseTracer):
         # --- Static Setup (Triggers Recompile if changed) ---
         self.halo_model = halo_model
         self.profile = NFWMatterProfile() if profile is None else profile
-        self.nu = nu
+        #self.nu = nu
         self.cib_model = cib_model # Setter handles normalization
         
         # Ensure emulators are pre-loaded
@@ -44,20 +44,10 @@ class CIBTracer(BaseTracer):
             self.s_nu = s_nu
 
         # --- Dynamic Leaves (Tracked for Gradients) ---
-        self.L0_cib = L0_cib
-        self.alpha_cib = alpha_cib
-        self.beta_cib = beta_cib
-        self.gamma_cib = gamma_cib
-        self.T0_cib = T0_cib
-        self.m_eff_cib = m_eff_cib
-        self.sigma2_LM_cib = sigma2_LM_cib
-        self.delta_cib = delta_cib
-        self.z_plateau_cib = z_plateau_cib
-        self.M_min_cib = M_min_cib
-        self.eta_max_cib = eta_max_cib
-        self.zc_cib = zc_cib
-        self.tau_cib = tau_cib
-        self.fsub_cib = fsub_cib
+        self.nu = nu
+        self.L0_cib, self.alpha_cib, self.beta_cib, self.gamma_cib, self.T0_cib = L0_cib, alpha_cib, beta_cib, gamma_cib, T0_cib
+        self.m_eff_cib, self.sigma2_LM_cib, self.delta_cib, self.z_plateau_cib, self.M_min_cib = m_eff_cib, sigma2_LM_cib, delta_cib, z_plateau_cib, M_min_cib  
+        self.eta_max_cib, self.zc_cib, self.tau_cib, self.fsub_cib  = eta_max_cib, zc_cib, tau_cib, fsub_cib
 
     @property
     def cib_model(self):
@@ -73,24 +63,24 @@ class CIBTracer(BaseTracer):
     # --- JAX PyTree Registration ---
 
     def tree_flatten(self):
-        # All physical parameters are leaves
+        # Frequency and all physical parameters are leaves
         leaves = (
-            self.L0_cib, self.alpha_cib, self.beta_cib, self.gamma_cib,
+            self.nu, self.L0_cib, self.alpha_cib, self.beta_cib, self.gamma_cib,
             self.T0_cib, self.m_eff_cib, self.sigma2_LM_cib, self.delta_cib,
             self.z_plateau_cib, self.M_min_cib, self.eta_max_cib, self.zc_cib,
             self.tau_cib, self.fsub_cib
         )
         # Structural metadata
-        aux_data = (self.halo_model, self.profile, self.nu, self._cib_model, self.s_nu)
+        aux_data = (self.halo_model, self.profile, self._cib_model, self.s_nu)
         return (leaves, aux_data)
 
     @classmethod
     def tree_unflatten(cls, aux_data, leaves):
         obj = cls.__new__(cls)
         # Unpack aux
-        obj.halo_model, obj.profile, obj.nu, obj._cib_model, obj.s_nu = aux_data
+        obj.halo_model, obj.profile, obj._cib_model, obj.s_nu = aux_data
         # Unpack leaves
-        (obj.L0_cib, obj.alpha_cib, obj.beta_cib, obj.gamma_cib,
+        (obj.nu, obj.L0_cib, obj.alpha_cib, obj.beta_cib, obj.gamma_cib,
          obj.T0_cib, obj.m_eff_cib, obj.sigma2_LM_cib, obj.delta_cib,
          obj.z_plateau_cib, obj.M_min_cib, obj.eta_max_cib, obj.zc_cib,
          obj.tau_cib, obj.fsub_cib) = leaves
@@ -98,10 +88,14 @@ class CIBTracer(BaseTracer):
 
     def update_params(self, **kwargs):
         names = [
-            'L0_cib', 'alpha_cib', 'beta_cib', 'gamma_cib', 'T0_cib', 'm_eff_cib',
+            'nu', 'L0_cib', 'alpha_cib', 'beta_cib', 'gamma_cib', 'T0_cib', 'm_eff_cib',
             'sigma2_LM_cib', 'delta_cib', 'z_plateau_cib', 'M_min_cib', 
             'eta_max_cib', 'zc_cib', 'tau_cib', 'fsub_cib'
         ]
+        # Check for typos!
+        if not set(kwargs).issubset(names):
+            raise ValueError(f"Invalid CIB parameter(s): {set(kwargs) - set(names)}")
+    
         leaves, treedef = jax.tree_util.tree_flatten(self)
         new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
@@ -110,10 +104,8 @@ class CIBTracer(BaseTracer):
 
     def sigma(self, m, params=None):
         params = merge_with_defaults(params)
-
-        M_eff_cib = self.m_eff_cib
-        sigma2_LM_cib = self.sigma2_LM_cib
-
+        M_eff_cib, sigma2_LM_cib = self.m_eff_cib, self.sigma2_LM_cib
+       
         # Log-normal in mass
         log10_m = jnp.log10(m)
         log10_M_eff = jnp.log10(M_eff_cib)
@@ -136,10 +128,7 @@ class CIBTracer(BaseTracer):
     def theta(self, z, nu, params=None):
         """Spectral energy distribution function Theta(nu,z) for CIB, analogous to class_sz."""
         params = merge_with_defaults(params)
-        T0 = self.T0_cib
-        alpha_cib = self.alpha_cib
-        beta_cib = self.beta_cib
-        gamma_cib = self.gamma_cib
+        T0, alpha_cib, beta_cib, gamma_cib = self.T0_cib, self.alpha_cib, self.beta_cib, self.gamma_cib
     
         h = Const._h_P_  # Planck [J s]
         k_B = Const._k_B_ #1.380649e-23  # Boltzmann [J/K]
@@ -312,13 +301,19 @@ class CIBTracer(BaseTracer):
         
         # Get the halo mass function dn/dlnm 
         dndlnm = self.halo_model.halo_mass_function(m, z, params=params) # Shape: (Nm, Nz)
+
+        # Correct for Maniyar if needed
+        chi = self.halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        maniyar_factor = (1+z) * chi**2 if self.cib_model == 'maniyar' else 1
         
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
-        h_factor = h**2 if self.cib_model == 'shang' else 1.0
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
+
+        # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
+        j_bar = jax.lax.cond(self.halo_model.hm_consistency, lambda x: x + self.halo_model.counter_terms(m, z, params=params)[0] * lc[0], lambda x: x, j_bar)
         
-        return j_bar * h_factor / (4 * jnp.pi)
+        return j_bar * h**3 / (4 * jnp.pi) * maniyar_factor
 
 
     def monopole(self, m, z, nu, params=None):

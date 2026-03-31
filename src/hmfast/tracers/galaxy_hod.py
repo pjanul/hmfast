@@ -67,12 +67,12 @@ class GalaxyHODTracer(BaseTracer):
         return obj
 
     def update_params(self, **kwargs):
-        """
-        Creates a new version of the tracer using the static structure of 'self'.
-        """
         names = ['sigma_log10M_HOD', 'alpha_s_HOD', 'M1_prime_HOD', 'M_min_HOD', 'M0_HOD']
-
-        # Flatten the pytree, insert the new values, and unflatten
+        
+        # Block typos immediately
+        if not set(kwargs).issubset(names):
+            raise ValueError(f"Invalid galaxy HOD parameter(s): {set(kwargs) - set(names)}")
+    
         leaves, treedef = jax.tree_util.tree_flatten(self)
         new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
         return jax.tree_util.tree_unflatten(treedef, new_leaves)

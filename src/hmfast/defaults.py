@@ -16,15 +16,15 @@ DEFAULT_PARAMS = {
     'm_ncdm': 0.06,
     'N_ur': 3.046,
     'w0_fld': -0.95,           # only for wcdm models
-    'c_delta': 1.156,
+    #'c_delta': 1.156,
 
     # Other cosmological parameters
     'T_cmb': 2.7255,
     'deg_ncdm': 1,
-    'B': 1.4,
 
     
     # tSZ tracer-specific parameters
+    'B': 1.4,            # Hydrostatic bias factor
     'P0_GNFW': 8.130,
     'alpha_GNFW': 1.0620,
     'beta_GNFW': 5.4807,
@@ -41,22 +41,22 @@ DEFAULT_PARAMS = {
 
 
      # CIB tracer-specific parameters (general + Shang model)
-    'L0_cib': 6.4e-8,             # Normalisation of L − M relation in [Jy MPc2/Msun]
-    'alpha_cib': 0.36,            # redshift evolution of dust temperature
-    'beta_cib': 1.75,             # emissivity index of sed
-    'gamma_cib': 1.7,             # Power law index of SED at high frequency
-    'T0_cib': 24.4,               # dust temperature today in Kelvins
-    'm_eff_cib': 10**12.6,        # Most efficient halo mass in Msun
-    'sigma2_LM_cib': 0.5,         # Size of of halo masses sourcing CIB emission
-    'delta_cib': 3.6,             # Redshift evolution of L − M normalisation
-    'z_plateau_cib': 1e100,       # see 5.2.1 of https://arxiv.org/pdf/1208.5049.pdf
-    'M_min_cib': 10**11.5,
+    # 'L0_cib': 6.4e-8,             # Normalisation of L − M relation in [Jy MPc2/Msun]
+    # 'alpha_cib': 0.36,            # redshift evolution of dust temperature
+    # 'beta_cib': 1.75,             # emissivity index of sed
+    # 'gamma_cib': 1.7,             # Power law index of SED at high frequency
+    # 'T0_cib': 24.4,               # dust temperature today in Kelvins
+    # 'm_eff_cib': 10**12.6,        # Most efficient halo mass in Msun
+    # 'sigma2_LM_cib': 0.5,         # Size of of halo masses sourcing CIB emission
+    # 'delta_cib': 3.6,             # Redshift evolution of L − M normalisation
+    # 'z_plateau_cib': 1e100,       # see 5.2.1 of https://arxiv.org/pdf/1208.5049.pdf
+    # 'M_min_cib': 10**11.5,
 
-     # CIB tracer-specific parameters (Maniyar model)
-    'eta_max_cib': 0.4028353504978569,       # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'zc_cib': 1.5,                          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'tau_cib': 1.2040244128818796,          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
-    'fsub_cib': 0.134,                     # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/Cell_cib.py
+    #  # CIB tracer-specific parameters (Maniyar model)
+    # 'eta_max_cib': 0.4028353504978569,       # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    # 'zc_cib': 1.5,                          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    # 'tau_cib': 1.2040244128818796,          # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/input_var.py
+    # 'fsub_cib': 0.134,                     # see https://github.com/abhimaniyar/halomodel_cib_tsz_cibxtsz/blob/master/Cell_cib.py
   
 
     

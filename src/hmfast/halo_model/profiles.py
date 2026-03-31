@@ -273,6 +273,7 @@ class GNFWPressureProfile(PressureProfile):
 
 
 
+
 class NFWMatterProfile(MatterProfile):
     def __init__(self):
         pass

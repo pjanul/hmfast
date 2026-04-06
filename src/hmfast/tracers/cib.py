@@ -6,7 +6,7 @@ import jax.scipy as jscipy
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.tracers.base_tracer import BaseTracer
-from hmfast.halo_model.profiles import CIBProfile, ShangCIBProfile
+from hmfast.halo_model.profiles import CIBProfile, Shang12CIBProfile
 from hmfast.utils import lambertw, Const
 from hmfast.download import get_default_data_path
 from hmfast.defaults import merge_with_defaults

@@ -58,11 +58,8 @@ class GalaxyHODTracer(BaseTracer):
         """
         Update HOD parameters.
         """
-        # 1. Get a fresh profile with new numbers
-        new_profile = self.profile.update_params(**kwargs)
         
-        # 2. Return a new Tracer instance. 
-        # This is cleaner than calling tree_unflatten manually.
+        new_profile = self.profile.update_params(**kwargs)
         return GalaxyHODTracer(profile=new_profile, dndz=self._dndz_data)
 
 

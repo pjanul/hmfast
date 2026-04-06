@@ -242,4 +242,125 @@ class NFWDensityProfile(DensityProfile):
         rho_gas = f_b * rho_s[None, :, :] / (x[:, None, None] * (1 + x[:, None, None])**2)
         
         return rho_gas
+
+
+
+
+
+@register_pytree_node_class
+class BCMDensityProfile(DensityProfile):
+    def __init__(self, x=None, 
+                 log10Mc_bcm=13.25, theta_ej_bcm = 4.711, eta_star_bcm = 0.2, 
+                 delta_bcm = 7.0, gamma_bcm = 2.5, mu_bcm = 1.0, nu_log10Mc_bcm = -0.038,
+                ):
+        
+        # Grid initialization (triggers the x.setter)
+        self.x = x if x is not None else jnp.logspace(-4, 1, 256)
+
+        self.log10Mc_bcm, self.theta_ej_bcm, self.eta_star_bcm = log10Mc_bcm, theta_ej_bcm, eta_star_bcm
+        self.delta_bcm, self.gamma_bcm, self.mu_bcm, self.nu_log10Mc_bcm = delta_bcm, gamma_bcm, mu_bcm, nu_log10Mc_bcm
+        
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, value):
+        self._x = value
+        self._hankel = HankelTransform(self._x, nu=0.5)
+
+
+    def tree_flatten(self):
+        # Dynamic calibration parameters
+        leaves = (
+            self.log10Mc_bcm, self.theta_ej_bcm, self.eta_star_bcm,
+            self.delta_bcm, self.gamma_bcm, self.mu_bcm, self.nu_log10Mc_bcm
+        )
+        # Static metadata
+        aux_data = (self._x, self._hankel)
+        return (leaves, aux_data)
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, leaves):
+        x, hankel = aux_data
+        obj = cls.__new__(cls)
+        
+        # Unpack leaves back into attributes
+        (obj.log10Mc_bcm, obj.theta_ej_bcm, obj.eta_star_bcm,
+         obj.delta_bcm, obj.gamma_bcm, obj.mu_bcm, obj.nu_log10Mc_bcm) = leaves
+        
+        obj._x = x
+        obj._hankel = hankel
+        return obj
+
+
+    def update_params(self, **kwargs):
+        """Helper to return a NEW profile with updated leaf values."""
+        names = [
+            "log10Mc_bcm", "theta_ej_bcm", "eta_star_bcm",
+            "delta_bcm", "gamma_bcm", "mu_bcm", "nu_log10Mc_bcm"
+        ]
+        
+        # Strict Check: Block typos immediately
+        if not set(kwargs).issubset(names):
+            invalid = set(kwargs) - set(names)
+            raise ValueError(f"Invalid parameter(s): {invalid}. Expected: {names}")
+
+        leaves, treedef = jax.tree_util.tree_flatten(self)
+        # Create new leaf list by replacing values from kwargs if they exist
+        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        return jax.tree_util.tree_unflatten(treedef, new_leaves)
+
+
+    def profile(self, halo_model, x, m, z, params=None):
+        """
+        BCM gas density profile based.
+        
+        Args:
+            x: Dimensionless radius r/R200c (Nx,)
+            m: Halo mass M200c [M_sun/h] (Nm,)
+            z: Redshift (Nz,)
+        Returns:
+            rho_gas: Gas density in [M_sun h^2 / Mpc^3] (Nx, Nm, Nz)
+        """
+        params = merge_with_defaults(params)
+        cparams = halo_model.emulator.get_all_cosmo_params(params)
+        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
+        
+        # Broadcasting shapes: (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
+        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        xb, mb, zb = x[:, None, None], m[None, :, None], z[None, None, :]
+        
+        # This model is calibrated for the virial radius 
+        r_vir = halo_model.r_delta(m, z, mass_definition=MassDefinition("vir", "critical"), params=params)
+        r_asked = xb * r_vir
+        
+        # Redshift Dependent Mc (Matching your C logic)
+        mc_z_log = self.log10Mc_bcm * (1. + zb)**self.nu_log10Mc_bcm
+        mc = 10.**mc_z_log
+        
+        # Profile Components
+        ms = 2.5e11  # M_sun/h, fixed value
+        fstar_ms = 0.055 # Fixed value
+        f_star = fstar_ms * (m / ms)**(-self.eta_star_bcm)
+        num = f_b - f_star
+        
+        # beta_m scaling (Mass dependent slope)
+        m_ratio_mu = (mb / mc)**self.mu_bcm
+        beta_m = 3. * m_ratio_mu / (1. + m_ratio_mu)
+        
+        # Denominator 1: Large scale bound gas
+        denom1 = (1. + 10. * r_asked / r_vir)**beta_m
+        
+        # Denominator 2: Ejected gas / transition,
+        scaled_r = r_asked / (self.theta_ej_bcm * r_vir)
+        denom2 = (1. + (scaled_r)**self.gamma_bcm)**((self.delta_bcm - beta_m) / self.gamma_bcm)
+    
+        
+        return num / (denom1 * denom2) 
+
+
+
+    
    

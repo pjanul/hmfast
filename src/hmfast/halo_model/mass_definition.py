@@ -4,7 +4,6 @@ import jax.scipy as jscipy
 from functools import partial
 from jax.tree_util import register_pytree_node_class
 
-from hmfast.defaults import merge_with_defaults
 from hmfast.emulator import Emulator
 from hmfast.utils import newton_root
 

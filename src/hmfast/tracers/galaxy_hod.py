@@ -5,7 +5,6 @@ from jax.tree_util import register_pytree_node_class
 
 from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.halo_model.profiles import GalaxyHODProfile, StandardGalaxyHODProfile
-from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 
 # Ensure high precision for cosmological integrations
@@ -54,12 +53,12 @@ class GalaxyHODTracer(BaseTracer):
         obj._dndz_data = dndz_data
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Update HOD parameters.
         """
         
-        new_profile = self.profile.update_params(**kwargs)
+        new_profile = self.profile.update(**kwargs)
         return GalaxyHODTracer(profile=new_profile, dndz=self._dndz_data)
 
 

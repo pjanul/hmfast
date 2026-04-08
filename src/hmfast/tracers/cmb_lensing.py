@@ -8,7 +8,6 @@ from jax.tree_util import register_pytree_node_class
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
-from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
 from hmfast.halo_model.profiles import MatterProfile, NFWMatterProfile
@@ -47,12 +46,12 @@ class CMBLensingTracer(BaseTracer):
         obj.profile = profile
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Since this tracer has no params of its own, it just 
         passes the request to the profile.
         """
-        new_profile = self.profile.update_params(**kwargs)
+        new_profile = self.profile.update(**kwargs)
         return CMBLensingTracer(profile=new_profile)
 
 

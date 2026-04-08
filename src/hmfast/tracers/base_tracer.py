@@ -3,7 +3,6 @@ import jax.numpy as jnp
 from abc import ABC, abstractmethod
 import numpy as np
 
-from hmfast.defaults import merge_with_defaults
 from hmfast.halo_model.profiles import HaloProfile
 
 

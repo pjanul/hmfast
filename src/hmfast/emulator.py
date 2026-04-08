@@ -3,7 +3,6 @@ import jax
 import jax.numpy as jnp
 from typing import Dict, Union
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
-from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
 from jax.tree_util import register_pytree_node_class
@@ -78,7 +77,7 @@ class Emulator:
         
         return obj
     
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         names = [
             'H0', 'omega_cdm', 'omega_b', 'ln1e10A_s', 'n_s', 'tau_reio',
             'm_ncdm', 'N_ur', 'w0_fld', 
@@ -247,6 +246,7 @@ class Emulator:
 
         return self._interp_z(z, self._z_grid_bg(), preds)
 
+    @jax.jit
     def sigma8(self, z):
         """
         Get sigma8 at redshift z.
@@ -267,7 +267,7 @@ class Emulator:
         preds = emu.predictions(params)
         return self._interp_z(z, self._z_grid_bg(), preds)
 
-
+    @jax.jit
     def get_all_cosmo_params(self):
         """
         Get all relevant cosmological parameters.
@@ -303,7 +303,7 @@ class Emulator:
         
         return p
 
-    
+    @jax.jit
     def critical_density(self, z):
         """
         Get critical density at redshift z.
@@ -330,7 +330,7 @@ class Emulator:
         
         return rho_crit_factor * (H_z/h)**2 
         
-
+    @jax.jit
     def omega_m(self, z):
         """
         Compute Ω_m(z) = rho_m(z) / rho_crit(z) without neutrinos.
@@ -352,7 +352,7 @@ class Emulator:
         
         return Omega_m_z
 
-
+    @jax.jit
     def growth_factor(self, z):
         """
         Linear growth factor D(z), normalized to D(0)=1.
@@ -362,12 +362,12 @@ class Emulator:
     
         k0 = 1e-2  # reference wavenumber
         z_grid_pk = self._z_grid_pk()
-        pk0_grid = jax.vmap(lambda zp: jnp.interp(k0, *self.pk_matter(zp, linear=True)))(z_grid_pk)
-        D_grid = jnp.sqrt(pk0_grid / jnp.interp(k0, *self.pk_matter(0.0, linear=True)))
+        pk0_grid = jax.vmap(lambda zp: jnp.interp(k0, *self.pk(zp, linear=True)))(z_grid_pk)
+        D_grid = jnp.sqrt(pk0_grid / jnp.interp(k0, *self.pk(0.0, linear=True)))
     
         return jnp.interp(z, z_grid_pk, D_grid)
 
-
+    @jax.jit
     def growth_rate(self, z):
         """
         Return the linear growth rate f(z) = d ln D / d ln a.
@@ -383,7 +383,7 @@ class Emulator:
         return jnp.interp(z, z_grid_pk, f_grid)
 
 
-
+    @jax.jit
     def v_rms_squared(self, z):
         """
         v_rms^2(z) from linear growth factor and matter power spectrum.
@@ -394,7 +394,7 @@ class Emulator:
         z_grid_pk = self._z_grid_pk()
     
         # P(k, z) on the pk grid
-        P_grid = jax.vmap(lambda zp: jnp.interp(k_grid, *self.pk_matter(zp, linear=True)))(z_grid_pk)
+        P_grid = jax.vmap(lambda zp: jnp.interp(k_grid, *self.pk(zp, linear=True)))(z_grid_pk)
     
         a_grid = 1.0 / (1.0 + z_grid_pk)
         H_grid = self.hubble_parameter(z_grid_pk)
@@ -407,7 +407,7 @@ class Emulator:
         return jnp.interp(z, z_grid_pk, vrms2_grid)
 
 
-
+    @jax.jit
     def comoving_volume_element(self, z):
         """
         Comoving volume element per unit redshift and solid angle.
@@ -437,7 +437,7 @@ class Emulator:
     # ------------------------------------------------------------------
 
     #@partial(jax.jit, static_argnums=(2,))
-    def pk_matter(self, z, linear=True):
+    def pk(self, z, linear=True):
         """
         Get the matter power spectrum at redshift z.
         
@@ -493,6 +493,7 @@ class Emulator:
     # Derived parameters
     # ------------------------------------------------------------------
 
+    @jax.jit
     def derived_parameters(self):
         params = self._to_dict()
         emu = self._load_emulator("DER")

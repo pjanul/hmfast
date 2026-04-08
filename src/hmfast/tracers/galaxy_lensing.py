@@ -8,7 +8,6 @@ from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.halo_model.profiles import MatterProfile, NFWMatterProfile
 from hmfast.utils import Const
-from hmfast.defaults import merge_with_defaults
 from hmfast.download import get_default_data_path
 
 
@@ -69,12 +68,12 @@ class GalaxyLensingTracer(BaseTracer):
         obj._dndz_data = dndz_data
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Updates profile parameters. 
         Passes the current dndz blob to the new instance.
         """
-        new_profile = self.profile.update_params(**kwargs)
+        new_profile = self.profile.update(**kwargs)
         return GalaxyLensingTracer(profile=new_profile, dndz=self._dndz_data)
 
 

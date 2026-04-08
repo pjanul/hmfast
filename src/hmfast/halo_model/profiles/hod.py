@@ -9,7 +9,6 @@ from jax.scipy.special import sici, erf
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import lambertw, Const
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.halo_model.profiles import HaloProfile
@@ -49,7 +48,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         return cls(*leaves)
 
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         names = ['sigma_log10M_HOD', 'alpha_s_HOD', 'M1_prime_HOD', 'M_min_HOD', 'M0_HOD']
         
         # Block typos immediately

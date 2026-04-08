@@ -9,7 +9,6 @@ from jax.scipy.special import sici, erf
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import lambertw, Const
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.halo_model.profiles import HaloProfile

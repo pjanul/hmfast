@@ -9,7 +9,6 @@ from jax.scipy.special import sici, erf
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import lambertw, Const
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.halo_model.profiles import HaloProfile, HankelTransform
@@ -119,7 +118,7 @@ class B16DensityProfile(DensityProfile):
         return obj
 
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
         names = [
             "A_rho0", "A_alpha", "A_beta",
@@ -291,7 +290,7 @@ class BCMDensityProfile(DensityProfile):
         return obj
 
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
         names = [
             "log10Mc_bcm", "theta_ej_bcm", "eta_star_bcm",

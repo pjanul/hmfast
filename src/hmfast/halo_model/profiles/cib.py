@@ -9,7 +9,6 @@ from jax.scipy.special import sici, erf
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import lambertw, Const
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.halo_model.profiles import HaloProfile
@@ -45,7 +44,7 @@ class Shang12CIBProfile(CIBProfile):
     def tree_unflatten(cls, aux, leaves):
         return cls(*leaves)
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         names = [
             'nu', 'L0_cib', 'alpha_cib', 'beta_cib', 'gamma_cib', 'T0_cib', 'm_eff_cib',
             'sigma2_LM_cib', 'delta_cib', 'z_plateau_cib', 'M_min_cib'
@@ -283,7 +282,7 @@ class Maniyar21CIBProfile(CIBProfile):
         return cls(*leaves, s_nu_data=aux)
 
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         names = ['nu', 'eta_max_cib', 'zc_cib', 'tau_cib', 'fsub_cib', 'M_min_cib', 'm_eff_cib', 'sigma2_LM_cib']
         # Check for typos/invalid names
         if not set(kwargs).issubset(names):

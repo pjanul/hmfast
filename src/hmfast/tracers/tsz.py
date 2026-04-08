@@ -6,7 +6,6 @@ from jax.tree_util import register_pytree_node_class
 from hmfast.emulator import Emulator
 from hmfast.halo_model import HaloModel
 from hmfast.tracers.base_tracer import BaseTracer
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import Const
 from hmfast.halo_model.profiles import PressureProfile, GNFWPressureProfile
 
@@ -40,11 +39,11 @@ class tSZTracer(BaseTracer):
         obj.profile = profile
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Updates pressure profile parameters (e.g., P0, alpha, beta).
         """
-        new_profile = self.profile.update_params(**kwargs)
+        new_profile = self.profile.update(**kwargs)
         return tSZTracer(profile=new_profile)
 
     # --- End JAX PyTree Registration ---

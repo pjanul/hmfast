@@ -9,7 +9,6 @@ from hmfast.tracers.base_tracer import BaseTracer
 from hmfast.halo_model.profiles import CIBProfile, Shang12CIBProfile
 from hmfast.utils import lambertw, Const
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 
 @register_pytree_node_class
 class CIBTracer(BaseTracer):
@@ -37,11 +36,11 @@ class CIBTracer(BaseTracer):
         obj.profile = profile
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Passes all parameter updates (including 'nu') down to the profile.
         """
-        new_profile = self.profile.update_params(**kwargs)
+        new_profile = self.profile.update(**kwargs)
         return CIBTracer(profile=new_profile)
     
     def kernel(self, emulator, z):

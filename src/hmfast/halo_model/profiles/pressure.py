@@ -9,7 +9,6 @@ from jax.scipy.special import sici, erf
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.defaults import merge_with_defaults
 from hmfast.utils import lambertw, Const
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.halo_model.profiles import HaloProfile, HankelTransform
@@ -109,7 +108,7 @@ class GNFWPressureProfile(PressureProfile):
         obj._hankel = hankel
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
         names = ["P0_GNFW", "alpha_GNFW", "beta_GNFW", "gamma_GNFW", "B"]
         
@@ -210,7 +209,7 @@ class B12PressureProfile(PressureProfile):
         obj._hankel = hankel
         return obj
 
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
         names = [
             "A_P0", "A_xc", "A_beta",

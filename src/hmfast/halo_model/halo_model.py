@@ -15,7 +15,6 @@ from hmfast.halo_model.bias import T10HaloBias
 from hmfast.halo_model.mass_function import TW10SubHaloMass
 from hmfast.halo_model.concentration import D08Concentration, B13Concentration
 from hmfast.emulator import Emulator
-from hmfast.defaults import merge_with_defaults
 from hmfast.halo_model.mass_definition import MassDefinition
 from hmfast.utils import newton_root
 
@@ -70,7 +69,7 @@ class HaloModel:
 
 
         # Create TophatVar instance once to instantiate it
-        dummy_k, _ = self.emulator.pk_matter(1., linear=True)
+        dummy_k, _ = self.emulator.pk(1., linear=True)
         self._tophat_instance = partial(TophatVar(dummy_k, lowring=True, backend='jax'), extrap=True)
 
 
@@ -94,12 +93,12 @@ class HaloModel:
         return obj
 
     
-    def update_params(self, **kwargs):
+    def update(self, **kwargs):
         """
         Updates the underlying emulator parameters without re-initializing the whole class.
         """
         
-        new_emulator = self.emulator.update_params(**kwargs)
+        new_emulator = self.emulator.update(**kwargs)
         children, aux_data = self.tree_flatten()
         new_instance = self.tree_unflatten(aux_data, (new_emulator,))
         
@@ -252,7 +251,7 @@ class HaloModel:
 
 
     
-    @jax.jit #@partial(jax.jit, static_argnums=0)
+    @jax.jit
     def counter_terms(self, m, z):
         """
         Compute n_min, b1_min, b2_min counter terms for halo model consistency.
@@ -292,7 +291,7 @@ class HaloModel:
         return n_min, b1_min, b2_min
 
         
-    @jax.jit #@partial(jax.jit, static_argnums=0)
+    @jax.jit 
     def _compute_hmf_grid(self):
         """
         Compute σ(R, z) for use in halo mass function and bias.
@@ -309,7 +308,7 @@ class HaloModel:
         h = cparams["h"]
     
         # Power spectra for all redshifts, shape: (n_k, n_z)
-        pk_grid = jax.vmap(lambda zp: self.emulator.pk_matter(zp, linear=True)[1].flatten())(z_grid).T
+        pk_grid = jax.vmap(lambda zp: self.emulator.pk(zp, linear=True)[1].flatten())(z_grid).T
     
         # Compute σ²(R, z) and dσ²/dR using TophatVar
         R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
@@ -345,7 +344,7 @@ class HaloModel:
         return ln_x, ln_M, dn_dlnM_grid, sigma_grid
 
 
-    @jax.jit #@partial(jax.jit, static_argnums=(0,))
+    @jax.jit 
     def halo_mass_function(self, m=jnp.geomspace(5e10, 3.5e15, 100), z=jnp.geomspace(0.005, 3.0, 100)) -> jnp.ndarray:
         """
         Compute the halo mass function for arbitrary m and z shapes.
@@ -529,7 +528,7 @@ class HaloModel:
         I1 = get_I(tracer1)
         I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
         
-        P_lin = jax.vmap(lambda zi: jnp.interp(k, *self.emulator.pk_matter(zi, linear=True)))(z).T * h**3
+        P_lin = jax.vmap(lambda zi: jnp.interp(k, *self.emulator.pk(zi, linear=True)))(z).T * h**3
         
         return P_lin * I1 * I2
 

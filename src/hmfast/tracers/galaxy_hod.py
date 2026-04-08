@@ -63,14 +63,14 @@ class GalaxyHODTracer(BaseTracer):
         return GalaxyHODTracer(profile=new_profile, dndz=self._dndz_data)
 
 
-    def kernel(self, emulator, z, params=None):
+    def kernel(self, emulator, z):
         """Return Wg_grid at requested z."""
-        params = merge_with_defaults(params)
+        
         z = jnp.atleast_1d(z)
         z_g, phi_prime_g = self.dndz
     
         phi_prime_g_at_z = jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
-        H_grid = emulator.hubble_parameter(z, params=params)
-        chi_grid = emulator.angular_diameter_distance(z, params=params) * (1.0 + z)
+        H_grid = emulator.hubble_parameter(z)
+        chi_grid = emulator.angular_diameter_distance(z) * (1.0 + z)
 
         return H_grid * (phi_prime_g_at_z / chi_grid**2)

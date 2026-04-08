@@ -21,7 +21,7 @@ class CIBTracer(BaseTracer):
     _required_profile_type = CIBProfile
     
     def __init__(self, profile=None):
-        super().__init__(profile=profile or ShangCIBProfile())
+        super().__init__(profile=profile or Shang12CIBProfile())
         
     # --- JAX PyTree Registration ---
     def tree_flatten(self):
@@ -44,13 +44,13 @@ class CIBTracer(BaseTracer):
         new_profile = self.profile.update_params(**kwargs)
         return CIBTracer(profile=new_profile)
     
-    def kernel(self, emulator, z, params=None):
-        params = merge_with_defaults(params)
-        h = params["H0"]/100
-        chi = emulator.angular_diameter_distance(z, params=params) * (1 + z)
+    def kernel(self, emulator, z):
+        
+        h = emulator.H0 
+        chi = emulator.angular_diameter_distance(z) * (1 + z)
 
         # If Shang, apply the 1/(a * chi^2) factor. If Maniyar, return 1.0.
-        is_shang = isinstance(self.profile, ShangCIBProfile)
+        is_shang = isinstance(self.profile, Shang12CIBProfile)
         s_nu_factor = jnp.where(is_shang, 1.0 / ((1.0 + z) * chi**2), 1.0)
         
         

@@ -56,27 +56,27 @@ class CMBLensingTracer(BaseTracer):
         return CMBLensingTracer(profile=new_profile)
 
 
-    def kernel(self, emulator, z, params=None):
+    def kernel(self, emulator, z):
         """
         Compute the CMB lensing kernel W_kappa_cmb at redshift z.
         """
         # Merge default parameters with input
-        params = merge_with_defaults(params)
-        cparams = emulator.get_all_cosmo_params(params=params)
+        
+        cparams = emulator.get_all_cosmo_params()
         z = jnp.atleast_1d(z)  # Ensure z is an array
         
         # Cosmological constants
-        H0 = params["H0"]  # Hubble constant in km/s/Mpc
+        H0 = emulator.H0    # Hubble constant in km/s/Mpc
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s        
         h = H0 / 100
         
         # Compute comoving distance and Hubble parameter
-        chi_z = emulator.angular_diameter_distance(z, params=params) * (1 + z) * h # Comoving distance in Mpc/h
-        H_z = emulator.hubble_parameter(z, params=params)   # Hubble parameter in km/s/Mpc
+        chi_z = emulator.angular_diameter_distance(z) * (1 + z) * h # Comoving distance in Mpc/h
+        H_z = emulator.hubble_parameter(z)   # Hubble parameter in km/s/Mpc
         
         # Comoving distance to the last scattering surface (z ~ 1090) in Mpc/h
-        chi_z_cmb = emulator.derived_parameters(params=params)["chi_star"] * h  
+        chi_z_cmb = emulator.derived_parameters()["chi_star"] * h  
         
         # Compute the CMB lensing kernel
         W_kappa_cmb =  (

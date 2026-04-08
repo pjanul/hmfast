@@ -59,8 +59,7 @@ class Shang12CIBProfile(CIBProfile):
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
 
 
-    def sigma(self, m, params=None):
-        params = merge_with_defaults(params)
+    def sigma(self, m):
         M_eff_cib, sigma2_LM_cib = self.m_eff_cib, self.sigma2_LM_cib
        
         # Log-normal in mass
@@ -70,10 +69,10 @@ class Shang12CIBProfile(CIBProfile):
         return Sigma_M
 
 
-    def phi(self, z, params=None):
+    def phi(self, z):
         ''' 
         Implementation of Φ(z) = (1 + z)^(δ_CIB) for z < z_plateau, 1 for z >= z_plateau from the Shang model'''
-        params = merge_with_defaults(params)
+        
         delta_cib = self.delta_cib
         z_p = self.z_plateau_cib
 
@@ -82,9 +81,9 @@ class Shang12CIBProfile(CIBProfile):
         return Phi_z
 
 
-    def theta(self,  z, nu, params=None):
+    def theta(self,  z, nu):
         """Spectral energy distribution function Theta(nu,z) for CIB, analogous to class_sz."""
-        params = merge_with_defaults(params)
+        
         T0, alpha_cib, beta_cib, gamma_cib = self.T0_cib, self.alpha_cib, self.beta_cib, self.gamma_cib
     
         h = Const._h_P_  # Planck [J s]
@@ -113,16 +112,16 @@ class Shang12CIBProfile(CIBProfile):
         return Theta
 
 
-    def l_gal(self, halo_model, m, z, nu, params=None):
+    def l_gal(self, halo_model, m, z, nu):
         # Shang model logic: L0 * Phi(z) * Sigma(m) * Theta(nu_eff)
-        phi_z = jnp.atleast_1d(self.phi(z, params=params))[None, :]
-        sigma_m = jnp.atleast_1d(self.sigma(m, params=params))[:, None]
-        theta_val = jnp.atleast_1d(self.theta(z, nu * (1 + z), params=params))[None, :]
+        phi_z = jnp.atleast_1d(self.phi(z))[None, :]
+        sigma_m = jnp.atleast_1d(self.sigma(m))[:, None]
+        theta_val = jnp.atleast_1d(self.theta(z, nu * (1 + z)))[None, :]
         return self.L0_cib * phi_z * sigma_m * theta_val
 
 
 
-    def l_sat(self, halo_model, m, z, nu, params=None):
+    def l_sat(self, halo_model, m, z, nu):
         def integrate_single_halo(m_single):
             ms_min = self.M_min_cib
             ms_max = m_single
@@ -134,7 +133,7 @@ class Shang12CIBProfile(CIBProfile):
             # Subhalo mass function
             dn_dlnms = halo_model.subhalo_mass_model.dndlnmu(m_single, ms_grid)
             # Standard Shang luminosity
-            l_gal_grid = self.l_gal(halo_model, ms_grid, z, nu, params=params)
+            l_gal_grid = self.l_gal(halo_model, ms_grid, z, nu)
             
             return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
 
@@ -142,55 +141,55 @@ class Shang12CIBProfile(CIBProfile):
 
 
      
-    def l_cen(self, halo_model, m, z, nu, params=None):
+    def l_cen(self, halo_model, m, z, nu):
         # Shang: Central mass is the full halo mass
         n_cen = jnp.where(m > self.M_min_cib, 1.0, 0.0)
-        l_gal = self.l_gal(halo_model, m, z, nu, params=params)
+        l_gal = self.l_gal(halo_model, m, z, nu)
         return n_cen[:, None] * l_gal
 
 
      
-    def j_bar_nu(self, halo_model, m, z, nu, params=None):
+    def j_bar_nu(self, halo_model, m, z, nu):
         """
         Compute the mean comoving emissivity j_bar_nu(z) in [Lsun / Mpc^3].
         Integral of (L_cen + L_sat) over the halo mass function.
         """
-        params = merge_with_defaults(params)
-        h = params["H0"] / 100
+        
+        h = halo_model.emulator.H0 / 100
 
         # Get the luminosities (ensure physical mass if needed)
         m_phys = m / h
-        lc = self.l_cen(halo_model, m_phys, z, nu, params=params) # Shape: (Nm, Nz)
-        ls = self.l_sat(halo_model, m_phys, z, nu, params=params) # Shape: (Nm, Nz)
+        lc = self.l_cen(halo_model, m_phys, z, nu) # Shape: (Nm, Nz)
+        ls = self.l_sat(halo_model, m_phys, z, nu) # Shape: (Nm, Nz)
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function(m, z, params=params) # Shape: (Nm, Nz)
+        dndlnm = halo_model.halo_mass_function(m, z) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
-        chi = halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi = halo_model.emulator.angular_diameter_distance(z) * (1 + z) 
         
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z, params=params)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) 
 
 
-    def monopole(self, halo_model, m, z, nu, params=None):
+    def monopole(self, halo_model, m, z, nu):
         """
         Compute total CIB intensity I_nu [Jy/sr] using the line-of-sight integral.
         I_nu = integral [ dchi/dz * a(z) * j_bar_nu(z) ] dz
         """
-        params = merge_with_defaults(params)
+       
     
         # Get the mean comoving emissivity (Shape: Nz)
-        j_bar = self.j_bar_nu(halo_model, m, z, nu, params=params)
+        j_bar = self.j_bar_nu(halo_model, m, z, nu)
         
         # dchi/dz = c / H(z), a(z) = 1/(1+z)
-        dchi_dz = 1.0 / halo_model.emulator.hubble_parameter(z, params=params)
+        dchi_dz = 1.0 / halo_model.emulator.hubble_parameter(z)
         a = 1.0 / (1.0 + z)
         
         # Final Integral over redshift
@@ -200,26 +199,26 @@ class Shang12CIBProfile(CIBProfile):
         return intensity
 
 
-    def sat_and_cen_contribution(self, halo_model, k, m, z, params=None):
+    def sat_and_cen_contribution(self, halo_model, k, m, z):
 
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+        
+        cparams = halo_model.emulator.get_all_cosmo_params()
         nu = self.nu
-        h = params["H0"]/100
+        h = cparams["h"]
        
         #nu = self.nu 
-        chi = halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi = halo_model.emulator.angular_diameter_distance(z) * (1 + z) 
 
         # Compute the physical mass for ls and lc and then u_k_matter from BaseTracer
         m_physical = m/h
-        ls = self.l_sat(halo_model, m_physical, z, nu, params=params)
-        lc = self.l_cen(halo_model, m_physical, z, nu , params=params)
+        ls = self.l_sat(halo_model, m_physical, z, nu)
+        lc = self.l_cen(halo_model, m_physical, z, nu)
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
-        _, u_m = self.u_k_matter(halo_model, k, m, z, params=params)
+        _, u_m = self.u_k_matter(halo_model, k, m, z)
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
@@ -228,14 +227,14 @@ class Shang12CIBProfile(CIBProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1, params=None):
+    def u_k(self, halo_model, k, m, z, moment=1):
         """ 
         Compute either the first or second moment of the CIB tracer.
         Refactored to use sat_and_cen_contribution to avoid redundant math.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
-        params = merge_with_defaults(params)
-        sat_term, cen_term = self.sat_and_cen_contribution(halo_model, k, m, z, params=params)
+        
+        sat_term, cen_term = self.sat_and_cen_contribution(halo_model, k, m, z)
 
         moment_funcs = [
             lambda _: cen_term + sat_term,                         # prefactor * (lc[None, :, :] + ls[None, :, :] * u_m ) 
@@ -285,7 +284,7 @@ class Maniyar21CIBProfile(CIBProfile):
 
 
     def update_params(self, **kwargs):
-        names = ['self.nu', 'eta_max_cib', 'zc_cib', 'tau_cib', 'fsub_cib', 'M_min_cib', 'm_eff_cib', 'sigma2_LM_cib']
+        names = ['nu', 'eta_max_cib', 'zc_cib', 'tau_cib', 'fsub_cib', 'M_min_cib', 'm_eff_cib', 'sigma2_LM_cib']
         # Check for typos/invalid names
         if not set(kwargs).issubset(names):
             raise ValueError(f"Invalid CIB parameter(s): {set(kwargs) - set(names)}")
@@ -295,18 +294,18 @@ class Maniyar21CIBProfile(CIBProfile):
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
 
     
-    def m_dot(self, halo_model, m, z, params=None):
+    def m_dot(self, halo_model, m, z):
         ''' Mdot =  46.1(1 + 1.11z)E(z)(m /10^12Msun)^1.1 from the Maniyar model'''
 
-        params = merge_with_defaults(params)
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
-        E_z = jnp.atleast_1d(halo_model.emulator.hubble_parameter(z, params=params)) * c_km_s / params["H0"]
+        
+        E_z = jnp.atleast_1d(halo_model.emulator.hubble_parameter(z)) * c_km_s / halo_model.emulator.H0
         
         return 46.1 * (1.0 + 1.11 * z[None, :]) * E_z[None, :] * (m[:, None] / 1e12) ** 1.1
 
 
-    def sfr_maniyar(self, halo_model, m, z, params=None):
+    def sfr_maniyar(self, halo_model, m, z):
         """
         Compute Maniyar et al. CIB galaxy luminosity from halo mass and redshift.
     
@@ -317,8 +316,8 @@ class Maniyar21CIBProfile(CIBProfile):
         """
 
         # Gather all relevant parameters 
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+        
+        cparams = halo_model.emulator.get_all_cosmo_params()
         M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = self.m_eff_cib, self.sigma2_LM_cib, self.eta_max_cib, self.tau_cib, self.zc_cib, self.fsub_cib 
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
@@ -326,7 +325,7 @@ class Maniyar21CIBProfile(CIBProfile):
         sigma2_lnM = jnp.where(m[:, None] < M_eff,sigma2_LM, (jnp.sqrt(sigma2_LM) - tau * jnp.maximum(0.0, z_c - z[None, :]))**2,)
 
         # Get the halo accretion rate, baryon fraction, and also take log of relevant quantities
-        Mdot = self.m_dot(halo_model, m, z, params=params)
+        Mdot = self.m_dot(halo_model, m, z)
         logM = jnp.log(m)[:, None]
         logMeff = jnp.log(M_eff)
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
@@ -337,7 +336,7 @@ class Maniyar21CIBProfile(CIBProfile):
 
         return sfr
 
-    def s_nu_maniyar(self, z, nu, params=None):
+    def s_nu_maniyar(self, z, nu):
         ln_x_grid, ln_nu_grid, ln_s_nu_grid = jnp.log(1 + self.s_nu_data[0]), jnp.log(self.s_nu_data[1]), jnp.log(self.s_nu_data[2])
         _s_nu_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_nu_grid), ln_s_nu_grid)  
         s_nu = jnp.exp(_s_nu_interp((jnp.log(1 + z), jnp.log(nu))))
@@ -345,15 +344,15 @@ class Maniyar21CIBProfile(CIBProfile):
 
         
 
-    def l_gal(self, halo_model, m, z, nu, params=None):
+    def l_gal(self, halo_model, m, z, nu):
         # Maniyar model logic: 4pi * s_nu * SFR
-        s_nu = self.s_nu_maniyar(z, nu, params=params)[None, :]
-        sfr = self.sfr_maniyar(halo_model, m, z, params=params)
+        s_nu = self.s_nu_maniyar(z, nu)[None, :]
+        sfr = self.sfr_maniyar(halo_model, m, z)
         return 4 * jnp.pi * s_nu * sfr
 
 
 
-    def l_sat(self, halo_model, m, z, nu, params=None):
+    def l_sat(self, halo_model, m, z, nu):
         def integrate_single_halo(m_single):
             ms_min = self.M_min_cib
             # Host efficiency scaling uses mass corrected by fsub
@@ -366,8 +365,8 @@ class Maniyar21CIBProfile(CIBProfile):
             dn_dlnms = halo_model.subhalo_mass_model.dndlnmu(m_single, ms_grid)
             
             # Maniyar Clamping Logic
-            sfr_i = self.l_gal(halo_model, ms_grid, z, nu, params=params)
-            sfr_ii = self.l_gal(halo_model, ms_max, z, nu, params=params) * ms_grid[:, None] / ms_max
+            sfr_i = self.l_gal(halo_model, ms_grid, z, nu)
+            sfr_ii = self.l_gal(halo_model, ms_max, z, nu) * ms_grid[:, None] / ms_max
             l_gal_grid = jnp.minimum(sfr_i, sfr_ii)
             
             return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
@@ -375,33 +374,33 @@ class Maniyar21CIBProfile(CIBProfile):
         return jax.vmap(integrate_single_halo)(m)
 
 
-    def l_cen(self, halo_model, m, z, nu, params=None):
+    def l_cen(self, halo_model, m, z, nu):
         # Maniyar: Central mass is reduced by the subhalo fraction
         m_eff = m * (1 - self.fsub_cib)
         n_cen = jnp.where(m_eff > self.M_min_cib, 1.0, 0.0)
-        l_gal = self.l_gal(halo_model, m_eff, z, nu, params=params)
+        l_gal = self.l_gal(halo_model, m_eff, z, nu)
         return n_cen[:, None] * l_gal
 
     
     
-    def j_bar_nu(self, halo_model, m, z, nu, params=None):
+    def j_bar_nu(self, halo_model, m, z, nu):
         """
         Compute the mean comoving emissivity j_bar_nu(z) in [Lsun / Mpc^3].
         Integral of (L_cen + L_sat) over the halo mass function.
         """
-        params = merge_with_defaults(params)
-        h = params["H0"] / 100
+       
+        h = halo_model.emulator.H0 / 100
 
         # Get the luminosities (ensure physical mass if needed)
         m_phys = m / h
-        lc = self.l_cen(halo_model, m_phys, z, nu, params=params) # Shape: (Nm, Nz)
-        ls = self.l_sat(halo_model, m_phys, z, nu, params=params) # Shape: (Nm, Nz)
+        lc = self.l_cen(halo_model, m_phys, z, nu) # Shape: (Nm, Nz)
+        ls = self.l_sat(halo_model, m_phys, z, nu) # Shape: (Nm, Nz)
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function(m, z, params=params) # Shape: (Nm, Nz)
+        dndlnm = halo_model.halo_mass_function(m, z) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
-        chi = halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi = halo_model.emulator.angular_diameter_distance(z) * (1 + z) 
         maniyar_factor = (1+z) * chi**2 #if self.cib_model == 'maniyar' else 1
         
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
@@ -409,23 +408,22 @@ class Maniyar21CIBProfile(CIBProfile):
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z, params=params)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) * maniyar_factor
 
 
-    def monopole(self, halo_model, m, z, nu, params=None):
+    def monopole(self, halo_model, m, z, nu):
         """
         Compute total CIB intensity I_nu [Jy/sr] using the line-of-sight integral.
         I_nu = integral [ dchi/dz * a(z) * j_bar_nu(z) ] dz
         """
-        params = merge_with_defaults(params)
     
         # Get the mean comoving emissivity (Shape: Nz)
-        j_bar = self.j_bar_nu(halo_model, m, z, nu, params=params)
+        j_bar = self.j_bar_nu(halo_model, m, z, nu)
         
         # dchi/dz = c / H(z), a(z) = 1/(1+z)
-        dchi_dz = 1.0 / halo_model.emulator.hubble_parameter(z, params=params)
+        dchi_dz = 1.0 / halo_model.emulator.hubble_parameter(z)
         a = 1.0 / (1.0 + z)
         
         # Final Integral over redshift
@@ -435,26 +433,25 @@ class Maniyar21CIBProfile(CIBProfile):
         return intensity
 
     
-    def sat_and_cen_contribution(self, halo_model, k, m, z, params=None):
+    def sat_and_cen_contribution(self, halo_model, k, m, z):
 
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+        cparams = halo_model.emulator.get_all_cosmo_params()
         nu = self.nu
-        h = params["H0"]/100
+        h = halo_model.emulator.H0 / 100
        
         #nu = self.nu 
-        chi = halo_model.emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi = halo_model.emulator.angular_diameter_distance(z) * (1 + z) 
 
         # Compute the physical mass for ls and lc and then u_k_matter from BaseTracer
         m_physical = m/h
-        ls = self.l_sat(halo_model, m_physical, z, nu, params=params)
-        lc = self.l_cen(halo_model, m_physical, z, nu , params=params)
+        ls = self.l_sat(halo_model, m_physical, z, nu)
+        lc = self.l_cen(halo_model, m_physical, z, nu)
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
-        _, u_m = self.u_k_matter(halo_model, k, m, z, params=params)
+        _, u_m = self.u_k_matter(halo_model, k, m, z)
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
@@ -463,16 +460,16 @@ class Maniyar21CIBProfile(CIBProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1, params=None):
+    def u_k(self, halo_model, k, m, z, moment=1):
         """ 
         Compute either the first or second moment of the CIB tracer.
         Refactored to use sat_and_cen_contribution to avoid redundant math.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
-        params = merge_with_defaults(params)
+        
 
         nu = self.nu
-        sat_term, cen_term = self.sat_and_cen_contribution(halo_model, k, m, z, nu, params=params)
+        sat_term, cen_term = self.sat_and_cen_contribution(halo_model, k, m, z)
 
         moment_funcs = [
             lambda _: cen_term + sat_term,                         # prefactor * (lc[None, :, :] + ls[None, :, :] * u_m ) 

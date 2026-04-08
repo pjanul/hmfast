@@ -81,23 +81,23 @@ class GalaxyLensingTracer(BaseTracer):
     # --- End JAX PyTree Registration ---
 
     
-    def I_s(self, emulator, z, params=None):
+    def I_s(self, emulator, z):
         """
         Return I_s at requested z.
         Uses pre-loaded dndz_data = [z, phi_prime].
         Integrates only over sources behind the lens (z_s > z).
         """
         
-        params = merge_with_defaults(params)
+        
         z = jnp.atleast_1d(z)
-        h = params["H0"] / 100
+        h = emulator.H0 / 100
         
         # Load source distribution       
         z_s, phi_prime_s = self.dndz
         
         # Angular distances
-        chi_z_s = emulator.angular_diameter_distance(z_s, params=params) * (1 + z_s) 
-        chi_z = emulator.angular_diameter_distance(z, params=params) * (1 + z) 
+        chi_z_s = emulator.angular_diameter_distance(z_s) * (1 + z_s) 
+        chi_z = emulator.angular_diameter_distance(z) * (1 + z) 
     
         # Reshape for broadcasting
         chi_z_s = chi_z_s[:, None]  # (N_s, 1)
@@ -116,27 +116,27 @@ class GalaxyLensingTracer(BaseTracer):
         return I_s
 
 
-    def kernel(self, emulator, z, params=None):
+    def kernel(self, emulator, z):
         """
         Compute the galaxy lensing kernel W_kappa_g at redshift z.
         """
         # Merge default parameters with input
-        params = merge_with_defaults(params)
-        cparams = emulator.get_all_cosmo_params(params=params)
+       
+        cparams = emulator.get_all_cosmo_params()
         z = jnp.atleast_1d(z) # Ensure z is an array
 
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s
        
         # Cosmological constants
-        H0 = params["H0"]  # Hubble constant in km/s/Mpc
+        H0 = emulator.H0  # Hubble constant in km/s/Mpc
         h = H0 / 100
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
 
         # Compute comoving distance and Hubble parameter
-        chi_z = emulator.angular_diameter_distance(z, params=params) * (1 + z) * h # Comoving distance in Mpc/h
-        H_z = emulator.hubble_parameter(z, params=params)   # Hubble parameter in km/s/Mpc
+        chi_z = emulator.angular_diameter_distance(z) * (1 + z) * h # Comoving distance in Mpc/h
+        H_z = emulator.hubble_parameter(z)   # Hubble parameter in km/s/Mpc
     
-        I_s = self.I_s(emulator, z, params=params) 
+        I_s = self.I_s(emulator, z) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (

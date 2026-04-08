@@ -17,16 +17,16 @@ from hmfast.halo_model.profiles import HaloProfile, HankelTransform
 
 
 class PressureProfile(HaloProfile):
-     def u_k(self, halo_model, k, m, z, moment=1, params=None):
+     def u_k(self, halo_model, k, m, z, moment=1):
         
-        params = merge_with_defaults(params)
-        h = params['H0']/100
+        
+        h = halo_model.emulator.H0 / 100 
         B = self.B
         delta = halo_model.mass_definition.delta
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
-        r_delta = halo_model.r_delta(m, z, params=params) / B**(1/3) # (Nm, Nz)
-        d_A = jnp.atleast_1d(halo_model.emulator.angular_diameter_distance(z, params=params)) * h
+        r_delta = halo_model.r_delta(m, z) / B**(1/3) # (Nm, Nz)
+        d_A = jnp.atleast_1d(halo_model.emulator.angular_diameter_distance(z)) * h
         ell_delta = d_A[None, :] / r_delta  # (Nm, Nz)
         
         Mpc_per_h_to_cm = Const._Mpc_over_m_ / h # This is actually Mpc_per_h_to_m, but the math is currently working
@@ -37,7 +37,7 @@ class PressureProfile(HaloProfile):
         ell_target = k[:, None] * chi[None, :] - 0.5 
         
         # Get native Hankel transform outputs, which may not align with the k from this function's input
-        k_native, u_k_native = self.u_k_hankel(halo_model, self.x, m, z, params=params)  
+        k_native, u_k_native = self.u_k_hankel(halo_model, self.x, m, z)  
         
         # Calculate native u_ell and the native ell grid
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None])) 
@@ -123,7 +123,7 @@ class GNFWPressureProfile(PressureProfile):
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
         
 
-    def profile(self, halo_model, x, m, z, params=None):
+    def profile(self, halo_model, x, m, z):
         """
         GNFW pressure profile as a function of dimensionless scaled radius x = r/r_delta.
         
@@ -136,8 +136,8 @@ class GNFWPressureProfile(PressureProfile):
        
     
         # Retrieve all required parameters and ensure all inputs are 1D  
-        params = merge_with_defaults(params)
-        H0 = params["H0"]
+        
+        H0 = halo_model.emulator.H0
         
         P0, alpha, beta, gamma, B = self.P0_GNFW, self.alpha_GNFW, self.beta_GNFW, self.gamma_GNFW, self.B 
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z) 
@@ -145,7 +145,7 @@ class GNFWPressureProfile(PressureProfile):
         # Helper variables for normalization
         h = H0 / 100.0
         c_km_s = Const._c_ / 1e3
-        H = halo_model.emulator.hubble_parameter(z, params=params) * c_km_s  # (Nz,)
+        H = halo_model.emulator.hubble_parameter(z) * c_km_s  # (Nz,)
         H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
 
         # Corrected mass given the hydrostatic mass bias
@@ -154,7 +154,7 @@ class GNFWPressureProfile(PressureProfile):
         P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m_delta_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
     
         # Scaled radius and GNFW formula
-        c_delta = halo_model.c_delta(m, z, params=params)  # (Nm, Nz)
+        c_delta = halo_model.c_delta(m, z)  # (Nm, Nz)
         scaled_x = c_delta[None, :, :] * x[:, None, None]   # (Nx, Nm, Nz)
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
     
@@ -226,9 +226,9 @@ class B12PressureProfile(PressureProfile):
         new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
 
-    def profile(self, halo_model, x, m, z, params=None):
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+    def profile(self, halo_model, x, m, z):
+       
+        cparams = halo_model.emulator.get_all_cosmo_params()
         h = cparams["h"]   
         
         # B12 fixed slopes
@@ -252,9 +252,9 @@ class B12PressureProfile(PressureProfile):
         
         # Thermal Pressure Normalization (P200c)
         # Usually follows P200c = 200 * G * M200c * rho_crit * f_b / (2 * R200c)
-        rho_crit = jnp.atleast_1d(halo_model.emulator.critical_density(z, params=params))
-        H = jnp.atleast_1d(halo_model.emulator.hubble_parameter(z, params=params)) * (Const._c_ / 1e3)
-        r_delta = halo_model.r_delta(m, z, params=params)
+        rho_crit = jnp.atleast_1d(halo_model.emulator.critical_density(z))
+        H = jnp.atleast_1d(halo_model.emulator.hubble_parameter(z)) * (Const._c_ / 1e3)
+        r_delta = halo_model.r_delta(m, z)
 
 
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]

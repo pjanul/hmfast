@@ -62,47 +62,47 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     # --- Physics Implementations ---
 
-    def n_cen(self, m, params=None):
+    def n_cen(self, m):
         """Mean central occupation."""
         # Using attributes directly as they are now JAX-traced leaves
         x = (jnp.log10(m) - jnp.log10(self.M_min_HOD)) / self.sigma_log10M_HOD
         return 0.5 * (1.0 + erf(x))
 
-    def n_sat(self, m, params=None):
+    def n_sat(self, m):
         """Mean satellite occupation."""
         pow_term = jnp.maximum((m - self.M0_HOD) / self.M1_prime_HOD, 0.0)**self.alpha_s_HOD
         return self.n_cen(m) * pow_term
 
-    def ng_bar(self, halo_model, m, z, params=None):
+    def ng_bar(self, halo_model, m, z):
         """Comoving galaxy number density ng(z)."""
-        params = merge_with_defaults(params)
+       
         logm = jnp.log(m)
         z = jnp.atleast_1d(z)
 
         Ntot = self.n_cen(m) + self.n_sat(m)
-        dndlnm = halo_model.halo_mass_function(m, z, params=params)
+        dndlnm = halo_model.halo_mass_function(m, z)
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
-        return jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z, params=params)[0] * Ntot[0], lambda x: x, ng_val)
+        return jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val)
 
-    def galaxy_bias(self, halo_model, m, z, params=None):
+    def galaxy_bias(self, halo_model, m, z):
         """Compute the large-scale galaxy bias b_g(z)."""
-        params = merge_with_defaults(params)
+       
         logm = jnp.log(m)
         z = jnp.atleast_1d(z)
 
         Ntot = self.n_cen(m) + self.n_sat(m)
-        dndlnm = halo_model.halo_mass_function(m, z, params=params)
-        bh = halo_model.halo_bias(m, z, order=1, params=params)
-        ng = self.ng_bar(halo_model, m, z, params=params)
+        dndlnm = halo_model.halo_mass_function(m, z)
+        bh = halo_model.halo_bias(m, z, order=1)
+        ng = self.ng_bar(halo_model, m, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)
-        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z, params=params)[1] * Ntot[0], lambda x: x, bg_num)
+        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
         return bg_num / ng
 
 
-    def sat_and_cen_contribution(self, halo_model, k, m, z, params=None):
+    def sat_and_cen_contribution(self, halo_model, k, m, z):
         """ 
         Compute either the first or second moment of the galaxy HOD tracer u_ell.
         For galaxy HOD:, 
@@ -111,12 +111,12 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         You cannot simply take u_ell_g**2.
         """
 
-        params = merge_with_defaults(params)
-        Ns = self.n_sat(m, params=params)
-        Nc = self.n_cen(m, params=params)
-        ng = self.ng_bar(halo_model, m, z, params=params) * (params["H0"]/100)**3
+       
+        Ns = self.n_sat(m)
+        Nc = self.n_cen(m)
+        ng = self.ng_bar(halo_model, m, z) * (halo_model.emulator.H0 / 100)**3
 
-        _, u_m = self.u_k_matter(halo_model, k, m, z, params=params)  
+        _, u_m = self.u_k_matter(halo_model, k, m, z)  
 
         sat_term = (1/ng) * (Ns[None, :, None] * u_m)
         cen_term = (1/ng) * (Nc[None, :, None]**0)
@@ -124,14 +124,14 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1, params=None):
+    def u_k(self, halo_model, k, m, z, moment=1):
         """Compute 1st or 2nd moment of the galaxy HOD tracer."""
-        params = merge_with_defaults(params)
-        Ns = self.n_sat(m, params=params)
-        Nc = self.n_cen(m, params=params)
-        ng = self.ng_bar(halo_model, m, z, params=params) * (params["H0"]/100)**3
+       
+        Ns = self.n_sat(m)
+        Nc = self.n_cen(m)
+        ng = self.ng_bar(halo_model, m, z) * (halo_model.emulator.H0 / 100)**3
 
-        _, u_m = self.u_k_matter(halo_model, k, m, z, params=params)
+        _, u_m = self.u_k_matter(halo_model, k, m, z)
     
         moment_funcs = [
             

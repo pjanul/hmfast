@@ -49,9 +49,9 @@ class tSZTracer(BaseTracer):
 
     # --- End JAX PyTree Registration ---
         
-    def kernel(self,emulator, z, params=None):
-        params = merge_with_defaults(params)
-        h = params['H0']/100
+    def kernel(self,emulator, z):
+        
+        h = emulator.H0/100 
         
         # Get electon mass in eV, Thomson cross section in cm^2, and Mpc/h in cm
         m_e = Const._m_e_ * Const._c_**2 / Const._eV_

@@ -64,7 +64,7 @@ class BaseTracer(ABC):
 
 
     @abstractmethod
-    def kernel(self, emulator, z, params=None):
+    def kernel(self, emulator, z):
         """
         Compute the tracer's radial kernel W(z). All child classes must have a version of this function implemented.
         """

@@ -49,10 +49,9 @@ class kSZTracer(BaseTracer):
 
     # ---------------- End JAX PyTree Registration ---------------- #
 
-    def kernel(self, emulator, z, params=None):
+    def kernel(self, emulator, z):
         # sigmaT / m_prot in (Mpc/h)**2/(Msun/h) which is required for kSZ
-        params = merge_with_defaults(params)
-        sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_ * params["H0"] / 100
+        sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_ * emulator.H0 / 100
         return sigma_T_over_m_p / (1.0 + z)
 
         

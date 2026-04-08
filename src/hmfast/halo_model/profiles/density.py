@@ -17,20 +17,19 @@ from hmfast.halo_model.profiles import HaloProfile, HankelTransform
 
 class DensityProfile(HaloProfile):
     
-    def u_k(self, halo_model, k, m, z, moment=1, params=None):
+    def u_k(self, halo_model, k, m, z, moment=1):
         """
         Compute the kSZ tracer u_ell (Nk, Nm, Nz).
         Supports arbitrary input shapes for k, m, and z.
         """
         
-        params = merge_with_defaults(params)
-        h = params['H0'] / 100.0
+        h = halo_model.emulator.H0 / 100
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Compute r_delta and ell_delta
         delta = halo_model.mass_definition.delta
-        r_delta = halo_model.r_delta(m, z, params=params)
-        d_A_z = jnp.atleast_1d(halo_model.emulator.angular_diameter_distance(z, params=params)) * h
+        r_delta = halo_model.r_delta(m, z)
+        d_A_z = jnp.atleast_1d(halo_model.emulator.angular_diameter_distance(z)) * h
         ell_delta = d_A_z[None, :] / r_delta
         
         # chi: (Nz,) -> Target ell grid: (Nk, Nz)
@@ -38,14 +37,13 @@ class DensityProfile(HaloProfile):
         ell_target = k[:, None] * chi[None, :] - 0.5 
     
         # Calculate kSZ Prefactor as (Nm, Nz)
-        vrms = jnp.sqrt(halo_model.emulator.v_rms_squared(z, params=params))
+        vrms = jnp.sqrt(halo_model.emulator.v_rms_squared(z))
         mu_e = 1.14
         f_free = 1.0
         prefactor = (4 * jnp.pi * r_delta**3 * f_free / mu_e * (1 + z)[None, :]**3 / chi[None, :]**2 * vrms[None, :])
     
         # Get native Hankel transform outputs, which may not align with the k from this function's input
-        #k_native, u_k_native = self.u_k_hankel(m, z, params=params) 
-        k_native, u_k_native = self.u_k_hankel(halo_model, self.x, m, z, params=params)   # New way
+        k_native, u_k_native = self.u_k_hankel(halo_model, self.x, m, z)   # New way
         
         # Calculate native u_ell and the native ell grid
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
@@ -160,7 +158,7 @@ class B16DensityProfile(DensityProfile):
         return presets[key]
         
 
-    def profile(self, halo_model, x, m, z, params=None):
+    def profile(self, halo_model, x, m, z):
         """
         Battaglia et al. 2016 gas density profile (AGN feedback model).
         Fully vectorized to support:
@@ -169,8 +167,7 @@ class B16DensityProfile(DensityProfile):
             z.shape = (Nz,)
         Output shape: (Nx, Nm, Nz)
         """
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+        cparams = halo_model.emulator.get_all_cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         h = cparams["h"]
 
@@ -182,7 +179,7 @@ class B16DensityProfile(DensityProfile):
         x_b, m_b, z_b = x[:, None, None], m[None, :, None], z[None, None, :]      # (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
         
         # Critical density broadcast to (1, 1, Nz)
-        rho_crit_z = jnp.atleast_1d(halo_model.emulator.critical_density(z, params=params))[None, None, :]
+        rho_crit_z = jnp.atleast_1d(halo_model.emulator.critical_density(z))[None, None, :]
         
         # Mass scaling logic
         m_200c_msun = m_b / h
@@ -221,16 +218,15 @@ class NFWDensityProfile(DensityProfile):
         self._hankel = HankelTransform(self._x, nu=0.5)
         
 
-    def profile(self, halo_model, x, m, z, params=None):
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+    def profile(self, halo_model, x, m, z):
+        cparams = halo_model.emulator.get_all_cosmo_params()
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
        
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Get scale radius r_s
-        r_delta = halo_model.r_delta(m, z, params=params)
-        c_delta = halo_model.c_delta(m, z, params=params)
+        r_delta = halo_model.r_delta(m, z)
+        c_delta = halo_model.c_delta(m, z)
         r_s = r_delta / c_delta # (Nm, Nz)
         
         # Calculate rho_s
@@ -313,7 +309,7 @@ class BCMDensityProfile(DensityProfile):
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
 
 
-    def profile(self, halo_model, x, m, z, params=None):
+    def profile(self, halo_model, x, m, z):
         """
         BCM gas density profile based.
         
@@ -324,8 +320,8 @@ class BCMDensityProfile(DensityProfile):
         Returns:
             rho_gas: Gas density in [M_sun h^2 / Mpc^3] (Nx, Nm, Nz)
         """
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params)
+       
+        cparams = halo_model.emulator.get_all_cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Broadcasting shapes: (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
@@ -333,7 +329,7 @@ class BCMDensityProfile(DensityProfile):
         xb, mb, zb = x[:, None, None], m[None, :, None], z[None, None, :]
         
         # This model is calibrated for the virial radius 
-        r_vir = halo_model.r_delta(m, z, mass_definition=MassDefinition("vir", "critical"), params=params)
+        r_vir = halo_model.r_delta(m, z, mass_definition=MassDefinition("vir", "critical"))
         r_asked = xb * r_vir
         
         # Redshift Dependent Mc (Matching your C logic)

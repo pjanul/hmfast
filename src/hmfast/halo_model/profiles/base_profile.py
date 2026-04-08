@@ -46,7 +46,7 @@ class HaloProfile:
         return False
 
         
-    def u_k_hankel(self, halo_model, x, m, z, params=None):
+    def u_k_hankel(self, halo_model, x, m, z):
         """
         Hankel-transform a 3D halo/tracer profile to u_ell for halo model use.
     
@@ -62,21 +62,20 @@ class HaloProfile:
             k values over which the hankel transform will be evaluated. 
             If None, the transform's natural k grid will be output.
             If not None, the transform will be inteprolated to match this k
-        params : dict, optional
-            Parameter dictionary
+       
 
         Returns ell, u_ell_m
     
         """
 
-        params = merge_with_defaults(params)
-        cparams = halo_model.emulator.get_all_cosmo_params(params=params)
-        h = params['H0']/100
+       
+        cparams = halo_model.emulator.get_all_cosmo_params()
+        h = cparams['h']
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(m_val, z_val):
-            profile = jnp.squeeze(self.profile(halo_model, x, m_val, z_val, params=params))  # remove extra axes
+            profile = jnp.squeeze(self.profile(halo_model, x, m_val, z_val))  # remove extra axes
             return profile * x**0.5 * W_x  # shape (Nx,)
 
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
@@ -88,20 +87,20 @@ class HaloProfile:
  
         return k_native, u_k_native
 
-    def u_k_matter(self, halo_model, k, m, z, params=None):
+    def u_k_matter(self, halo_model, k, m, z):
         """
         Calculate u^m(k, M, z) supporting independent dimensions for k, m, and z.
         
         Returns u_k_m with shape (N_k, N_m, N_z).
         """
-        params = merge_with_defaults(params)
+       
         
         # Ensure all inputs are 1D arrays
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Get c_delta and r_delta
-        c_delta = halo_model.c_delta(m, z, params=params)
-        r_delta = halo_model.r_delta(m, z, params=params)
+        c_delta = halo_model.c_delta(m, z)
+        r_delta = halo_model.r_delta(m, z)
         lambda_val = 1.0 
         
         # Compute analytical profile q terms with shape: (N_k, N_m, N_z)

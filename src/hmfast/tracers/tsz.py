@@ -48,7 +48,7 @@ class tSZTracer(BaseTracer):
 
     # --- End JAX PyTree Registration ---
         
-    def kernel(self,emulator, z):
+    def kernel(self, emulator, z):
         
         h = emulator.H0/100 
         

@@ -26,9 +26,9 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     Refactored with individual float attributes to support JAX JIT and Grad.
     """
 
-    def __init__(self, sigma_log10M_HOD=0.68, alpha_s_HOD=1.30, M1_prime_HOD=10**12.7, M_min_HOD=10**11.8, M0_HOD=0.0):        
+    def __init__(self, sigma_log10M=0.68, alpha_s=1.30, M1_prime=10**12.7, M_min=10**11.8, M0=0.0):        
         
-        self.sigma_log10M_HOD, self.alpha_s_HOD, self.M1_prime_HOD, self.M_min_HOD, self.M0_HOD  = sigma_log10M_HOD, alpha_s_HOD, M1_prime_HOD, M_min_HOD, M0_HOD
+        self.sigma_log10M, self.alpha_s, self.M1_prime, self.M_min, self.M0  = sigma_log10M, alpha_s, M1_prime, M_min, M0
 
     @property
     def has_central_contribution(self):
@@ -39,7 +39,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def tree_flatten(self):
         # Dynamic leaves (JAX will track these for gradients/jit) and static metadata (changes will trigger a recompile)
-        leaves = (self.sigma_log10M_HOD, self.alpha_s_HOD, self.M1_prime_HOD, self.M_min_HOD, self.M0_HOD)
+        leaves = (self.sigma_log10M, self.alpha_s, self.M1_prime, self.M_min, self.M0)
         return (leaves, None)
 
 
@@ -49,7 +49,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
 
     def update(self, **kwargs):
-        names = ['sigma_log10M_HOD', 'alpha_s_HOD', 'M1_prime_HOD', 'M_min_HOD', 'M0_HOD']
+        names = ['sigma_log10M', 'alpha_s', 'M1_prime', 'M_min', 'M0']
         
         # Block typos immediately
         if not set(kwargs).issubset(names):
@@ -64,12 +64,12 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     def n_cen(self, m):
         """Mean central occupation."""
         # Using attributes directly as they are now JAX-traced leaves
-        x = (jnp.log10(m) - jnp.log10(self.M_min_HOD)) / self.sigma_log10M_HOD
+        x = (jnp.log10(m) - jnp.log10(self.M_min)) / self.sigma_log10M
         return 0.5 * (1.0 + erf(x))
 
     def n_sat(self, m):
         """Mean satellite occupation."""
-        pow_term = jnp.maximum((m - self.M0_HOD) / self.M1_prime_HOD, 0.0)**self.alpha_s_HOD
+        pow_term = jnp.maximum((m - self.M0) / self.M1_prime, 0.0)**self.alpha_s
         return self.n_cen(m) * pow_term
 
     def ng_bar(self, halo_model, m, z):

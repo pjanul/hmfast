@@ -87,7 +87,7 @@ class Emulator:
         
         invalid = set(kwargs) - set(names)
         if invalid:
-            raise ValueError(f"Invalid Emulator parameter(s): {invalid}")
+            raise ValueError(f"Invalid cosmological parameter(s): {invalid}")
     
         # Flatten the current instance
         leaves, treedef = jax.tree_util.tree_flatten(self)
@@ -120,13 +120,14 @@ class Emulator:
             "EE":   ("TTTEEE", EmulatorLoader),
             "TE":   ("TTTEEE", EmulatorLoaderPCA),
             "PP":   ("PP", EmulatorLoader),
+            "BB":   ("BB", EmulatorLoader),
             "DER":  ("derived-parameters", EmulatorLoader),
         }
     
         try:
             subdir, loader_cls = key_map[key]
         except KeyError:
-            raise KeyError(f"Unknown emulator key: {key}")
+            raise KeyError(f"Unknown key: {key}")
     
         self._emu[key] = loader_cls(os.path.join(self._base_path(), subdir, f"{key}_{_COSMO_MODELS[self.cosmo_model]['suffix']}"))
         return self._emu[key]
@@ -141,7 +142,7 @@ class Emulator:
             'H0': self.H0,
             'omega_cdm': self.omega_cdm,
             'omega_b': self.omega_b,
-            'ln10^{10}A_s': self.ln1e10A_s,  # Mapping your attribute to emulator key
+            'ln10^{10}A_s': self.ln1e10A_s,  # Mapping attribute to what the emulator expects (ln10^{10}A_s is not a valid variable name)
             'n_s': self.n_s,
             'tau_reio': self.tau_reio,
             'm_ncdm': self.m_ncdm,
@@ -468,26 +469,69 @@ class Emulator:
     # CMB
     # ------------------------------------------------------------------
 
-    def cmb_dls(self, lmax=10000):
+    # def cmb_dls(self, lmax=10000):
         
-        params = self._to_dict()
+    #     params = self._to_dict()
 
-        tt = self._load_emulator("TT").ten_to_predictions(params)
-        ee = self._load_emulator("EE").ten_to_predictions(params)
-        te = self._load_emulator("TE").predictions(params)
-        pp = self._load_emulator("PP").ten_to_predictions(params)
+    #     tt = self._load_emulator("TT").ten_to_predictions(params)
+    #     ee = self._load_emulator("EE").ten_to_predictions(params)
+    #     te = self._load_emulator("TE").predictions(params)
+    #     pp = self._load_emulator("PP").ten_to_predictions(params)
 
-        n = min(len(tt), len(ee), len(te), len(pp), lmax - 1)
+    #     n = min(len(tt), len(ee), len(te), len(pp), lmax - 1)
+    #     ell = jnp.arange(2, n + 2)
+
+    #     return {
+    #         "ell": ell,
+    #         "tt": tt[:n],
+    #         "ee": ee[:n],
+    #         "te": te[:n],
+    #         "pp": pp[:n] / (2 * jnp.pi),
+    #     }
+
+
+    def _get_ell_and_n(self, emu_preds, lmax):
+        """Helper to determine the multipole range."""
+        n = min(len(emu_preds), lmax - 1)
         ell = jnp.arange(2, n + 2)
+        return ell, n
 
-        return {
-            "ell": ell,
-            "tt": tt[:n],
-            "ee": ee[:n],
-            "te": te[:n],
-            "pp": pp[:n] / (2 * jnp.pi),
-        }
+    #@partial(jax.jit, static_argnums=(1,))
+    def cl_tt(self, lmax=10000):
+        params = self._to_dict()
+        preds = self._load_emulator("TT").ten_to_predictions(params)
+        ell, n = self._get_ell_and_n(preds, lmax)
+        return ell, preds[:n]
 
+    #@partial(jax.jit, static_argnums=(1,))
+    def cl_ee(self, lmax=10000):
+        params = self._to_dict()
+        preds = self._load_emulator("EE").ten_to_predictions(params)
+        ell, n = self._get_ell_and_n(preds, lmax)
+        return ell, preds[:n]
+
+    #@partial(jax.jit, static_argnums=(1,))
+    def cl_te(self, lmax=10000):
+        params = self._to_dict()
+        preds = self._load_emulator("TE").predictions(params)
+        ell, n = self._get_ell_and_n(preds, lmax)
+        return ell, preds[:n]
+
+    #@partial(jax.jit, static_argnums=(1,))
+    def cl_pp(self, lmax=10000):
+        params = self._to_dict()
+        preds = self._load_emulator("PP").ten_to_predictions(params)
+        ell, n = self._get_ell_and_n(preds, lmax)
+        # Apply the 1/(2pi) normalization used in your original code
+        return ell, preds[:n] / (2 * jnp.pi)
+
+    def cl_bb(self, lmax=10000):
+        if self.cosmo_model != 6: 
+            raise ValueError("This function is only implemented for EDE-v2 emulators.")
+        params = self._to_dict()
+        preds = self._load_emulator("BB").ten_to_predictions(params)
+        ell, n = self._get_ell_and_n(preds, lmax)
+        return ell, preds[:n]
         
     # ------------------------------------------------------------------
     # Derived parameters

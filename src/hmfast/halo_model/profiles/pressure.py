@@ -67,12 +67,12 @@ class PressureProfile(HaloProfile):
 
 @register_pytree_node_class
 class GNFWPressureProfile(PressureProfile):
-    def __init__(self, x=None, P0_GNFW=8.130, alpha_GNFW=1.0620, beta_GNFW=5.4807, gamma_GNFW=0.3292, B=1.4):
+    def __init__(self, x=None, P0=8.130, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4):
 
-        self.P0_GNFW = P0_GNFW
-        self.alpha_GNFW = alpha_GNFW
-        self.beta_GNFW = beta_GNFW
-        self.gamma_GNFW = gamma_GNFW
+        self.P0 = P0
+        self.alpha = alpha
+        self.beta = beta
+        self.gamma = gamma
         self.B = B
 
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256) 
@@ -93,7 +93,7 @@ class GNFWPressureProfile(PressureProfile):
 
     def tree_flatten(self):
         # The dynamic parameters JAX should track
-        leaves = (self.P0_GNFW, self.alpha_GNFW, self.beta_GNFW, self.gamma_GNFW, self.B)
+        leaves = (self.P0, self.alpha, self.beta, self.gamma, self.B)
         # Static metadata: the grid and the Hankel object
         aux_data = (self._x, self._hankel)
         return (leaves, aux_data)
@@ -103,14 +103,14 @@ class GNFWPressureProfile(PressureProfile):
         x, hankel = aux_data
         # Create object without calling __init__ to avoid rebuilding Hankel
         obj = cls.__new__(cls)
-        obj.P0_GNFW, obj.alpha_GNFW, obj.beta_GNFW, obj.gamma_GNFW, obj.B = leaves
+        obj.P0, obj.alpha, obj.beta, obj.gamma, obj.B = leaves
         obj._x = x
         obj._hankel = hankel
         return obj
 
     def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
-        names = ["P0_GNFW", "alpha_GNFW", "beta_GNFW", "gamma_GNFW", "B"]
+        names = ["P0", "alpha", "beta", "gamma", "B"]
         
         # STRICT CHECK: Block typos immediately
         if not set(kwargs).issubset(names):
@@ -138,7 +138,7 @@ class GNFWPressureProfile(PressureProfile):
         
         H0 = halo_model.emulator.H0
         
-        P0, alpha, beta, gamma, B = self.P0_GNFW, self.alpha_GNFW, self.beta_GNFW, self.gamma_GNFW, self.B 
+        P0, alpha, beta, gamma, B = self.P0, self.alpha, self.beta, self.gamma, self.B 
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z) 
        
         # Helper variables for normalization
@@ -231,7 +231,7 @@ class B12PressureProfile(PressureProfile):
         h = cparams["h"]   
         
         # B12 fixed slopes
-        alpha_gnfw, gamma_gnfw = 1.0, -0.3
+        alpha, gamma = 1.0, -0.3
         
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
         x_b, m_b, z_b = x[:, None, None], m[None, :, None], z[None, None, :]
@@ -247,7 +247,7 @@ class B12PressureProfile(PressureProfile):
         
         # Normalized GNFW shape
         scaled_x = x_b / xc
-        p_x = (scaled_x)**gamma_gnfw * (1 + scaled_x**alpha_gnfw)**(-beta)
+        p_x = (scaled_x)**gamma * (1 + scaled_x**alpha)**(-beta)
         
         # Thermal Pressure Normalization (P200c)
         # Usually follows P200c = 200 * G * M200c * rho_crit * f_b / (2 * R200c)

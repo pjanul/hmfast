@@ -6,7 +6,7 @@ import jax.scipy as jscipy
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.tracers.base_tracer import BaseTracer
-from hmfast.halo_model.profiles import CIBProfile, Shang12CIBProfile
+from hmfast.halo_model.profiles import CIBProfile, S12CIBProfile
 from hmfast.utils import lambertw, Const
 from hmfast.download import get_default_data_path
 
@@ -20,7 +20,7 @@ class CIBTracer(BaseTracer):
     _required_profile_type = CIBProfile
     
     def __init__(self, profile=None):
-        super().__init__(profile=profile or Shang12CIBProfile())
+        super().__init__(profile=profile or S12CIBProfile())
         
     # --- JAX PyTree Registration ---
     def tree_flatten(self):
@@ -49,7 +49,7 @@ class CIBTracer(BaseTracer):
         chi = emulator.angular_diameter_distance(z) * (1 + z)
 
         # If Shang, apply the 1/(a * chi^2) factor. If Maniyar, return 1.0.
-        is_shang = isinstance(self.profile, Shang12CIBProfile)
+        is_shang = isinstance(self.profile, S12CIBProfile)
         s_nu_factor = jnp.where(is_shang, 1.0 / ((1.0 + z) * chi**2), 1.0)
         
         

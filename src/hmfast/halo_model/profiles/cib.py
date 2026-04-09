@@ -20,7 +20,7 @@ class CIBProfile(HaloProfile):
 
 
 @register_pytree_node_class
-class Shang12CIBProfile(CIBProfile):
+class S12CIBProfile(CIBProfile):
     def __init__(self, nu, L0_cib=6.4e-8, alpha_cib=0.36, beta_cib=1.75, gamma_cib=1.7,
                  T0_cib=24.4, m_eff_cib=10**12.6, sigma2_LM_cib=0.5, 
                  delta_cib=3.6, z_plateau_cib=1e100, M_min_cib=10**11.5):
@@ -250,7 +250,7 @@ class Shang12CIBProfile(CIBProfile):
 
 
 @register_pytree_node_class
-class Maniyar21CIBProfile(CIBProfile):
+class M21CIBProfile(CIBProfile):
     def __init__(self, nu, eta_max_cib=0.4028, zc_cib=1.5, tau_cib=1.204, fsub_cib=0.134, 
                  M_min_cib=10**11.5, m_eff_cib=10**12.6, sigma2_LM_cib=0.5, s_nu_data=None):
         self.nu = nu

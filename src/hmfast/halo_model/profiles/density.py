@@ -245,15 +245,15 @@ class NFWDensityProfile(DensityProfile):
 @register_pytree_node_class
 class BCMDensityProfile(DensityProfile):
     def __init__(self, x=None, 
-                 log10Mc_bcm=13.25, theta_ej_bcm = 4.711, eta_star_bcm = 0.2, 
-                 delta_bcm = 7.0, gamma_bcm = 2.5, mu_bcm = 1.0, nu_log10Mc_bcm = -0.038,
+                 log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2, 
+                 delta = 7.0, gamma = 2.5, mu = 1.0, nu_log10Mc = -0.038,
                 ):
         
         # Grid initialization (triggers the x.setter)
         self.x = x if x is not None else jnp.logspace(-4, 1, 256)
 
-        self.log10Mc_bcm, self.theta_ej_bcm, self.eta_star_bcm = log10Mc_bcm, theta_ej_bcm, eta_star_bcm
-        self.delta_bcm, self.gamma_bcm, self.mu_bcm, self.nu_log10Mc_bcm = delta_bcm, gamma_bcm, mu_bcm, nu_log10Mc_bcm
+        self.log10Mc, self.theta_ej, self.eta_star = log10Mc, theta_ej, eta_star
+        self.delta, self.gamma, self.mu, self.nu_log10Mc = delta, gamma, mu, nu_log10Mc
         
 
     @property
@@ -269,8 +269,8 @@ class BCMDensityProfile(DensityProfile):
     def tree_flatten(self):
         # Dynamic calibration parameters
         leaves = (
-            self.log10Mc_bcm, self.theta_ej_bcm, self.eta_star_bcm,
-            self.delta_bcm, self.gamma_bcm, self.mu_bcm, self.nu_log10Mc_bcm
+            self.log10Mc, self.theta_ej, self.eta_star,
+            self.delta, self.gamma, self.mu, self.nu_log10Mc
         )
         # Static metadata
         aux_data = (self._x, self._hankel)
@@ -282,8 +282,8 @@ class BCMDensityProfile(DensityProfile):
         obj = cls.__new__(cls)
         
         # Unpack leaves back into attributes
-        (obj.log10Mc_bcm, obj.theta_ej_bcm, obj.eta_star_bcm,
-         obj.delta_bcm, obj.gamma_bcm, obj.mu_bcm, obj.nu_log10Mc_bcm) = leaves
+        (obj.log10Mc, obj.theta_ej, obj.eta_star,
+         obj.delta, obj.gamma, obj.mu, obj.nu_log10Mc) = leaves
         
         obj._x = x
         obj._hankel = hankel
@@ -293,8 +293,8 @@ class BCMDensityProfile(DensityProfile):
     def update(self, **kwargs):
         """Helper to return a NEW profile with updated leaf values."""
         names = [
-            "log10Mc_bcm", "theta_ej_bcm", "eta_star_bcm",
-            "delta_bcm", "gamma_bcm", "mu_bcm", "nu_log10Mc_bcm"
+            "log10Mc", "theta_ej", "eta_star",
+            "delta", "gamma", "mu", "nu_log10Mc"
         ]
         
         # Strict Check: Block typos immediately
@@ -332,25 +332,25 @@ class BCMDensityProfile(DensityProfile):
         r_asked = xb * r_vir
         
         # Redshift Dependent Mc (Matching your C logic)
-        mc_z_log = self.log10Mc_bcm * (1. + zb)**self.nu_log10Mc_bcm
+        mc_z_log = self.log10Mc * (1. + zb)**self.nu_log10Mc
         mc = 10.**mc_z_log
         
         # Profile Components
         ms = 2.5e11  # M_sun/h, fixed value
         fstar_ms = 0.055 # Fixed value
-        f_star = fstar_ms * (m / ms)**(-self.eta_star_bcm)
+        f_star = fstar_ms * (m / ms)**(-self.eta_star)
         num = f_b - f_star
         
         # beta_m scaling (Mass dependent slope)
-        m_ratio_mu = (mb / mc)**self.mu_bcm
+        m_ratio_mu = (mb / mc)**self.mu
         beta_m = 3. * m_ratio_mu / (1. + m_ratio_mu)
         
         # Denominator 1: Large scale bound gas
         denom1 = (1. + 10. * r_asked / r_vir)**beta_m
         
         # Denominator 2: Ejected gas / transition,
-        scaled_r = r_asked / (self.theta_ej_bcm * r_vir)
-        denom2 = (1. + (scaled_r)**self.gamma_bcm)**((self.delta_bcm - beta_m) / self.gamma_bcm)
+        scaled_r = r_asked / (self.theta_ej * r_vir)
+        denom2 = (1. + (scaled_r)**self.gamma)**((self.delta - beta_m) / self.gamma)
     
         
         return num / (denom1 * denom2) 

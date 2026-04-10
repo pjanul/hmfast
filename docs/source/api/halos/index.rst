@@ -10,8 +10,8 @@ hmfast.halos
 
 .. toctree::
    :maxdepth: 2
+
    mass_function
    bias
    concentration
    profiles
-

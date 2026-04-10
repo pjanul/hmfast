@@ -10,7 +10,7 @@ Base Profile Utilities
 
    hmfast.halos.profiles.base_profile.HaloProfile
 
-Density Profiles
+Electron density Profiles
 ----------------
 
 .. autosummary::
@@ -21,7 +21,17 @@ Density Profiles
    hmfast.halos.profiles.density.NFWDensityProfile
    hmfast.halos.profiles.density.B16DensityProfile
 
-Matter Profiles
+Electron Pressure Profiles
+-----------------
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   hmfast.halos.profiles.pressure.PressureProfile
+   hmfast.halos.profiles.pressure.GNFWPressureProfile
+
+Matter Density Profiles
 ---------------
 
 .. autosummary::
@@ -31,15 +41,6 @@ Matter Profiles
    hmfast.halos.profiles.matter.MatterProfile
    hmfast.halos.profiles.matter.NFWMatterProfile
 
-Pressure Profiles
------------------
-
-.. autosummary::
-   :toctree: generated
-   :nosignatures:
-
-   hmfast.halos.profiles.pressure.PressureProfile
-   hmfast.halos.profiles.pressure.GNFWPressureProfile
 
 HOD Profiles
 ------------

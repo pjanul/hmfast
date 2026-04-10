@@ -43,3 +43,12 @@ intersphinx_mapping = {
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
+
+# --- Hide tree_flatten and tree_unflatten everywhere ---
+def skip_tree_methods(app, what, name, obj, skip, options):
+    if name in ("tree_flatten", "tree_unflatten"):
+        return True
+    return skip
+
+def setup(app):
+    app.connect("autodoc-skip-member", skip_tree_methods)

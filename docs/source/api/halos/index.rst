@@ -1,11 +1,17 @@
 hmfast.halos
 ============
 
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   hmfast.halos.HaloModel
+   hmfast.halos.MassDefinition
+
 .. toctree::
    :maxdepth: 2
-
-   core
    mass_function
    bias
    concentration
    profiles
+

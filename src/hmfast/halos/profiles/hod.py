@@ -80,7 +80,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
-        return jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val)
+        return jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val)
 
     def galaxy_bias(self, halo_model, m, z):
         """Compute the large-scale galaxy bias b_g(z)."""
@@ -94,7 +94,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         ng = self.ng_bar(halo_model, m, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)
-        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
+        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
         return bg_num / ng
 
 

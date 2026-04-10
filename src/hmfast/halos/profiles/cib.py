@@ -170,7 +170,7 @@ class S12CIBProfile(CIBProfile):
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) 
 
@@ -405,7 +405,7 @@ class M21CIBProfile(CIBProfile):
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model.counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) * maniyar_factor
 

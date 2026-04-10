@@ -26,8 +26,7 @@ Key features include:
    :caption: Contents:
 
    installation
-   emulator
-   halo_model
+   api/index
 
 
 Questions & Feedback

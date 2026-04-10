@@ -18,9 +18,10 @@ class PressureProfile(HaloProfile):
         
         
         h = halo_model.cosmology.H0 / 100 
-        B = self.B
+        B = 1.0 #self.B
         delta = halo_model.mass_definition.delta
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+
         
         r_delta = halo_model.r_delta(m, z) / B**(1/3) # (Nm, Nz)
         d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
@@ -119,40 +120,43 @@ class GNFWPressureProfile(PressureProfile):
         leaves, treedef = jax.tree_util.tree_flatten(self)
         new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
-        
+    
 
     def profile(self, halo_model, x, m, z):
         """
         GNFW pressure profile as a function of dimensionless scaled radius x = r/r_delta.
-        
         Fully vectorized: supports
             x.shape = (Nx,)
             m.shape = (Nm,)
             z.shape = (Nz,)
         Output shape: (Nx, Nm, Nz)
         """
-       
-    
-        # Retrieve all required parameters and ensure all inputs are 1D  
-        
         H0 = halo_model.cosmology.H0
-        
-        P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B 
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z) 
-       
-        # Helper variables for normalization
+        P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B
+        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+    
+        # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
+        mass_def_old = halo_model.mass_definition
+        mass_def_500c = MassDefinition(500, "critical")
+        m500c = halo_model.convert_m_delta(m, z, mass_def_old, mass_def_500c)
+    
+        # Compute r_delta (input) and r_500c (for GNFW scaling)
+        r_delta = halo_model.r_delta(m, z)  # (Nm, Nz)
+        r_500c = halo_model.r_delta(m500c, z, mass_definition=mass_def_500c)  # (Nm, Nz)
+    
+        # Convert input x = r/r_delta to x_500c = r/r_500c
+        x_500c = x[:, None, None] * (r_delta[None, :, :] / r_500c[None, :, :])  # (Nx, Nm, Nz)
+    
+        # Compute normalization P_500c (with hydrostatic bias)
         h = H0 / 100.0
         c_km_s = Const._c_ / 1e3
         H = halo_model.cosmology.hubble_parameter(z) * c_km_s  # (Nz,)
         H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
-
-        # Corrected mass given the hydrostatic mass bias
-        m_delta_tilde = (m / B)[None, :, None]  # (1, Nm, 1)
+        m500c_tilde = (m500c / B)[None, :, None]  # (1, Nm, 1)
+        P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
     
-        P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m_delta_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
-    
-        # Scaled radius and GNFW formula
-        scaled_x = c500 * x[:, None, None]   # (Nx, Nm, Nz)
+        # GNFW profile
+        scaled_x = c500 * x_500c  # (Nx, Nm, Nz)
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
     
         return Pe  # shape: (Nx, Nm, Nz)
@@ -171,7 +175,6 @@ class B12PressureProfile(PressureProfile):
         self.alpha_m_P0, self.alpha_m_xc, self.alpha_m_beta = alpha_m_P0, alpha_m_xc, alpha_m_beta
         self.alpha_z_P0, self.alpha_z_xc, self.alpha_z_beta = alpha_z_P0, alpha_z_xc, alpha_z_beta
 
-        self.B = 1.0  # Need to get rid of this eventually
         # Grid initialization
         self.x = x if x is not None else jnp.logspace(-4, 1, 256)
 
@@ -224,37 +227,44 @@ class B12PressureProfile(PressureProfile):
         return jax.tree_util.tree_unflatten(treedef, new_leaves)
 
     def profile(self, halo_model, x, m, z):
-       
+        """
+        Battaglia 2012 pressure profile generalized for arbitrary mass definition.
+        Always normalizes and scales using the native 200c definition.
+        """
         cparams = halo_model.cosmology.get_all_cosmo_params()
-        h = cparams["h"]   
-        
-        # B12 fixed slopes
+        h = cparams["h"]
         alpha, gamma = 1.0, -0.3
-        
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        x_b, m_b, z_b = x[:, None, None], m[None, :, None], z[None, None, :]
-        
-        # M200c mass scaling, making sure to apply hydrostatic bias factor
-        m_delta_tilde =  m[None, :, None]  # (m / self.B)[None, :, None]  # (1, Nm, 1)
-        mass_ratio = (m_delta_tilde / h) / 1e14
-        
-        # Compute Shape Parameters via consistent scaling naming
-        P0 = self.A_P0 * mass_ratio**self.alpha_m_P0 * (1 + z_b)**self.alpha_z_P0 
-        xc = self.A_xc * mass_ratio**self.alpha_m_xc * (1 + z_b)**self.alpha_z_xc 
-        beta = self.A_beta * mass_ratio**self.alpha_m_beta * (1 + z_b)**self.alpha_z_beta 
-        
+    
+        # Convert input mass to M200c for normalization
+        mass_def_old = halo_model.mass_definition
+        mass_def_200c = MassDefinition(200, "critical")
+        m200c = halo_model.convert_m_delta(m, z, mass_def_old, mass_def_200c)
+    
+        # Compute r_delta (input) and r_200c (for B12 scaling)
+        r_delta = halo_model.r_delta(m, z)  # (Nm, Nz)
+        r_200c = halo_model.r_delta(m200c, z, mass_definition=mass_def_200c)  # (Nm, Nz)
+    
+        # Rescale x: x_200c = x * (r_delta / r_200c)
+        x_200c = x[:, None, None] * (r_delta[None, :, :] / r_200c[None, :, :])  # (Nx, Nm, Nz)
+        m200c_b = m200c[None, :, None]
+        z_b = z[None, None, :]
+        mass_ratio = (m200c_b / h) / 1e14
+    
+        # Compute shape parameters using M200c
+        P0 = self.A_P0 * mass_ratio**self.alpha_m_P0 * (1 + z_b)**self.alpha_z_P0
+        xc = self.A_xc * mass_ratio**self.alpha_m_xc * (1 + z_b)**self.alpha_z_xc
+        beta = self.A_beta * mass_ratio**self.alpha_m_beta * (1 + z_b)**self.alpha_z_beta
+    
         # Normalized GNFW shape
-        scaled_x = x_b / xc
+        scaled_x = x_200c / xc
         p_x = (scaled_x)**gamma * (1 + scaled_x**alpha)**(-beta)
-        
+    
         # Thermal Pressure Normalization (P200c)
-        # Usually follows P200c = 200 * G * M200c * rho_crit * f_b / (2 * R200c)
         rho_crit = jnp.atleast_1d(halo_model.cosmology.critical_density(z))
         H = jnp.atleast_1d(halo_model.cosmology.hubble_parameter(z)) * (Const._c_ / 1e3)
-        r_delta = halo_model.r_delta(m, z)
-
-
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
-        P_200c = ((m_b / r_delta[None, :, :]) *  f_b *  2.61051e-18 * (H[None, None, :])**2 )   #2.61051e-18 should be written with proper constants
-                
+        # Use M200c and r_200c for normalization
+        P_200c = ((m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :])**2)
+    
         return P_200c * P0 * p_x

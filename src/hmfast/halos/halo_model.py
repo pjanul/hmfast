@@ -115,15 +115,24 @@ class HaloModel:
     #@partial(jax.jit, static_argnums=0)
     def delta_vir_to_crit(self, z):
         """
-        Compute the virial overdensity with respect to the critical density, $\Delta_{\mathrm{vir}}(z)$, using Bryan & Norman (1998):
+        Compute the virial overdensity with respect to the critical density, $\Delta_{\mathrm{vir}}(z)$,
+        using the Bryan & Norman (1998) fitting formula for a flat universe.
     
-            $\Delta_{\mathrm{vir}}(z) = 18\pi^2 + 82x - 39x^2$, where $x = \Omega_m(z) - 1$
+        The formula is:
+            $$
+            \Delta_{\mathrm{vir}}(z) = 18\pi^2 + 82x - 39x^2
+            $$
+        where $x = \Omega_m(z) - 1$.
     
-        **Parameters**
-            **z** (float or array-like): Redshift(s).
+        Parameters
+        ----------
+        z : float or array-like
+            Redshift(s) at which to compute the virial overdensity.
     
-        **Returns**
-            **delta_vir** (float or array-like): Virial overdensity relative to the critical density at $z$.
+        Returns
+        -------
+        delta_vir : float or array-like
+            Virial overdensity relative to the critical density at redshift $z$.
         """
         omega_m = self.cosmology.omega_m(z)
         x = omega_m - 1.0
@@ -214,15 +223,23 @@ class HaloModel:
    
     def r_delta(self, m, z, mass_definition=None):
         """
-        Compute the halo radius $r_\Delta$ for a given mass and overdensity.
+        Compute the halo radius corresponding to a given mass and overdensity at redshift z.
     
-        **Parameters**
-            **m** (float or array-like): Halo mass(es).
-            **z** (float or array-like): Redshift(s).
-            **mass_definition** (MassDefinition, optional): Overdensity definition (uses self.mass_definition if None).
+        Parameters
+        ----------
+        z : float
+            Redshift at which to compute the radius.
+        m : float
+            Halo mass enclosed within the overdensity radius, in the same units as used for rho_crit.
+        delta : float
+            Overdensity parameter relative to the critical density (e.g., 200 for M_200).
+        
+       
     
-        **Returns**
-            **r_delta** (float or array-like): Halo radius corresponding to the given mass and overdensity.
+        Returns
+        -------
+        float
+            Radius r_delta (e.g., R_200) within which the average density equals delta * rho_crit(z).
         """
         
         mass_definition = self.mass_definition if mass_definition is None else mass_definition
@@ -344,14 +361,17 @@ class HaloModel:
         """
         Compute the halo mass function $dn/d\ln M$ for arbitrary mass and redshift arrays.
     
-        **Parameters**
-            **m** (array-like): Halo mass grid.
-            **z** (array-like): Redshift grid.
+        Parameters
+        ----------
+        m : array-like
+            Halo mass grid.
+        z : array-like
+            Redshift grid.
     
-        **Returns**
-            **dn_dlnM** (array-like): Halo mass function values, shape (len(m), len(z)).
-    
-        The halo mass function is evaluated using the current mass function model and cosmology.
+        Returns
+        -------
+        dndlnM : array-like
+            Halo mass function values, shape (len(m), len(z)).
         """
         
         ln_x_grid, ln_M_grid, dn_dlnM_grid, _ = self._compute_hmf_grid()
@@ -370,13 +390,19 @@ class HaloModel:
         """
         Compute the halo bias $b_1$ or $b_2$ for arbitrary mass and redshift arrays.
     
-        **Parameters**
-            **m** (array-like): Halo mass grid.
-            **z** (array-like): Redshift grid.
-            **order** (int): Bias order (1 for linear, 2 for quadratic).
+        Parameters
+        ----------
+        m : array-like
+            Halo mass grid.
+        z : array-like
+            Redshift grid.
+        order : int, default 1
+            Bias order (1 for linear, 2 for quadratic).
     
-        **Returns**
-            **bias** (array-like): Halo bias values, shape (len(m), len(z)).
+        Returns
+        -------
+        bias : array-like
+            Halo bias values, shape (len(m), len(z)).
         """
         
        
@@ -413,16 +439,25 @@ class HaloModel:
         """
         Compute the 1-halo term of the 3D power spectrum $P_{1h}(k, z)$ for two tracers.
     
-        **Parameters**
-            **tracer1** (Tracer): First tracer object.
-            **tracer2** (Tracer or None): Second tracer object (if None, uses tracer1).
-            **k** (array-like): Wavenumber grid.
-            **m** (array-like): Mass grid.
-            **z** (array-like): Redshift grid.
-            **kstar_damping** (float): Damping scale for small-scale power.
+        Parameters
+        ----------
+        tracer1 : Tracer
+            First tracer object.
+        tracer2 : Tracer or None
+            Second tracer object (if None, uses tracer1).
+        k : array-like
+            Wavenumber grid.
+        m : array-like
+            Mass grid.
+        z : array-like
+            Redshift grid.
+        kstar_damping : float, default 0.01
+            Damping scale for small-scale power.
     
-        **Returns**
-            **pk1h** (array-like): 1-halo power spectrum, shape (len(k), len(z)).
+        Returns
+        -------
+        pk_1h : array-like
+            1-halo power spectrum, shape (len(k), len(z)).
         """
     
         h = self.cosmology.H0 / 100
@@ -481,16 +516,25 @@ class HaloModel:
         """
         Compute the 1-halo term of the angular power spectrum $C_\ell^{1h}$.
     
-        **Parameters**
-            **tracer1** (Tracer): First tracer object.
-            **tracer2** (Tracer or None): Second tracer object (if None, uses tracer1).
-            **l** (array-like): Multipole grid.
-            **m** (array-like): Mass grid.
-            **z** (array-like): Redshift grid.
-            **kstar_damping** (float): Damping scale for small-scale power.
+        Parameters
+        ----------
+        tracer1 : Tracer
+            First tracer object.
+        tracer2 : Tracer or None
+            Second tracer object (if None, uses tracer1).
+        l : array-like
+            Multipole grid.
+        m : array-like
+            Mass grid.
+        z : array-like
+            Redshift grid.
+        kstar_damping : float, default 0.01
+            Damping scale for small-scale power.
     
-        **Returns**
-            **cl1h** (array-like): 1-halo angular power spectrum, shape (len(l),).
+        Returns
+        -------
+        cl_1h : array-like
+            1-halo angular power spectrum, shape (len(l),).
         """
         
         h = self.cosmology.H0 / 100
@@ -522,15 +566,23 @@ class HaloModel:
         """
         Compute the 2-halo term of the 3D power spectrum $P_{2h}(k, z)$ for two tracers.
     
-        **Parameters**
-            **tracer1** (Tracer): First tracer object.
-            **tracer2** (Tracer or None): Second tracer object (if None, uses tracer1).
-            **k** (array-like): Wavenumber grid.
-            **m** (array-like): Mass grid.
-            **z** (array-like): Redshift grid.
+        Parameters
+        ----------
+        tracer1 : Tracer
+            First tracer object.
+        tracer2 : Tracer or None
+            Second tracer object (if None, uses tracer1).
+        k : array-like
+            Wavenumber grid.
+        m : array-like
+            Mass grid.
+        z : array-like
+            Redshift grid.
     
-        **Returns**
-            **pk2h** (array-like): 2-halo power spectrum, shape (len(k), len(z)).
+        Returns
+        -------
+        pk_2h : array-like
+            2-halo power spectrum, shape (len(k), len(z)).
         """
         
         cparams = self.cosmology.get_all_cosmo_params()
@@ -578,15 +630,23 @@ class HaloModel:
         """
         Compute the 2-halo term of the angular power spectrum $C_\ell^{2h}$.
     
-        **Parameters**
-            **tracer1** (Tracer): First tracer object.
-            **tracer2** (Tracer or None): Second tracer object (if None, uses tracer1).
-            **l** (array-like): Multipole grid.
-            **m** (array-like): Mass grid.
-            **z** (array-like): Redshift grid.
+        Parameters
+        ----------
+        tracer1 : Tracer
+            First tracer object.
+        tracer2 : Tracer or None
+            Second tracer object (if None, uses tracer1).
+        l : array-like
+            Multipole grid.
+        m : array-like
+            Mass grid.
+        z : array-like
+            Redshift grid.
     
-        **Returns**
-            **cl2h** (array-like): 2-halo angular power spectrum, shape (len(l),).
+        Returns
+        -------
+        cl_2h : array-like
+            2-halo angular power spectrum, shape (len(l),).
         """
         
         tracer2 = tracer1 if tracer2 is None else tracer2

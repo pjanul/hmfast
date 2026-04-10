@@ -1,9 +1,6 @@
 hmfast.tracers
 ==============
 
-.. automodule:: hmfast.tracers
-   :show-inheritance:
-
 
 Tracers
 

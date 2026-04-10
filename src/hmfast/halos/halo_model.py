@@ -436,7 +436,7 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_1h(self, tracer1, tracer2, k, m, z,  kstar_damping=0.01):
-         """
+        """
         Compute the 1-halo term of the 3D power spectrum $P_{1h}(k, z)$ for two tracers.
     
         Parameters
@@ -513,7 +513,7 @@ class HaloModel:
        
     @partial(jax.jit, static_argnums=(1, 2))
     def cl_1h(self, tracer1, tracer2, l, m, z, kstar_damping=0.01):
-         """
+        """
         Compute the 1-halo term of the angular power spectrum $C_\ell^{1h}$.
     
         Parameters

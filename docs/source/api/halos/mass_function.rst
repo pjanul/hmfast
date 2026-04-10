@@ -8,5 +8,4 @@ Core Classes
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.HaloModel
-   hmfast.halos.MassDefinition
+   hmfast.halos.T10HaloMass

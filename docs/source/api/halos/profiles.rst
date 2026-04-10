@@ -17,7 +17,6 @@ Electron density Profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.density.DensityProfile
    hmfast.halos.profiles.density.NFWDensityProfile
    hmfast.halos.profiles.density.B16DensityProfile
 
@@ -28,7 +27,6 @@ Electron Pressure Profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.pressure.PressureProfile
    hmfast.halos.profiles.pressure.GNFWPressureProfile
 
 Matter Density Profiles
@@ -38,7 +36,6 @@ Matter Density Profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.matter.MatterProfile
    hmfast.halos.profiles.matter.NFWMatterProfile
 
 
@@ -49,7 +46,6 @@ HOD Profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.hod.GalaxyHODProfile
    hmfast.halos.profiles.hod.StandardGalaxyHODProfile
 
 CIB Profiles
@@ -59,6 +55,5 @@ CIB Profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.cib.CIBProfile
    hmfast.halos.profiles.cib.S12CIBProfile
    hmfast.halos.profiles.cib.M21CIBProfile

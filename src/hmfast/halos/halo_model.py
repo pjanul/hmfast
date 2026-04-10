@@ -387,7 +387,7 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=(3))
     def halo_bias(self, m, z, order=1):
-         """
+        """
         Compute the halo bias $b_1$ or $b_2$ for arbitrary mass and redshift arrays.
     
         Parameters

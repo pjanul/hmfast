@@ -24,11 +24,31 @@ jax.config.update("jax_enable_x64", True)
 @register_pytree_node_class
 class HaloModel:
     """
-    A differentiable halo model implementation using JAX.
-    
-    This class provides methods for computing halo model predictions
-    with automatic differentiation capabilities.
+    Differentiable halo model.
+
+    This class provides methods for computing halo model predictions with automatic differentiation,
+    including the halo mass function, bias, and power spectra for various tracers.
+
+    Parameters
+    ----------
+    cosmology : Cosmology, optional
+        Cosmology object (default: LCDM with cosmo_model=0).
+    mass_definition : MassDefinition, optional
+        Mass definition (default: delta=200, reference='critical').
+    mass_model : object, optional
+        Halo mass function model (default: T08HaloMass).
+    bias_model : object, optional
+        Halo bias model (default: T10HaloBias).
+    subhalo_mass_model : object, optional
+        Subhalo mass function model (default: TW10SubHaloMass).
+    concentration : object, optional
+        Concentration-mass relation (default: D08Concentration).
+    hm_consistency : bool, optional
+        Enforce halo model consistency corrections (default: True).
+    convert_masses : bool, optional
+        If True, convert masses between definitions as needed (default: False).
     """
+
     
     def __init__(self, 
                  cosmology=Cosmology(cosmo_model=0), 
@@ -41,15 +61,6 @@ class HaloModel:
                  convert_masses=False):
         """
         Initialize the halo model.
-        
-        Parameters
-        ----------
-        mass_model : function, default hmf_T08 (i.e. the halo mass function model from Tinker et al 2008)
-            Mass function to use.
-        bias_model : function, default hbf_T10 (i.e. the halo bias function model from Tinker et al 2010)
-            Bias function to use.
-        concentration : function, default c_D08 (i.e. the concentration-mass relation from Duffy et al 2008)
-            The concentration-mass relation
         """
         
         # Load cosmology and make sure the required files are loaded outside of jitted functions (note that DER is needed for CMB lensing tracers)
@@ -119,9 +130,9 @@ class HaloModel:
         using the Bryan & Norman (1998) fitting formula for a flat universe.
     
         The formula is:
-            $$
-            \Delta_{\mathrm{vir}}(z) = 18\pi^2 + 82x - 39x^2
-            $$
+        $$
+        \Delta_{\mathrm{vir}}(z) = 18\pi^2 + 82x - 39x^2
+        $$
         where $x = \Omega_m(z) - 1$.
     
         Parameters

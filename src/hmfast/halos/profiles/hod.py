@@ -41,8 +41,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     def _tree_unflatten(cls, aux, leaves):
         return cls(*leaves)
 
-
-    def update(self, **kwargs):
+    def update(self, sigma_log10M=None, alpha_s=None, M1_prime=None, M_min=None, M0=None):
         """
         Return a new profile instance with updated HOD parameters.
 
@@ -64,14 +63,17 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         StandardGalaxyHODProfile
             New profile instance with updated parameters.
         """
-        names = ['sigma_log10M', 'alpha_s', 'M1_prime', 'M_min', 'M0']
-        
-        # Block typos immediately
-        if not set(kwargs).issubset(names):
-            raise ValueError(f"Invalid galaxy HOD parameter(s): {set(kwargs) - set(names)}")
-    
         leaves, treedef = self._tree_flatten()
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        # Use existing values if the new ones are None
+        new_leaves = (
+            sigma_log10M if sigma_log10M is not None else self.sigma_log10M,
+            alpha_s if alpha_s is not None else self.alpha_s,
+            M1_prime if M1_prime is not None else self.M1_prime,
+            M_min if M_min is not None else self.M_min,
+            M0 if M0 is not None else self.M0,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
     # --- Physics Implementations ---

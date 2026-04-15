@@ -117,7 +117,46 @@ class B16DensityProfile(DensityProfile):
         return obj
 
 
-    def update(self, **kwargs):
+    # def update(self, **kwargs):
+    #     """
+    #     Return a new profile instance with updated calibration parameters.
+
+    #     Parameters
+    #     ----------
+    #     A_rho0 : float, optional
+    #     A_alpha : float, optional
+    #     A_beta : float, optional
+    #     alpha_m_rho0 : float, optional
+    #     alpha_m_alpha : float, optional
+    #     alpha_m_beta : float, optional
+    #     alpha_z_rho0 : float, optional
+    #     alpha_z_alpha : float, optional
+    #     alpha_z_beta : float, optional
+
+    #     Returns
+    #     -------
+    #     B16DensityProfile
+    #         New profile instance with updated parameters.
+    #     """
+    #     names = [
+    #         "A_rho0", "A_alpha", "A_beta",
+    #         "alpha_m_rho0", "alpha_m_alpha", "alpha_m_beta",
+    #         "alpha_z_rho0", "alpha_z_alpha", "alpha_z_beta"
+    #     ]
+        
+    #     # Strict Check: Block typos immediately
+    #     if not set(kwargs).issubset(names):
+    #         invalid = set(kwargs) - set(names)
+    #         raise ValueError(f"Invalid parameter(s): {invalid}. Expected: {names}")
+
+    #     leaves, treedef = self._tree_flatten()
+    #     # Create new leaf list by replacing values from kwargs if they exist
+    #     new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+    #     return self._tree_unflatten(treedef, new_leaves)
+
+    def update(self, A_rho0=None, A_alpha=None, A_beta=None,
+               alpha_m_rho0=None, alpha_m_alpha=None, alpha_m_beta=None,
+               alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None):
         """
         Return a new profile instance with updated calibration parameters.
 
@@ -138,20 +177,20 @@ class B16DensityProfile(DensityProfile):
         B16DensityProfile
             New profile instance with updated parameters.
         """
-        names = [
-            "A_rho0", "A_alpha", "A_beta",
-            "alpha_m_rho0", "alpha_m_alpha", "alpha_m_beta",
-            "alpha_z_rho0", "alpha_z_alpha", "alpha_z_beta"
-        ]
-        
-        # Strict Check: Block typos immediately
-        if not set(kwargs).issubset(names):
-            invalid = set(kwargs) - set(names)
-            raise ValueError(f"Invalid parameter(s): {invalid}. Expected: {names}")
-
         leaves, treedef = self._tree_flatten()
-        # Create new leaf list by replacing values from kwargs if they exist
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        new_leaves = (
+            A_rho0 if A_rho0 is not None else self.A_rho0,
+            A_alpha if A_alpha is not None else self.A_alpha,
+            A_beta if A_beta is not None else self.A_beta,
+            alpha_m_rho0 if alpha_m_rho0 is not None else self.alpha_m_rho0,
+            alpha_m_alpha if alpha_m_alpha is not None else self.alpha_m_alpha,
+            alpha_m_beta if alpha_m_beta is not None else self.alpha_m_beta,
+            alpha_z_rho0 if alpha_z_rho0 is not None else self.alpha_z_rho0,
+            alpha_z_alpha if alpha_z_alpha is not None else self.alpha_z_alpha,
+            alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
     @staticmethod
@@ -332,7 +371,8 @@ class BCMDensityProfile(DensityProfile):
         return obj
 
 
-    def update(self, **kwargs):
+    def update(self, log10Mc=None, theta_ej=None, eta_star=None, 
+               delta=None, gamma=None, mu=None, nu_log10Mc=None):
         """
         Return a new profile instance with updated calibration parameters.
 
@@ -351,19 +391,18 @@ class BCMDensityProfile(DensityProfile):
         BCMDensityProfile
             New profile instance with updated parameters.
         """
-        names = [
-            "log10Mc", "theta_ej", "eta_star",
-            "delta", "gamma", "mu", "nu_log10Mc"
-        ]
-        
-        # Strict Check: Block typos immediately
-        if not set(kwargs).issubset(names):
-            invalid = set(kwargs) - set(names)
-            raise ValueError(f"Invalid parameter(s): {invalid}. Expected: {names}")
-
         leaves, treedef = self._tree_flatten()
-        # Create new leaf list by replacing values from kwargs if they exist
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        new_leaves = (
+            log10Mc if log10Mc is not None else self.log10Mc,
+            theta_ej if theta_ej is not None else self.theta_ej,
+            eta_star if eta_star is not None else self.eta_star,
+            delta if delta is not None else self.delta,
+            gamma if gamma is not None else self.gamma,
+            mu if mu is not None else self.mu,
+            nu_log10Mc if nu_log10Mc is not None else self.nu_log10Mc,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
 

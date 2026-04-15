@@ -109,7 +109,7 @@ class GNFWPressureProfile(PressureProfile):
         obj._hankel = hankel
         return obj
 
-    def update(self, **kwargs):
+    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None):
         """
         Return a new profile instance with updated GNFW pressure profile parameters.
     
@@ -127,15 +127,17 @@ class GNFWPressureProfile(PressureProfile):
         GNFWPressureProfile
             New profile instance with updated parameters.
         """
-        names = ["P0", "c500", "alpha", "beta", "gamma", "B"]
-        
-        # STRICT CHECK: Block typos immediately
-        if not set(kwargs).issubset(names):
-            invalid = set(kwargs) - set(names)
-            raise ValueError(f"Invalid GNFW parameter(s): {invalid}. Expected: {names}")
-
         leaves, treedef = self._tree_flatten()
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        new_leaves = (
+            P0 if P0 is not None else self.P0,
+            c500 if c500 is not None else self.c500,
+            alpha if alpha is not None else self.alpha,
+            beta if beta is not None else self.beta,
+            gamma if gamma is not None else self.gamma,
+            B if B is not None else self.B,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
     
 
@@ -235,7 +237,9 @@ class B12PressureProfile(PressureProfile):
         obj._hankel = hankel
         return obj
 
-    def update(self, **kwargs):
+    def update(self, A_P0=None, A_xc=None, A_beta=None,
+               alpha_m_P0=None, alpha_m_xc=None, alpha_m_beta=None,
+               alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None):
         """
         Return a new profile instance with updated B12 pressure profile parameters.
     
@@ -256,18 +260,20 @@ class B12PressureProfile(PressureProfile):
         B12PressureProfile
             New profile instance with updated parameters.
         """
-        names = [
-            "A_P0", "A_xc", "A_beta",
-            "alpha_m_P0", "alpha_m_xc", "alpha_m_beta",
-            "alpha_z_P0", "alpha_z_xc", "alpha_z_beta", 
-        ]
-        
-        if not set(kwargs).issubset(names):
-            invalid = set(kwargs) - set(names)
-            raise ValueError(f"Invalid parameter(s): {invalid}. Expected: {names}")
-
         leaves, treedef = self._tree_flatten()
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        new_leaves = (
+            A_P0 if A_P0 is not None else self.A_P0,
+            A_xc if A_xc is not None else self.A_xc,
+            A_beta if A_beta is not None else self.A_beta,
+            alpha_m_P0 if alpha_m_P0 is not None else self.alpha_m_P0,
+            alpha_m_xc if alpha_m_xc is not None else self.alpha_m_xc,
+            alpha_m_beta if alpha_m_beta is not None else self.alpha_m_beta,
+            alpha_z_P0 if alpha_z_P0 is not None else self.alpha_z_P0,
+            alpha_z_xc if alpha_z_xc is not None else self.alpha_z_xc,
+            alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
     def profile(self, halo_model, x, m, z):

@@ -3,6 +3,7 @@ from . import concentration
 from . import massfunc
 from . import bias
 from .mass_definition import MassDefinition
+from . import profiles
 
 __all__ = [
     "HaloModel",
@@ -10,4 +11,5 @@ __all__ = [
     "massfunc",
     "bias",
     "MassDefinition",
+    "profiles",
 ]

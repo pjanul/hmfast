@@ -4,13 +4,13 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node_class
 
-from hmfast.tracers.base_tracer import BaseTracer
+from hmfast.tracers.base_tracer import Tracer
 from hmfast.halos.profiles import CIBProfile, S12CIBProfile
 from hmfast.utils import lambertw, Const
 from hmfast.download import get_default_data_path
 
 @register_pytree_node_class
-class CIBTracer(BaseTracer):
+class CIBTracer(Tracer):
     """
     Cosmic infrared background tracer.
     """

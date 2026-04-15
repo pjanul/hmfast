@@ -7,7 +7,7 @@ from hmfast.halos.profiles import HaloProfile
 
 
  
-class BaseTracer(ABC):
+class Tracer(ABC):
     """
     Abstract base class for cosmological tracers.
     All tracers to inherit from this class, which forces them to have certain callable functions )

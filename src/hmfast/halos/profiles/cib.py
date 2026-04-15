@@ -206,7 +206,7 @@ class S12CIBProfile(CIBProfile):
         #nu = self.nu 
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        # Compute the physical mass for ls and lc and then u_k_matter from BaseTracer
+        # Compute the physical mass for ls and lc and then u_k_matter from Tracer
         m_physical = m/h
         ls = self.l_sat(halo_model, m_physical, z, nu)
         lc = self.l_cen(halo_model, m_physical, z, nu)
@@ -439,7 +439,7 @@ class M21CIBProfile(CIBProfile):
         #nu = self.nu 
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        # Compute the physical mass for ls and lc and then u_k_matter from BaseTracer
+        # Compute the physical mass for ls and lc and then u_k_matter from Tracer
         m_physical = m/h
         ls = self.l_sat(halo_model, m_physical, z, nu)
         lc = self.l_cen(halo_model, m_physical, z, nu)

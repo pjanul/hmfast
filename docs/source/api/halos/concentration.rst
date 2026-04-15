@@ -1,7 +1,7 @@
 hmfast.halos.concentration
 =============
 
-Concentration Models
+Concentration-mass relations
 --------------------
 
 .. autosummary::

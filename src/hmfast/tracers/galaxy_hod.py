@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node_class
 
-from hmfast.tracers.base_tracer import BaseTracer
+from hmfast.tracers.base_tracer import Tracer
 from hmfast.halos.profiles import GalaxyHODProfile, StandardGalaxyHODProfile
 from hmfast.download import get_default_data_path
 
@@ -11,7 +11,7 @@ from hmfast.download import get_default_data_path
 jax.config.update("jax_enable_x64", True)
 
 @register_pytree_node_class
-class GalaxyHODTracer(BaseTracer):
+class GalaxyHODTracer(Tracer):
     """
     Galaxy counts tracer.
     """

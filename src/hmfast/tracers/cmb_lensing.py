@@ -5,7 +5,7 @@ import jax.scipy as jscipy
 from jax.scipy.special import sici, erf 
 from jax.tree_util import register_pytree_node_class
 
-from hmfast.tracers.base_tracer import BaseTracer
+from hmfast.tracers.base_tracer import Tracer
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
 from hmfast.halos.profiles import MatterProfile, NFWMatterProfile
@@ -13,7 +13,7 @@ jax.config.update("jax_enable_x64", True)
 
 
 @register_pytree_node_class
-class CMBLensingTracer(BaseTracer):
+class CMBLensingTracer(Tracer):
     """
     CMB weak lensing tracer.
     """

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from jax.tree_util import register_pytree_node_class
 
-from hmfast.tracers.base_tracer import BaseTracer
+from hmfast.tracers.base_tracer import Tracer
 from hmfast.utils import Const
 from hmfast.halos.profiles import PressureProfile, GNFWPressureProfile
 
@@ -11,7 +11,7 @@ jax.config.update("jax_enable_x64", True)
 
 
 @register_pytree_node_class
-class tSZTracer(BaseTracer):
+class tSZTracer(Tracer):
     """
     thermal Sunyaev-Zeldovich effect tracer.
     """

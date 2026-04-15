@@ -1,34 +1,68 @@
 import jax
 import jax.numpy as jnp
 from functools import partial
+from abc import ABC, abstractmethod
 
 from hmfast.halos.mass_definition import MassDefinition
 
 
 
-class ConstantConcentration:
+class Concentration(ABC):
     """
-    Constant concentration-mass relation, with the value of c_delta being specified in the parameters.
+    Abstract base class for all concentration-mass relations.
+    All subclasses must implement the c_delta method.
+    """
+    @abstractmethod
+    def c_delta(self, halo_model, m, z):
+        """
+        Compute the concentration parameter c_delta.
+        """
+        pass
+
+
+        
+class ConstantConcentration(Concentration):
+    """
+    Constant concentration-mass relation.
+
+    The concentration parameter :math:`c_\\Delta` is fixed to a user-specified value for all halos.
     """
     def __init__(self, c):
         self.c = c
         pass
 
     def c_delta(self, halo_model, m, z):
+        """
+        Valid for all mass definitions.
+    
+        Returns a constant value for the concentration parameter, broadcast to the shape of the input masses and redshifts.
+        """
         return jnp.broadcast_to(self.c, (len(jnp.atleast_1d(m)), len(jnp.atleast_1d(z))))
 
 
 
-class D08Concentration:
+class D08Concentration(Concentration):
     """
-    Duffy et al. (2008) mass-concentration relation.
-    A, B, C are fit parameters, and M_pivot is the pivot mass (Msun/h)
+    Concentration-mass relation from `Duffy et al. (2008) <https://ui.adsabs.harvard.edu/abs/2008MNRAS.390L..64D/abstract>`_.
     """
     def __init__(self):
         pass
 
 
     def c_delta(self, halo_model, m, z):
+        """
+        Valid for 200c, 200m, and virial mass definitions.
+
+        The relation is:
+
+        .. math::
+
+            c_\\Delta(M, z) = A \\left(\\frac{M}{M_\\mathrm{pivot}}\\right)^B (1+z)^C
+
+        where :math:`A`, :math:`B`, :math:`C`, and :math:`M_\\mathrm{pivot}` are fit parameters.
+        Conversion between mass definitions is handled if needed.
+        """
+        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         mdef = halo_model.mass_definition
 
@@ -68,15 +102,26 @@ class D08Concentration:
 
 
 
-class B13Concentration:
+class B13Concentration(Concentration):
     """
-    Bhattacharya et al. (2013) mass-concentration relation.
-    Parameters A, B, C from Table 2 (arXiv:1112.5479).
+    Concentration-mass relation from `Bhattacharya et al. (2013) <https://ui.adsabs.harvard.edu/abs/2013ApJ...766...32B/abstract>`_.
     """
     def __init__(self):
         pass
 
     def c_delta(self, halo_model, m, z):
+        """
+        Valid for 200c, 200m, and virial mass definitions.
+
+        The relation is:
+
+        .. math::
+
+            c_\\Delta(M, z) = A D(z)^B \\nu^C
+
+        where :math:`D(z)` is the linear growth factor and :math:`\\nu` is a function of mass and redshift.
+        Parameters :math:`A`, :math:`B`, :math:`C` are taken from the paper.
+        """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         mdef = halo_model.mass_definition
         
@@ -126,15 +171,26 @@ class B13Concentration:
 
 
 
-class SC14Concentration:
+class SC14Concentration(Concentration):
     """
-    Sanchez-Conde & Prada (2014) concentration-mass relation.
-    Coefficients from Eq. 1 (arXiv:1312.1729). Note: calibrated for 200c.
+    Concentration-mass relation from `Sanchez-Conde & Prada (2014) <https://ui.adsabs.harvard.edu/abs/2014MNRAS.442.2271S/abstract>`_.
     """
     def __init__(self):
         pass
 
     def c_delta(self, halo_model, m, z):
+        """
+        Valid for 200c mass definition.
+    
+        The relation is:
+    
+        .. math::
+    
+            c_{200c}(M, z) = \\sum_{i=0}^5 a_i [\\log_{10}(M)]^i \\times (1+z)^{-1}
+    
+        where the coefficients :math:`a_i` are from Eq. 1 of the paper. This relation is calibrated for 200c masses.
+        """
+        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         mdef = halo_model.mass_definition
 

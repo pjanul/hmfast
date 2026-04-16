@@ -8,25 +8,26 @@ from mcfit import TophatVar
 
 class HaloMass(ABC):
     """
-    Abstract base class for all halo mass functions.
-    All subclasses must implement the f_sigma method.
+    Abstract base class for halo mass function models.
+
+    Subclasses provide the dimensionless fitting function :math:`f_\\sigma`
+    entering :math:`dn / d\\ln M`, together with a public evaluator for the
+    halo mass function on a mass-redshift grid.
     """
     
     @partial(jax.jit, static_argnums=(0,))
     def _compute_hmf_grid(self, halo_model):
         """
-        Compute :math:`\sigma(R, z)` and the halo mass function grid for use in interpolation.
+        Compute the internal interpolation grid for the halo mass function.
 
         Returns
         -------
         ln_x : array_like
-            :math:`\ln(1+z)` grid.
+            :math:`\\ln(1+z)` grid.
         ln_M : array_like
-            :math:`\ln M` grid.
+            :math:`\\ln M` grid.
         dn_dlnM_grid : array_like
-            :math:`dn/d\ln M` grid.
-        sigma_grid : array_like
-            :math:`\sigma(R, z)` values.
+            Halo mass function grid :math:`dn/d\\ln M`.
         """
         
         z_grid = halo_model.cosmology._z_grid_pk()
@@ -74,7 +75,30 @@ class HaloMass(ABC):
     @abstractmethod
     def f_sigma(self, sigmas, z, delta_mean):
         """
-        Compute :math:`f_\\sigma`.
+        Evaluate the dimensionless function :math:`f_\\sigma` entering the
+        halo mass function.
+
+        In these models,
+
+        .. math::
+
+            \frac{dn}{d\ln M} = f_\sigma \, \frac{d\ln \nu}{d\ln R}
+            \frac{1}{4\pi R^3 h^3}
+
+        Parameters
+        ----------
+        sigmas : array-like
+            Root-mean-square linear density fluctuation
+            :math:`\\sigma(R, z)`.
+        z : float or array-like
+            Redshift(s).
+        delta_mean : float or array-like
+            Spherical-overdensity threshold with respect to the mean density.
+
+        Returns
+        -------
+        array-like
+            Values of :math:`f_\\sigma` evaluated at the requested inputs.
         """
         pass
 
@@ -92,30 +116,30 @@ class T08HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def f_sigma(self, sigmas, z, delta_mean):
         """
-        Computes the differential mass function :math:`dn/d\\ln\\sigma` for given variance :math:`\\sigma(R)` and redshift.
-    
-        The relation is:
-    
-            .. math::
-    
-                f(\\sigma) = 0.5 A \\left[ \\left( \\frac{\\sigma}{b} \\right)^{-a} + 1 \\right] \\exp\\left( -\\frac{c}{\\sigma^2} \\right)
-    
-            where :math:`A`, :math:`a`, :math:`b`, and :math:`c` are parameters interpolated as a function of overdensity and redshift.
+        Evaluate the Tinker et al. (2008) fitting function :math:`f_\\sigma`.
+
+        .. math::
+
+            f(\\sigma) = 0.5 A \\left[\\left(\\frac{\\sigma}{b}\\right)^{-a} + 1\\right]
+            \\exp\\left(-\\frac{c}{\\sigma^2}\\right)
+
+        where :math:`A`, :math:`a`, :math:`b`, and :math:`c` depend on the
+        overdensity threshold and redshift.
     
         Parameters
         ----------
         sigmas : jnp.ndarray
-            Variance of the linear density field :math:`\\sigma(R, z)`, shape (n_R, n_z) or (n_R,)
+            Root-mean-square linear density fluctuation
+            :math:`\\sigma(R, z)`.
         z : float or jnp.ndarray
-            Redshift(s) corresponding to sigmas
+            Redshift(s) corresponding to ``sigmas``.
         delta_mean : float or jnp.ndarray
-            Halo overdensity :math:`\\Delta` (e.g., 200, 500, 1600). Can be scalar or shape (n_z,)
+            Halo overdensity :math:`\\Delta` with respect to the mean density.
     
         Returns
         -------
         f_sigma : jnp.ndarray
-            Halo mass function values, shape matching sigmas
-            (:math:`dn/d\\ln\\sigma`) in units consistent with Tinker et al. (2008)
+            Values of :math:`f_\\sigma` with shape matching ``sigmas``.
         """
         
         # Convert delta_mean to log scale
@@ -142,19 +166,23 @@ class T08HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
         """
-        Compute the halo mass function :math:`\frac{dn}{d\ln M}` for arbitrary mass and redshift arrays.
+        Evaluate the halo mass function :math:`\\frac{dn}{d\\ln M}`.
 
         Parameters
         ----------
+        halo_model : HaloModel
+            Halo-model instance supplying the cosmology, mass definition, and
+            any mass-conversion settings needed to construct
+            :math:`dn / d\\ln M`.
         m : array-like
-            Halo mass grid.
+            Halo masses at which to evaluate the mass function.
         z : array-like
-            Redshift grid.
+            Redshifts at which to evaluate the mass function.
 
         Returns
         -------
         dndlnM : array-like
-            Halo mass function values, shape (len(m), len(z)).
+            Halo mass function values with shape :math:`(N_M, N_z)`.
         """
        
         
@@ -183,30 +211,32 @@ class T10HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def f_sigma(self, sigmas, z, delta_mean):
         """
-        Computes the mass function :math:`f(\\nu, z)` as a function of peak height :math:`\\nu` and redshift.
-    
-        The relation is:
-    
-            .. math::
-    
-                f(\\nu, z) = 0.5 \\alpha (1 + (\\beta^2 \\nu)^{-\\phi}) \\nu^{\\eta} \\exp\\left(-\\frac{\\gamma \\nu}{2}\\right) \\sqrt{\\nu}
-    
-            where the parameters :math:`\\alpha`, :math:`\\beta`, :math:`\\gamma`, :math:`\\eta`, :math:`\\phi` are redshift-dependent.
+        Evaluate the Tinker et al. (2010) fitting function entering
+        :math:`dn / d\\ln M`.
+
+        .. math::
+
+            f(\\nu, z) = 0.5 \\alpha \\left[1 + (\\beta^2 \\nu)^{-\\phi}\\right]
+            \\nu^{\\eta} \\exp\\left(-\\frac{\\gamma \\nu}{2}\\right) \\sqrt{\\nu}
+
+        where :math:`\\nu = \\delta_c^2 / \\sigma^2` and the fitting parameters are
+        redshift dependent.
     
         Parameters
         ----------
         sigmas : jnp.ndarray
-            Variance of the linear density field :math:`\\sigma(R, z)`, shape (n_R, n_z) or (n_R,)
+            Root-mean-square linear density fluctuation
+            :math:`\\sigma(R, z)`.
         z : float or jnp.ndarray
-            Redshift(s) corresponding to sigmas
+            Redshift(s) corresponding to ``sigmas``.
         delta_mean : float or jnp.ndarray
-            Halo overdensity :math:`\\Delta` (e.g., 200, 500, 1600). Can be scalar or shape (n_z,)
+            Halo overdensity :math:`\\Delta` with respect to the mean density.
     
         Returns
         -------
         f_nu : jnp.ndarray
-            Halo mass function values, shape matching sigmas
-            (:math:`f(\\nu, z)`)
+            Values of the dimensionless fitting function with shape matching
+            ``sigmas``.
         """
         delta_mean = jnp.log10(delta_mean)
         delta_c = 1.686 
@@ -243,19 +273,23 @@ class T10HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
         """
-        Compute the halo mass function :math:`\frac{dn}{d\ln M}` for arbitrary mass and redshift arrays.
+        Evaluate the halo mass function :math:`\\frac{dn}{d\\ln M}`.
 
         Parameters
         ----------
+        halo_model : HaloModel
+            Halo-model instance supplying the cosmology, mass definition, and
+            any mass-conversion settings needed to construct
+            :math:`dn / d\\ln M`.
         m : array-like
-            Halo mass grid.
+            Halo masses at which to evaluate the mass function.
         z : array-like
-            Redshift grid.
+            Redshifts at which to evaluate the mass function.
 
         Returns
         -------
         dndlnM : array-like
-            Halo mass function values, shape (len(m), len(z)).
+            Halo mass function values with shape :math:`(N_M, N_z)`.
         """
        
         
@@ -274,13 +308,17 @@ class T10HaloMass(HaloMass):
 
 class SubHaloMass(ABC):
     """
-    Abstract base class for all subhalo mass functions.
-    All subclasses must implement the dndlnmu method.
+    Abstract base class for subhalo mass function models.
     """
     @abstractmethod
     def dndlnmu(self, halo_model, m, z):
         """
-        Compute :math:`d\\ln\\mu`
+        Compute the subhalo abundance per logarithmic mass ratio.
+
+        Returns
+        -------
+        array-like
+            Subhalo abundance :math:`dN/d\\ln \\mu`.
         """
         pass
 
@@ -295,13 +333,13 @@ class TW10SubHaloMass(SubHaloMass):
     
     def dndlnmu(self, M_host, M_sub):
         """
-        Computes the number of subhalos per host per :math:`d\\ln\\mu`, where :math:`\\mu = M_{\\rm sub} / M_{\\rm host}`.
-    
-        The relation is:
-    
-            .. math::
-    
-                \\frac{dN}{d\\ln\\mu} = 0.30 \\mu^{-0.7} \\exp(-9.9 \\mu^{2.5})
+        Compute the Tinker and Wetzel (2010) subhalo mass function.
+
+        .. math::
+
+            \\frac{dN}{d\\ln \\mu} = 0.30 \\mu^{-0.7} \\exp(-9.9 \\mu^{2.5})
+
+        where :math:`\\mu = M_{\\rm sub} / M_{\\rm host}`.
     
         Parameters
         ----------
@@ -313,7 +351,7 @@ class TW10SubHaloMass(SubHaloMass):
         Returns
         -------
         dN_dlnmu : float or array_like
-            Number of subhalos per host per :math:`d\\ln\\mu`
+            Number of subhalos per host per :math:`dN/d\\ln \\mu`.
         """
         mu = M_sub / M_host
         dN_dlnmu = 0.30 * mu ** (-0.7) * jnp.exp(-9.9 * mu ** 2.5)
@@ -338,15 +376,15 @@ class JvdB14SubHaloMass(SubHaloMass):
 
     def dndlnmu(self, M_host, M_sub):
         """
-        Computes the number of subhalos per host per :math:`d\\ln\\mu`, where :math:`\\mu = M_{\\rm sub} / M_{\\rm host}`.
-    
-        The relation is:
-    
-            .. math::
-    
-                \\frac{dN}{d\\ln\\mu} = \\gamma_1 \\mu^{\\alpha_1} + \\gamma_2 \\mu^{\\alpha_2} \\exp(-\\beta \\mu^{\\zeta})
-    
-            where the parameters are taken from Eq. 21 of the paper.
+        Compute the Jiang and van den Bosch (2014) subhalo mass function.
+
+        .. math::
+
+            \\frac{dN}{d\\ln \\mu} =
+            (\\gamma_1 \\mu^{\\alpha_1} + \\gamma_2 \\mu^{\\alpha_2})
+            \\exp(-\\beta \\mu^{\\zeta})
+
+        where :math:`\\mu = M_{\\rm sub} / M_{\\rm host}`.
     
         Parameters
         ----------
@@ -358,7 +396,7 @@ class JvdB14SubHaloMass(SubHaloMass):
         Returns
         -------
         dN_dlnmu : float or array_like
-            Number of subhalos per host per :math:`d\\ln\\mu`
+            Number of subhalos per host per :math:`dN/d\\ln \\mu`.
         """
         
         mu = M_sub / M_host

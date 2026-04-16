@@ -23,8 +23,9 @@ class HaloModel:
     """
     Differentiable halo model.
 
-    Provides methods for computing halo model predictions with automatic differentiation,
-    including the halo mass function, bias, and power spectra for various tracers.
+    Provides halo-model predictions for arbitrary tracers using a configurable
+    cosmology, halo mass function, halo bias model, concentration relation,
+    and subhalo mass function.
     """
    
 
@@ -107,22 +108,38 @@ class HaloModel:
 
     @partial(jax.jit, static_argnums=0)
     def c_delta(self, m, z):
+        """
+        Return the halo concentration :math:`c_\\Delta(M, z)`.
+
+        Parameters
+        ----------
+        m : array-like
+            Halo mass grid.
+        z : array-like
+            Redshift grid.
+
+        Returns
+        -------
+        array-like
+            Concentration evaluated at :math:`(M, z)`.
+        """
         return self.concentration.c_delta(self, m, z)
 
 
     #@partial(jax.jit, static_argnums=0)
     def delta_vir_to_crit(self, z):
         """
-        Compute the virial overdensity with respect to the critical density, :math:`\Delta_{\mathrm{vir}}(z)`,
+        Compute the virial overdensity with respect to the critical density,
+        :math:`\\Delta_{\\mathrm{vir}}(z)`,
         using the Bryan & Norman (1998) fitting formula for a flat universe.
 
         The formula is:
 
         .. math::
 
-            \Delta_{\mathrm{vir}}(z) = 18\pi^2 + 82x - 39x^2
+            \\Delta_{\\mathrm{vir}}(z) = 18\\pi^2 + 82x - 39x^2
 
-        where :math:`x = \Omega_m(z) - 1`.
+        where :math:`x = \\Omega_m(z) - 1`.
 
         Parameters
         ----------
@@ -180,13 +197,19 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(3, 4, 6))
     def convert_m_delta(self, m, z, mass_def_old, mass_def_new, c_old=None, max_iter=20):
         """
-        Convert halo mass between two mass definitions by solving for :math:`M_\mathrm{new}` such that:
+        Convert halo masses between two spherical-overdensity definitions.
+
+        The converted mass :math:`M_\\mathrm{new}` is obtained by solving
 
         .. math::
 
-            \frac{M_\mathrm{old}}{M_\mathrm{new}} = \frac{f_\mathrm{NFW}(c_\mathrm{old})}{f_\mathrm{NFW}(c_\mathrm{old} (M_\mathrm{new}/M_\mathrm{old} \cdot \Delta_\mathrm{old}/\Delta_\mathrm{new})^{1/3})}
+            \\frac{M_\\mathrm{old}}{M_\\mathrm{new}} =
+            \\frac{f_\\mathrm{NFW}(c_\\mathrm{old})}
+            {f_\\mathrm{NFW}\\left(c_\\mathrm{old}
+            \\left(\\frac{M_\\mathrm{new}}{M_\\mathrm{old}}
+            \\frac{\\Delta_\\mathrm{old}}{\\Delta_\\mathrm{new}}\\right)^{1/3}\\right)}
 
-        where :math:`f_\mathrm{NFW}(c) = \ln(1+c) - c/(1+c)`.
+        where :math:`f_\\mathrm{NFW}(c) = \\ln(1+c) - c/(1+c)`.
 
         Parameters
         ----------
@@ -206,7 +229,7 @@ class HaloModel:
         Returns
         -------
         array-like
-            Halo mass in the new definition.
+            Halo mass in the new definition, with shape :math:`(N_M, N_z)`.
         """
        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -252,11 +275,11 @@ class HaloModel:
    
     def r_delta(self, m, z, mass_definition=None):
         """
-        Compute the halo radius :math:`r_\Delta` corresponding to a given mass and overdensity at redshift :math:`z`.
+        Compute the halo radius :math:`r_\\Delta` associated with a halo mass.
 
         .. math::
 
-            r_\Delta = \left[\frac{3M}{4\pi \Delta \rho_{\mathrm{ref}}}\right]^{1/3}
+            r_\\Delta = \\left[\\frac{3M}{4\\pi \\Delta \\rho_{\\mathrm{ref}}(z)}\\right]^{1/3}
 
         Parameters
         ----------
@@ -270,7 +293,8 @@ class HaloModel:
         Returns
         -------
         float
-            Radius :math:`r_\Delta` within which the average density equals :math:`\Delta \times \rho_{\mathrm{ref}}(z)`.
+            Radius :math:`r_\\Delta` within which the mean enclosed density is
+            :math:`\\Delta \\rho_{\\mathrm{ref}}(z)`.
         """
         
         mass_definition = self.mass_definition if mass_definition is None else mass_definition
@@ -481,11 +505,15 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_1h(self, tracer1, tracer2, k, m, z,  k_damp=0.01):
         """
-        Compute the 1-halo term of the 3D power spectrum :math:`P_{1h}(k, z)` for two tracers.
+        Compute the 1-halo contribution to the 3D power spectrum.
 
         .. math::
 
-            P_{1h}(k, z) = \int dM \frac{dn}{d\ln M} \, u_1(k, M, z) u_2(k, M, z)
+            P_{1h}(k, z) = \\int d\\ln M \, \\frac{dn}{d\\ln M}
+            \, u_1(k, M, z) u_2(k, M, z)
+
+        where :math:`dn/d\\ln M` is evaluated by the active
+        :class:`HaloMass` model via :meth:`halo_mass_function`.
 
         Parameters
         ----------
@@ -562,7 +590,11 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def cl_1h(self, tracer1, tracer2, l, m, z, k_damp=0.01):
         """
-        Compute the 1-halo term of the angular power spectrum :math:`C_\ell^{1h}`.
+        Compute the 1-halo contribution to the angular power spectrum
+        :math:`C_\\ell^{1h}`.
+
+        The Limber-projected spectrum is obtained by integrating the 1-halo
+        3D power spectrum against the tracer kernels and comoving volume element.
 
         Parameters
         ----------
@@ -613,11 +645,15 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_2h(self, tracer1, tracer2, k, m, z):
         """
-        Compute the 2-halo term of the 3D power spectrum :math:`P_{2h}(k, z)` for two tracers.
+        Compute the 2-halo contribution to the 3D power spectrum.
 
         .. math::
 
-            P_{2h}(k, z) = P_{\mathrm{lin}}(k, z) I_1(k, z) I_2(k, z)
+            P_{2h}(k, z) = P_{\\mathrm{lin}}(k, z) \, I_1(k, z) \, I_2(k, z)
+
+        where each :math:`I_i` contains the mass integral over the tracer profile,
+        weighted by :math:`dn/d\\ln M` from the active :class:`HaloMass` model and
+        :math:`b(M, z)` from the active :class:`HaloBias` model.
 
         Parameters
         ----------
@@ -681,7 +717,11 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def cl_2h(self, tracer1, tracer2, l, m, z):
         """
-        Compute the 2-halo term of the angular power spectrum :math:`C_\ell^{2h}`.
+        Compute the 2-halo contribution to the angular power spectrum
+        :math:`C_\\ell^{2h}`.
+
+        The Limber-projected spectrum is obtained by integrating the 2-halo
+        3D power spectrum against the tracer kernels and comoving volume element.
 
         Parameters
         ----------

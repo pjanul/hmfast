@@ -8,12 +8,32 @@ from mcfit import TophatVar
 
 class HaloBias(ABC):
     """
-    Abstract base class for all halo bias classes.
+    Abstract base class for halo bias models.
+
+    Subclasses implement large-scale halo bias relations evaluated on a
+    mass-redshift grid.
     """
     @abstractmethod
     def halo_bias(self, halo_model, m, z, order=1):
         """
-        Compute the halo bias of a given order.
+        Evaluate the halo bias of the requested order.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo-model instance supplying the cosmology, mass definition, and
+            any mass-conversion settings needed to evaluate the requested bias.
+        m : array-like
+            Halo masses at which to evaluate the bias.
+        z : array-like
+            Redshifts at which to evaluate the bias.
+        order : int, optional
+            Bias order to evaluate.
+
+        Returns
+        -------
+        array-like
+            Halo bias values with shape :math:`(N_M, N_z)`.
         """
         pass
 
@@ -21,18 +41,16 @@ class HaloBias(ABC):
     @partial(jax.jit, static_argnums=(0,))
     def _compute_sigma_grid(self, halo_model):
         """
-        Compute :math:`\sigma(R, z)` and the halo mass function grid for use in interpolation.
+        Compute the interpolation grid for :math:`\\sigma(M, z)`.
 
         Returns
         -------
         ln_x : array_like
-            :math:`\ln(1+z)` grid.
+            :math:`\\ln(1+z)` grid.
         ln_M : array_like
-            :math:`\ln M` grid.
-        dn_dlnM_grid : array_like
-            :math:`dn/d\ln M` grid.
+            :math:`\\ln M` grid.
         sigma_grid : array_like
-            :math:`\sigma(R, z)` values.
+            :math:`\\sigma(M, z)` values.
         """
         
         z_grid = halo_model.cosmology._z_grid_pk()
@@ -71,8 +89,9 @@ class T10HaloBias(HaloBias):
     """
     Halo bias model from `Tinker et al. (2010) <https://ui.adsabs.harvard.edu/abs/2010ApJ...724..878T/abstract>`_.
 
-    This class implements the large-scale halo bias relation as a function of peak height
-    :math:`\\nu` and redshift, calibrated for spherical overdensity halo definitions (e.g., 200m, 500c).
+    This class implements the large-scale halo bias relation as a function of
+    peak height :math:`\\nu` and redshift, calibrated for spherical-overdensity
+    halo definitions.
     """
 
     def __init__(self):
@@ -82,7 +101,8 @@ class T10HaloBias(HaloBias):
     @partial(jax.jit, static_argnums=(0,))
     def _b1_nu(self, sigmas, z, delta_mean):
         """
-        Compute the first-order halo bias :math:`b_1(\\nu)` following Tinker et al. (2010).
+        Compute the first-order halo bias :math:`b_1(\\nu)` following
+        Tinker et al. (2010).
     
         Parameters
         ----------
@@ -120,7 +140,8 @@ class T10HaloBias(HaloBias):
     @partial(jax.jit, static_argnums=(0,))
     def _b2_nu(self, sigmas, z, delta_mean):
         """
-        Compute the second-order halo bias :math:`b_2(\\nu)` following Tinker et al. (2010).
+        Compute the second-order halo bias :math:`b_2(\\nu)` following
+        Tinker et al. (2010).
     
         Parameters
         ----------
@@ -176,21 +197,24 @@ class T10HaloBias(HaloBias):
     @partial(jax.jit, static_argnums=(0,4))
     def halo_bias(self, halo_model, m, z, order=1):
         """
-        Compute the halo bias :math:`b_1` or :math:`b_2` for arbitrary mass and redshift arrays.
+        Evaluate the halo bias :math:`b_1` or :math:`b_2` on a mass-redshift grid.
 
         Parameters
         ----------
+        halo_model : HaloModel
+            Halo-model instance supplying the cosmology, mass definition, and
+            any mass-conversion settings needed to evaluate the bias.
         m : array-like
-            Halo mass grid.
+            Halo masses at which to evaluate the bias.
         z : array-like
-            Redshift grid.
+            Redshifts at which to evaluate the bias.
         order : int, default 1
             Bias order (1 for linear, 2 for quadratic).
 
         Returns
         -------
         bias : array-like
-            Halo bias values, shape (len(m), len(z)).
+            Halo bias values, shape :math:`(N_M, N_z)`.
         """
        
        

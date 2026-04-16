@@ -82,7 +82,8 @@ class GalaxyLensingTracer(Tracer):
     
     def _I_s(self, cosmology, z):
         """
-        Compute the lensing efficiency integral $I_s(z)$ at redshift $z$.
+        Compute the lensing efficiency integral :math:`I_s(z)` at redshift
+        :math:`z`.
 
         Integrates over the source redshift distribution, including only sources behind the lens.
 
@@ -96,7 +97,7 @@ class GalaxyLensingTracer(Tracer):
         Returns
         -------
         I_s : array_like
-            Lensing efficiency integral evaluated at redshift(s) $z$.
+            Lensing efficiency integral evaluated at redshift(s) :math:`z`.
         """
         
         z = jnp.atleast_1d(z)
@@ -128,19 +129,19 @@ class GalaxyLensingTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the galaxy lensing kernel $W_{\\kappa,g}(z)$ at redshift $z$.
+        Compute the galaxy lensing kernel :math:`W_{\\kappa,g}(z)` at redshift
+        :math:`z`.
 
         The kernel is given by:
 
         .. math::
+
             W_{\\kappa,g}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} I_s(z)
 
-        where:
-            - $\\Omega_m$ is the matter density parameter
-            - $H_0$ is the Hubble constant
-            - $c$ is the speed of light
-            - $\\chi(z)$ is the comoving distance to redshift $z$
-            - $I_s(z)$ is the lensing efficiency integral
+        where :math:`\\Omega_m` is the matter density parameter,
+        :math:`H_0` is the Hubble constant, :math:`c` is the speed of light,
+        :math:`\\chi(z)` is the comoving distance to redshift :math:`z`, and
+        :math:`I_s(z)` is the lensing efficiency integral.
 
         Parameters
         ----------
@@ -152,7 +153,7 @@ class GalaxyLensingTracer(Tracer):
         Returns
         -------
         W_kappa_g : array_like
-            Galaxy lensing kernel evaluated at redshift(s) $z$.
+            Galaxy lensing kernel evaluated at redshift(s) :math:`z`.
         """
         # Merge default parameters with input
        

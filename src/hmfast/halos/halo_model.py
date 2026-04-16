@@ -106,28 +106,28 @@ class HaloModel:
        
 
 
-    @partial(jax.jit, static_argnums=0)
-    def c_delta(self, m, z):
-        """
-        Return the halo concentration :math:`c_\\Delta(M, z)`.
+    # @partial(jax.jit, static_argnums=0)
+    # def c_delta(self, m, z):
+    #     """
+    #     Return the halo concentration :math:`c_\\Delta(M, z)`.
 
-        Parameters
-        ----------
-        m : array-like
-            Halo mass grid.
-        z : array-like
-            Redshift grid.
+    #     Parameters
+    #     ----------
+    #     m : array-like
+    #         Halo mass grid.
+    #     z : array-like
+    #         Redshift grid.
 
-        Returns
-        -------
-        array-like
-            Concentration evaluated at :math:`(M, z)`.
-        """
-        return self.concentration.c_delta(self, m, z)
+    #     Returns
+    #     -------
+    #     array-like
+    #         Concentration evaluated at :math:`(M, z)`.
+    #     """
+    #     return self.concentration.c_delta(self, m, z)
 
 
     #@partial(jax.jit, static_argnums=0)
-    def delta_vir_to_crit(self, z):
+    def _delta_vir_to_crit(self, z):
         """
         Compute the virial overdensity with respect to the critical density,
         :math:`\\Delta_{\\mathrm{vir}}(z)`,
@@ -165,7 +165,7 @@ class HaloModel:
         if self.mass_definition.delta == "vir":
             if self.mass_definition.reference != "critical":
                 raise ValueError("virial overdensity only defined w.r.t. critical density")
-            return self.delta_vir_to_crit(z)
+            return self._delta_vir_to_crit(z)
     
         return self.mass_definition.delta
 
@@ -198,38 +198,51 @@ class HaloModel:
     def convert_m_delta(self, m, z, mass_def_old, mass_def_new, c_old=None, max_iter=20):
         """
         Convert halo masses between two spherical-overdensity definitions.
-
-        The converted mass :math:`M_\\mathrm{new}` is obtained by solving
-
+        
+        The converted mass :math:`M_{\\Delta'}` is obtained by solving
+        
         .. math::
-
-            \\frac{M_\\mathrm{old}}{M_\\mathrm{new}} =
-            \\frac{f_\\mathrm{NFW}(c_\\mathrm{old})}
-            {f_\\mathrm{NFW}\\left(c_\\mathrm{old}
-            \\left(\\frac{M_\\mathrm{new}}{M_\\mathrm{old}}
-            \\frac{\\Delta_\\mathrm{old}}{\\Delta_\\mathrm{new}}\\right)^{1/3}\\right)}
-
-        where :math:`f_\\mathrm{NFW}(c) = \\ln(1+c) - c/(1+c)`.
-
+        
+            \\frac{M_{\\Delta}}{M_{\\Delta'}} =
+            \\frac{f_\\mathrm{NFW}(c_{\\Delta})}
+            {f_\\mathrm{NFW}\\left(
+            c_{\\Delta} \\, \\frac{r_{\\Delta'}}{r_{\\Delta}}
+            \\right)}
+        
+        where :math:`f_\\mathrm{NFW}(c) = \\ln(1+c) - c/(1+c)` and
+        
+        .. math::
+        
+            r_\\Delta =
+            \\left[
+            \\frac{3 M_\\Delta}
+            {4 \\pi \\, \\Delta \\, \\rho_\\mathrm{ref}(z)}
+            \\right]^{1/3}.
+        
+        Here :math:`r_{\\Delta'}` is defined analogously using
+        :math:`M_{\\Delta'}` and :math:`\\Delta'`.
+        
         Parameters
         ----------
         m : array-like
-            Halo mass in the old definition.
+            Halo mass in the original definition, :math:`M_{\\Delta}`.
         z : array-like
             Redshift(s).
         mass_def_old : MassDefinition
-            Old mass definition.
+            Original mass definition specifying :math:`\\Delta`.
         mass_def_new : MassDefinition
-            New mass definition.
+            Target mass definition specifying :math:`\\Delta'`.
         c_old : array-like, optional
-            Concentration in the old definition (if None, computed automatically).
+            Halo concentration :math:`c_{\\Delta}` in the original definition. If
+            ``None``, it is computed automatically.
         max_iter : int, optional
-            Maximum number of Newton-Raphson iterations.
-
+            Maximum number of root-finder iterations.
+        
         Returns
         -------
         array-like
-            Halo mass in the new definition, with shape :math:`(N_M, N_z)`.
+            Halo mass in the target definition, :math:`M_{\\Delta'}`, with shape
+            :math:`(N_M, N_z)`.
         """
        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -237,7 +250,7 @@ class HaloModel:
 
         # Vectorized Delta calculation
         def get_delta_crit(mdef, z_val):
-            d = jnp.where(mdef.delta == "vir", self.delta_vir_to_crit(z_val), mdef.delta)
+            d = jnp.where(mdef.delta == "vir", self._delta_vir_to_crit(z_val), mdef.delta)
             return jnp.where(mdef.reference == "mean", d * self.cosmology.omega_m(z_val), d)
 
         d_old_z, d_new_z = get_delta_crit(mass_def_old, z), get_delta_crit(mass_def_new, z)
@@ -247,7 +260,7 @@ class HaloModel:
         mm, zz = jnp.meshgrid(m, z, indexing='ij')
         
         if c_old is None:
-            c_old = self.c_delta(m, z)
+            c_old = self.concentration.c_delta(self, m, z)
         c_old = c_old[:Nm, :Nz].reshape(mm.shape)
 
         # First guess for the root finder is based on a power law approximation m * (Delta1 / Delta2)^0.2
@@ -309,7 +322,7 @@ class HaloModel:
 
         # If the user selects vir or rho_mean, correct for this
         if delta == "vir":
-            delta = self.delta_vir_to_crit(z)
+            delta = self._delta_vir_to_crit(z)
         
         if reference == "mean":
             rho_ref *= self.cosmology.omega_m(z)

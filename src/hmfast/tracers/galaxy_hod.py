@@ -73,14 +73,15 @@ class GalaxyHODTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the galaxy kernel $W_g(z)$ at redshift $z$.
+        Compute the galaxy kernel :math:`W_g(z)` at redshift :math:`z`.
 
         The kernel is given by:
 
         .. math::
+
             W_g(z) = H(z) \\frac{\\phi'(z)}{\\chi^2(z)}
 
-        where $\\phi'(z)$ is the normalized redshift distribution.
+        where :math:`\\phi'(z)` is the normalized redshift distribution.
 
         Parameters
         ----------
@@ -92,7 +93,7 @@ class GalaxyHODTracer(Tracer):
         Returns
         -------
         W_g : array_like
-            Galaxy kernel evaluated at redshift(s) $z$.
+            Galaxy kernel evaluated at redshift(s) :math:`z`.
         """
         
         z = jnp.atleast_1d(z)

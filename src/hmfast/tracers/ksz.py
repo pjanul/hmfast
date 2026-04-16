@@ -56,14 +56,17 @@ class kSZTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the kSZ kernel $W_{\\mathrm{kSZ}}(z)$ at redshift $z$.
+        Compute the kSZ kernel :math:`W_{\\mathrm{kSZ}}(z)` at redshift
+        :math:`z`.
 
         The kernel is given by:
 
         .. math::
+
             W_{\\mathrm{kSZ}}(z) = \\frac{\\sigma_T}{m_p} \\frac{1}{1+z}
 
-        where $\\sigma_T$ is the Thomson cross-section, $m_p$ is the proton mass, and $z$ is the redshift
+        where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_p` is
+        the proton mass, and :math:`z` is the redshift.
 
         Parameters
         ----------
@@ -75,7 +78,7 @@ class kSZTracer(Tracer):
         Returns
         -------
         W_ksz : array_like
-            kSZ kernel evaluated at redshift(s) $z$.
+            kSZ kernel evaluated at redshift(s) :math:`z`.
         """
         # sigmaT / m_prot in (Mpc/h)**2/(Msun/h) which is required for kSZ
         sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_ * cosmology.H0 / 100

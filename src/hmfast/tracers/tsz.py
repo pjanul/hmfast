@@ -67,7 +67,8 @@ class tSZTracer(Tracer):
     
                 K_\\mathrm{tSZ}(z) = \\frac{\\sigma_T}{m_e c^2} \\frac{1}{1+z}
     
-        where $\\sigma_T$ is the Thomson cross-section, $m_e$ is the electron mass, and $z$ is redshift.
+        where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_e` is
+        the electron mass, and :math:`z` is the redshift.
     
         Parameters
         ----------

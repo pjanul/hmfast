@@ -94,7 +94,7 @@ class HaloProfile:
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Get c_delta and r_delta
-        c_delta = halo_model.c_delta(m, z)
+        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
         r_delta = halo_model.r_delta(m, z)
         lambda_val = 1.0 
         

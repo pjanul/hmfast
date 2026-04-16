@@ -105,27 +105,6 @@ class HaloModel:
         return new_instance
        
 
-
-    # @partial(jax.jit, static_argnums=0)
-    # def c_delta(self, m, z):
-    #     """
-    #     Return the halo concentration :math:`c_\\Delta(M, z)`.
-
-    #     Parameters
-    #     ----------
-    #     m : array-like
-    #         Halo mass grid.
-    #     z : array-like
-    #         Redshift grid.
-
-    #     Returns
-    #     -------
-    #     array-like
-    #         Concentration evaluated at :math:`(M, z)`.
-    #     """
-    #     return self.concentration.c_delta(self, m, z)
-
-
     #@partial(jax.jit, static_argnums=0)
     def _delta_vir_to_crit(self, z):
         """
@@ -199,7 +178,9 @@ class HaloModel:
         """
         Convert halo masses between two spherical-overdensity definitions.
         
-        The converted mass :math:`M_{\\Delta'}` is obtained by solving
+        The overdensity threshold is changed from :math:`\\Delta` to
+        :math:`\\Delta'` by solving for the corresponding mass
+        :math:`M_{\\Delta'}`,
         
         .. math::
         
@@ -207,20 +188,25 @@ class HaloModel:
             \\frac{f_\\mathrm{NFW}(c_{\\Delta})}
             {f_\\mathrm{NFW}\\left(
             c_{\\Delta} \\, \\frac{r_{\\Delta'}}{r_{\\Delta}}
-            \\right)}
+            \\right)},
         
         where :math:`f_\\mathrm{NFW}(c) = \\ln(1+c) - c/(1+c)` and
+        :math:`r_\\Delta = \\left[3 M_\\Delta / (4 \\pi \\, \\Delta \\, \\rho_\\mathrm{ref}(z))\\right]^{1/3}`.
+        Here :math:`r_{\\Delta'}` is defined analogously using
+        :math:`M_{\\Delta'}` and :math:`\\Delta'`.
+        
+        Reference-density conversions are performed through
         
         .. math::
         
-            r_\\Delta =
-            \\left[
-            \\frac{3 M_\\Delta}
-            {4 \\pi \\, \\Delta \\, \\rho_\\mathrm{ref}(z)}
-            \\right]^{1/3}.
+            \\Delta_{\\mathrm{crit}} = \\Delta_{\\mathrm{mean}} \\, \\Omega_m(z),
         
-        Here :math:`r_{\\Delta'}` is defined analogously using
-        :math:`M_{\\Delta'}` and :math:`\\Delta'`.
+        and the virial overdensity relative to the critical density is defined by
+        
+        .. math::
+        
+            \\Delta_{\\mathrm{vir}}(z) = 18\\pi^2 + 82x - 39x^2,
+            \\qquad x = \\Omega_m(z) - 1.
         
         Parameters
         ----------
@@ -229,9 +215,11 @@ class HaloModel:
         z : array-like
             Redshift(s).
         mass_def_old : MassDefinition
-            Original mass definition specifying :math:`\\Delta`.
+            Original mass definition specifying :math:`\\Delta` and its reference
+            density.
         mass_def_new : MassDefinition
-            Target mass definition specifying :math:`\\Delta'`.
+            Target mass definition specifying :math:`\\Delta'` and its reference
+            density.
         c_old : array-like, optional
             Halo concentration :math:`c_{\\Delta}` in the original definition. If
             ``None``, it is computed automatically.
@@ -377,143 +365,6 @@ class HaloModel:
     
         return n_min, b1_min, b2_min
 
-        
-    # @jax.jit 
-    # def _compute_hmf_grid(self):
-    #     """
-    #     Compute :math:`\sigma(R, z)` and the halo mass function grid for use in interpolation.
-
-    #     Returns
-    #     -------
-    #     ln_x : array_like
-    #         :math:`\ln(1+z)` grid.
-    #     ln_M : array_like
-    #         :math:`\ln M` grid.
-    #     dn_dlnM_grid : array_like
-    #         :math:`dn/d\ln M` grid.
-    #     sigma_grid : array_like
-    #         :math:`\sigma(R, z)` values.
-    #     """
-        
-    #     z_grid = self.cosmology._z_grid_pk()
-    #     cparams = self.cosmology.get_all_cosmo_params()
-    #     h = cparams["h"]
-    
-    #     # Power spectra for all redshifts, shape: (n_k, n_z)
-    #     pk_grid = jax.vmap(lambda zp: self.cosmology.pk(zp, linear=True)[1].flatten())(z_grid).T
-    
-    #     # Compute σ²(R, z) and dσ²/dR using TophatVar
-    #     R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
-    #     R_grid = R_grid[0].flatten()  # shape: (n_R,)
-    
-    #     # Compute dσ²/dR for each z, output shape: (n_z, n_R)
-    #     dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var)
-    
-    #     # Compute σ(R, z)
-    #     ln_sigma_grid = 0.5 * jnp.log(var)
-    #     sigma_grid = jnp.exp(ln_sigma_grid)
-    
-    #     # Mass grid, shape: (n_R,)
-    #     rho_crit_0 = cparams["Rho_crit_0"]
-    #     Omega0_cb = cparams['Omega0_cb']
-    #     M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3) * h ** 3
-    
-    #     # Overdensity threshold
-    #     delta_numeric = self._delta_numeric(z_grid)
-    #     delta_mean = self._convert_reference(z_grid, delta_numeric, from_ref=self.mass_definition.reference, to_ref='mean') 
-    
-    #     # Halo mass function grid, shape: (n_z, n_R)
-    #     hmf_grid = self.mass_model.f_sigma(sigma_grid, z_grid, delta_mean)
-    
-    #     # Compute d n / d ln(M)
-    #     dlnnu_dlnR_grid = -dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)
-    #     dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
-    
-    #     # Grids for interpolation
-    #     ln_x = jnp.log(1. + z_grid)
-    #     ln_M = jnp.log(M_grid)
-    
-    #     return ln_x, ln_M, dn_dlnM_grid, sigma_grid
-
-
-    # @jax.jit 
-    # def halo_mass_function(self, m, z) -> jnp.ndarray:
-    #     """
-    #     Compute the halo mass function :math:`\frac{dn}{d\ln M}` for arbitrary mass and redshift arrays.
-
-    #     Parameters
-    #     ----------
-    #     m : array-like
-    #         Halo mass grid.
-    #     z : array-like
-    #         Redshift grid.
-
-    #     Returns
-    #     -------
-    #     dndlnM : array-like
-    #         Halo mass function values, shape (len(m), len(z)).
-    #     """
-       
-        
-    #     ln_x_grid, ln_M_grid, dn_dlnM_grid, _ = self._compute_hmf_grid()
-
-    #     # Create the interpolator, the meshgrid, and then stack the points
-    #     _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
-    #     mm, zz = jnp.meshgrid(jnp.atleast_1d(m), jnp.atleast_1d(z), indexing='ij')
-    #     pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-        
-    #     return _hmf_interp(pts)
-        
-       
-
-    # @partial(jax.jit, static_argnums=(3))
-    # def halo_bias(self, m, z, order=1):
-    #     """
-    #     Compute the halo bias :math:`b_1` or :math:`b_2` for arbitrary mass and redshift arrays.
-
-    #     Parameters
-    #     ----------
-    #     m : array-like
-    #         Halo mass grid.
-    #     z : array-like
-    #         Redshift grid.
-    #     order : int, default 1
-    #         Bias order (1 for linear, 2 for quadratic).
-
-    #     Returns
-    #     -------
-    #     bias : array-like
-    #         Halo bias values, shape (len(m), len(z)).
-    #     """
-       
-       
-    #     m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-    #     ln_x_grid, ln_M_grid, _, sigma_grid = self._compute_hmf_grid()
-
-    #     # Create the interpolator, the meshgrid, and then stack the points
-    #     _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid)) 
-    #     zz, mm = jnp.meshgrid(z, m, indexing='ij')
-    #     pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-    #     sigma_M = jnp.exp(_sigma_interp(pts))
-
-    #     # Handle delta values
-    #     delta_numeric = self._delta_numeric(z)
-    #     delta_mean = self._convert_reference(z, delta_numeric, from_ref=self.mass_definition.reference, to_ref='mean')
-        
-    #     # Ensure delta_mean is 1D before indexing
-    #     delta_mean = jnp.atleast_1d(delta_mean)
-    #     delta_mean_2d = delta_mean[:, None] 
-        
-    #     # Broadcast to (nz, nm)
-    #     delta_mean_broad = jnp.broadcast_to(delta_mean_2d, sigma_M.shape)
-
-    #     if order == 1: 
-    #         return self.bias_model.b1_nu(sigma_M, zz, delta_mean_broad).T
-    #     elif order == 2:
-    #         return self.bias_model.b2_nu(sigma_M, zz, delta_mean_broad).T
-    #     else:
-    #         raise ValueError("order must be either 1 or 2")
-    
 
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_1h(self, tracer1, tracer2, k, m, z,  k_damp=0.01):
@@ -525,8 +376,8 @@ class HaloModel:
             P_{1h}(k, z) = \\int d\\ln M \, \\frac{dn}{d\\ln M}
             \, u_1(k, M, z) u_2(k, M, z)
 
-        where :math:`dn/d\\ln M` is evaluated by the active
-        :class:`HaloMass` model via :meth:`halo_mass_function`.
+        where :math:`dn/d\\ln M` is the halo mass function 
+        and :math:`u_i(k \\mid M, z)` is the Fourier-space tracer profile.
 
         Parameters
         ----------
@@ -661,12 +512,18 @@ class HaloModel:
         Compute the 2-halo contribution to the 3D power spectrum.
 
         .. math::
-
-            P_{2h}(k, z) = P_{\\mathrm{lin}}(k, z) \, I_1(k, z) \, I_2(k, z)
-
-        where each :math:`I_i` contains the mass integral over the tracer profile,
-        weighted by :math:`dn/d\\ln M` from the active :class:`HaloMass` model and
-        :math:`b(M, z)` from the active :class:`HaloBias` model.
+        
+            P_{2h}(k, z) = P_{\\mathrm{lin}}(k, z) \\, I_1(k, z) \\, I_2(k, z)
+        
+        with
+        
+        .. math::
+        
+            I_i(k, z) = \\int d\\ln M \\, \\frac{dn}{d\\ln M}(M, z) \\, b(M, z) \\, u_i(k \\mid M, z),
+        
+        where :math:`u_i(k \\mid M, z)` is the Fourier-space tracer profile,
+        :math:`dn/d\\ln M` is the halo mass function, and :math:`b(M, z)` is the
+        linear halo bias.
 
         Parameters
         ----------

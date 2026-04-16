@@ -44,3 +44,10 @@ intersphinx_mapping = {
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
 
+def skip_init(app, what, name, obj, skip, options):
+    if name == "__init__":
+        return True
+    return skip
+
+def setup(app):
+    app.connect("autodoc-skip-member", skip_init)

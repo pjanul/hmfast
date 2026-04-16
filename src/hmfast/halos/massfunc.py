@@ -166,23 +166,27 @@ class T08HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
         """
-        Evaluate the halo mass function :math:`\\frac{dn}{d\\ln M}`.
-
+        Compute the halo mass function :math:`dn/d\\ln M`.
+    
+        The halo mass function gives the comoving number density of halos per logarithmic mass interval:
+    
+        .. math::
+    
+            \\frac{dn}{d\\ln M} = \\nu f(\\nu) \\frac{\\rho_{m,0}}{M} \\left| \\frac{d\\ln \\sigma^{-1}}{d\\ln M} \\right|
+    
+        where :math:`\\nu = \\delta_c / \\sigma(M)`, :math:`f(\\nu)` is the fitting function, :math:`\\rho_{m,0}` is the present-day mean matter density, :math:`M` is the halo mass, and :math:`\\sigma(M)` is the variance of the density field smoothed on mass scale :math:`M`.
+    
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo-model instance supplying the cosmology, mass definition, and
-            any mass-conversion settings needed to construct
-            :math:`dn / d\\ln M`.
         m : array-like
-            Halo masses at which to evaluate the mass function.
+            Halo mass grid.
         z : array-like
-            Redshifts at which to evaluate the mass function.
-
+            Redshift grid.
+    
         Returns
         -------
         dndlnM : array-like
-            Halo mass function values with shape :math:`(N_M, N_z)`.
+            Halo mass function values, shape (len(m), len(z)).
         """
        
         
@@ -273,23 +277,27 @@ class T10HaloMass(HaloMass):
     @partial(jax.jit, static_argnums=(0,))
     def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
         """
-        Evaluate the halo mass function :math:`\\frac{dn}{d\\ln M}`.
-
+        Compute the halo mass function :math:`dn/d\\ln M`.
+    
+        The halo mass function gives the comoving number density of halos per logarithmic mass interval:
+    
+        .. math::
+    
+            \\frac{dn}{d\\ln M} = \\nu f(\\nu) \\frac{\\rho_{m,0}}{M} \\left| \\frac{d\\ln \\sigma^{-1}}{d\\ln M} \\right|
+    
+        where :math:`\\nu = \\delta_c / \\sigma(M)`, :math:`f(\\nu)` is the fitting function, :math:`\\rho_{m,0}` is the present-day mean matter density, :math:`M` is the halo mass, and :math:`\\sigma(M)` is the variance of the density field smoothed on mass scale :math:`M`.
+    
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo-model instance supplying the cosmology, mass definition, and
-            any mass-conversion settings needed to construct
-            :math:`dn / d\\ln M`.
         m : array-like
-            Halo masses at which to evaluate the mass function.
+            Halo mass grid.
         z : array-like
-            Redshifts at which to evaluate the mass function.
-
+            Redshift grid.
+    
         Returns
         -------
         dndlnM : array-like
-            Halo mass function values with shape :math:`(N_M, N_z)`.
+            Halo mass function values, shape (len(m), len(z)).
         """
        
         

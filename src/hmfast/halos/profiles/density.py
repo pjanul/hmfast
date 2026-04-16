@@ -303,7 +303,7 @@ class NFWDensityProfile(DensityProfile):
         
         # Get scale radius r_s
         r_delta = halo_model.r_delta(m, z)
-        c_delta = halo_model.c_delta(m, z)
+        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
         r_s = r_delta / c_delta # (Nm, Nz)
         
         # Calculate rho_s

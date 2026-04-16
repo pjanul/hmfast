@@ -35,16 +35,52 @@ class tSZTracer(Tracer):
         obj.profile = profile
         return obj
 
-    def update(self, **kwargs):
+    def update(self, profile=None):
         """
-        Updates pressure profile parameters (e.g., P0, alpha, beta).
+        Return a new tSZTracer instance with updated attributes.
+    
+        Parameters
+        ----------
+        profile : PressureProfile, optional
+            New pressure profile to use for the tracer. If None, the profile is unchanged.
+    
+        Returns
+        -------
+        tSZTracer
+            New tracer instance with updated attributes.
         """
-        new_profile = self.profile.update(**kwargs)
-        return tSZTracer(profile=new_profile)
+        flat, aux = self._tree_flatten()
+        if profile is not None:
+            flat = (profile,)
+        return self._tree_unflatten(aux, flat)
 
     # --- End JAX PyTree Registration ---
         
     def kernel(self, cosmology, z):
+
+        """
+        Compute the tSZ kernel as a function of redshift.
+    
+        The kernel is given by:
+    
+            .. math::
+    
+                K_\\mathrm{tSZ}(z) = \\frac{\\sigma_T}{m_e c^2} \\frac{1}{1+z}
+    
+        where $\\sigma_T$ is the Thomson cross-section, $m_e$ is the electron mass, and $z$ is redshift.
+    
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array-like
+            Redshift(s).
+    
+        Returns
+        -------
+        kernel : float or array-like
+            tSZ kernel.
+        """
         
         h = cosmology.H0/100 
         

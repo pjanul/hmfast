@@ -40,17 +40,48 @@ class S12CIBProfile(CIBProfile):
     def _tree_unflatten(cls, aux, leaves):
         return cls(*leaves)
 
-    def update(self, **kwargs):
-        names = [
-            'nu', 'L0', 'alpha', 'beta', 'gamma', 'T0', 'M_eff',
-            'sigma2_LM', 'delta', 'z_p', 'M_min'
-        ]
-        # Check for typos/invalid names
-        if not set(kwargs).issubset(names):
-            raise ValueError(f"Invalid CIB parameter(s): {set(kwargs) - set(names)}")
-    
+    def update(self, nu=None, L0=None, alpha=None, beta=None, gamma=None,
+               T0=None, M_eff=None, sigma2_LM=None, 
+               delta=None, z_p=None, M_min=None):
+        """
+        Return a new profile instance with updated CIB parameters.
+
+        Parameters
+        ----------
+        nu : float, optional
+        L0 : float, optional
+        alpha : float, optional
+        beta : float, optional
+        gamma : float, optional
+        T0 : float, optional
+        M_eff : float, optional
+        sigma2_LM : float, optional
+        delta : float, optional
+        z_p : float, optional
+        M_min : float, optional
+
+        Returns
+        -------
+        S12CIBProfile
+            New profile instance with updated parameters.
+        """
         leaves, treedef = self._tree_flatten()
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        # Explicitly map current attributes to new leaves if not provided in kwargs
+        new_leaves = (
+            nu if nu is not None else self.nu,
+            L0 if L0 is not None else self.L0,
+            alpha if alpha is not None else self.alpha,
+            beta if beta is not None else self.beta,
+            gamma if gamma is not None else self.gamma,
+            T0 if T0 is not None else self.T0,
+            M_eff if M_eff is not None else self.M_eff,
+            sigma2_LM if sigma2_LM is not None else self.sigma2_LM,
+            delta if delta is not None else self.delta,
+            z_p if z_p is not None else self.z_p,
+            M_min if M_min is not None else self.M_min,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
 
@@ -284,14 +315,40 @@ class M21CIBProfile(CIBProfile):
         return cls(*leaves, s_nu=aux)
 
 
-    def update(self, **kwargs):
-        names = ['nu', 'eta_max', 'z_c', 'tau', 'f_sub', 'M_min', 'M_eff', 'sigma2_LM']
-        # Check for typos/invalid names
-        if not set(kwargs).issubset(names):
-            raise ValueError(f"Invalid CIB parameter(s): {set(kwargs) - set(names)}")
-    
+    def update(self, nu=None, eta_max=None, z_c=None, tau=None, f_sub=None, 
+               M_min=None, M_eff=None, sigma2_LM=None):
+        """
+        Return a new profile instance with updated CIB parameters.
+
+        Parameters
+        ----------
+        nu : float, optional
+        eta_max : float, optional
+        z_c : float, optional
+        tau : float, optional
+        f_sub : float, optional
+        M_min : float, optional
+        M_eff : float, optional
+        sigma2_LM : float, optional
+
+        Returns
+        -------
+        M21CIBProfile
+            New profile instance with updated parameters.
+        """
         leaves, treedef = self._tree_flatten()
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
+        
+        new_leaves = (
+            nu if nu is not None else self.nu,
+            eta_max if eta_max is not None else self.eta_max,
+            z_c if z_c is not None else self.z_c,
+            tau if tau is not None else self.tau,
+            f_sub if f_sub is not None else self.f_sub,
+            M_min if M_min is not None else self.M_min,
+            M_eff if M_eff is not None else self.M_eff,
+            sigma2_LM if sigma2_LM is not None else self.sigma2_LM,
+        )
+        
         return self._tree_unflatten(treedef, new_leaves)
 
     

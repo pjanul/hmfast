@@ -55,23 +55,48 @@ class GalaxyLensingTracer(Tracer):
         obj._dndz_data = dndz_data
         return obj
 
-    def update(self, **kwargs):
+    def update(self, profile=None, dndz=None):
         """
-        Updates profile parameters. 
-        Passes the current dndz blob to the new instance.
+        Return a new GalaxyLensingTracer instance with updated attributes using PyTree logic.
+
+        Parameters
+        ----------
+        profile : MatterProfile, optional
+            New matter profile to use for the tracer. If None, the profile is unchanged.
+        dndz : array_like, optional
+            New redshift distribution (z, dN/dz). If None, the distribution is unchanged.
+
+        Returns
+        -------
+        GalaxyLensingTracer
+            New tracer instance with updated attributes.
         """
-        new_profile = self.profile.update(**kwargs)
-        return GalaxyLensingTracer(profile=new_profile, dndz=self._dndz_data)
+        flat, aux = self._tree_flatten()
+        new_profile = profile if profile is not None else flat[0]
+        new_dndz = dndz if dndz is not None else flat[1]
+        return self._tree_unflatten(aux, (new_profile, new_dndz))
 
 
     # --- End JAX PyTree Registration ---
 
     
-    def I_s(self, cosmology, z):
+    def _I_s(self, cosmology, z):
         """
-        Return I_s at requested z.
-        Uses pre-loaded dndz_data = [z, phi_prime].
-        Integrates only over sources behind the lens (z_s > z).
+        Compute the lensing efficiency integral $I_s(z)$ at redshift $z$.
+
+        Integrates over the source redshift distribution, including only sources behind the lens.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object with required methods and parameters.
+        z : float or array_like
+            Redshift(s) at which to compute the integral.
+
+        Returns
+        -------
+        I_s : array_like
+            Lensing efficiency integral evaluated at redshift(s) $z$.
         """
         
         z = jnp.atleast_1d(z)
@@ -102,8 +127,32 @@ class GalaxyLensingTracer(Tracer):
 
 
     def kernel(self, cosmology, z):
-        """
-        Compute the galaxy lensing kernel W_kappa_g at redshift z.
+         """
+        Compute the galaxy lensing kernel $W_{\\kappa,g}(z)$ at redshift $z$.
+
+        The kernel is given by:
+
+        .. math::
+            W_{\\kappa,g}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} I_s(z)
+
+        where:
+            - $\\Omega_m$ is the matter density parameter
+            - $H_0$ is the Hubble constant
+            - $c$ is the speed of light
+            - $\\chi(z)$ is the comoving distance to redshift $z$
+            - $I_s(z)$ is the lensing efficiency integral
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object with required methods and parameters.
+        z : float or array_like
+            Redshift(s) at which to compute the kernel.
+
+        Returns
+        -------
+        W_kappa_g : array_like
+            Galaxy lensing kernel evaluated at redshift(s) $z$.
         """
         # Merge default parameters with input
        
@@ -121,7 +170,7 @@ class GalaxyLensingTracer(Tracer):
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z) * h # Comoving distance in Mpc/h
         H_z = cosmology.hubble_parameter(z)   # Hubble parameter in km/s/Mpc
     
-        I_s = self.I_s(cosmology, z) 
+        I_s = self._I_s(cosmology, z) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (

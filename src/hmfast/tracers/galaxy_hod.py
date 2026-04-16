@@ -52,7 +52,19 @@ class GalaxyHODTracer(Tracer):
 
     def update(self, **kwargs):
         """
-        Update HOD parameters.
+        Return a new GalaxyHODTracer instance with updated attributes using PyTree logic.
+
+        Parameters
+        ----------
+        profile : GalaxyHODProfile, optional
+            New HOD profile to use for the tracer. If None, the profile is unchanged.
+        dndz : array_like, optional
+            New redshift distribution (z, dN/dz). If None, the distribution is unchanged.
+
+        Returns
+        -------
+        GalaxyHODTracer
+            New tracer instance with updated attributes.
         """
         
         new_profile = self.profile.update(**kwargs)
@@ -60,7 +72,28 @@ class GalaxyHODTracer(Tracer):
 
 
     def kernel(self, cosmology, z):
-        """Return Wg_grid at requested z."""
+        """
+        Compute the galaxy kernel $W_g(z)$ at redshift $z$.
+
+        The kernel is given by:
+
+        .. math::
+            W_g(z) = H(z) \\frac{\\phi'(z)}{\\chi^2(z)}
+
+        where $\\phi'(z)$ is the normalized redshift distribution.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object with required methods and parameters.
+        z : float or array_like
+            Redshift(s) at which to compute the kernel.
+
+        Returns
+        -------
+        W_g : array_like
+            Galaxy kernel evaluated at redshift(s) $z$.
+        """
         
         z = jnp.atleast_1d(z)
         z_g, phi_prime_g = self.dndz

@@ -33,18 +33,50 @@ class kSZTracer(Tracer):
         obj.profile = profile
         return obj
 
-    def update(self, **kwargs):
+    def update(self, profile=None):
         """
-        Updates parameters.
+        Return a new kSZTracer instance with updated attributes using PyTree logic.
+
+        Parameters
+        ----------
+        profile : DensityProfile, optional
+            New density profile to use for the tracer. If None, the profile is unchanged.
+
+        Returns
+        -------
+        kSZTracer
+            New tracer instance with updated attributes.
         """
-        new_profile = self.profile.update(**kwargs)
-        # Returns a new tracer instance with the updated profile
-        return kSZTracer(profile=new_profile)
+        flat, aux = self._tree_flatten()
+        new_profile = profile if profile is not None else flat[0]
+        return self._tree_unflatten(aux, (new_profile,))
 
 
     # ---------------- End JAX PyTree Registration ---------------- #
 
     def kernel(self, cosmology, z):
+        """
+        Compute the kSZ kernel $W_{\\mathrm{kSZ}}(z)$ at redshift $z$.
+
+        The kernel is given by:
+
+        .. math::
+            W_{\\mathrm{kSZ}}(z) = \\frac{\\sigma_T}{m_p} \\frac{1}{1+z}
+
+        where $\\sigma_T$ is the Thomson cross-section, $m_p$ is the proton mass, and $z$ is the redshift
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object with required methods and parameters.
+        z : float or array_like
+            Redshift(s) at which to compute the kernel.
+
+        Returns
+        -------
+        W_ksz : array_like
+            kSZ kernel evaluated at redshift(s) $z$.
+        """
         # sigmaT / m_prot in (Mpc/h)**2/(Msun/h) which is required for kSZ
         sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_ * cosmology.H0 / 100
         return sigma_T_over_m_p / (1.0 + z)

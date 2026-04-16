@@ -5,7 +5,6 @@ from typing import Dict, Union
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
-from jax.tree_util import register_pytree_node_class
 from functools import partial
 
 jax.config.update("jax_enable_x64", True)
@@ -23,7 +22,6 @@ _COSMO_MODELS = {
 
 
 
-@register_pytree_node_class
 class Cosmology:
     def __init__(self, cosmo_model=0, 
                  H0=68.0, omega_cdm=0.12, omega_b=0.02246576, ln1e10A_s=3.035173309489548, n_s=0.965, tau_reio=0.0544,      # LCDM
@@ -47,7 +45,7 @@ class Cosmology:
     # PyTree registration
     # ------------------------------------------------------------------
 
-    def tree_flatten(self):
+    def _tree_flatten(self):
         # 1. Children: Only the 15 numerical parameters JAX should "see"
         children = (
             self.H0, self.omega_cdm, self.omega_b, self.ln1e10A_s, self.n_s, self.tau_reio,
@@ -60,7 +58,7 @@ class Cosmology:
         return (children, aux_data)
     
     @classmethod
-    def tree_unflatten(cls, aux_data, children):
+    def _tree_unflatten(cls, aux_data, children):
         # Reconstruct using the static metadata
         cosmo_model, _emu = aux_data
         
@@ -90,13 +88,13 @@ class Cosmology:
             raise ValueError(f"Invalid cosmological parameter(s): {invalid}")
     
         # Flatten the current instance
-        leaves, treedef = jax.tree_util.tree_flatten(self)
+        leaves, treedef = self._tree_flatten()
         
         # Update the parameter list
         new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
         
         # Unflatten returns a new instance with the SAME aux_data (the cache)
-        return jax.tree_util.tree_unflatten(treedef, new_leaves)
+        return self._tree_unflatten(treedef, new_leaves)
         
     # ------------------------------------------------------------------
     # atomic lazy loader (Python-side only)
@@ -545,3 +543,9 @@ class Cosmology:
         return out
 
 
+
+jax.tree_util.register_pytree_node(
+    Cosmology,
+    lambda obj: obj._tree_flatten(),
+    lambda aux_data, children: Cosmology._tree_unflatten(aux_data, children)
+)

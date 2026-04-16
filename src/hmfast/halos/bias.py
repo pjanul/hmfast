@@ -197,24 +197,37 @@ class T10HaloBias(HaloBias):
     @partial(jax.jit, static_argnums=(0,4))
     def halo_bias(self, halo_model, m, z, order=1):
         """
-        Evaluate the halo bias :math:`b_1` or :math:`b_2` on a mass-redshift grid.
-
+        Compute the halo bias for a given order.
+        
+        The first-order (linear) and second-order (quadratic) halo bias are given by:
+        
+        .. math::
+        
+            b_1(\\nu) = 1 - A \\frac{\\nu^a}{\\nu^a + \\delta_c^a} + B \\nu^b + C \\nu^c
+        
+            b_2(\\nu) = 2(1 + a^2)(\\epsilon_1 + E_1) + \\epsilon_2 + E_2
+        
+        where
+        
+        - :math:`\\nu = \\delta_c / \\sigma(M)` is the peak height,
+        - :math:`\\delta_c \\approx 1.686` is the critical density for collapse,
+        - :math:`A, a, B, b, C, c` and the definitions of :math:`\\epsilon_1, E_1, \\epsilon_2, E_2` are given in the original paper (see Tinker et al. 2010, ApJ 724, 878, Table 2).
+        
+        Please refer to the original paper for the parameter values and full expressions.
+        
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo-model instance supplying the cosmology, mass definition, and
-            any mass-conversion settings needed to evaluate the bias.
         m : array-like
-            Halo masses at which to evaluate the bias.
+            Halo mass grid.
         z : array-like
-            Redshifts at which to evaluate the bias.
-        order : int, default 1
-            Bias order (1 for linear, 2 for quadratic).
-
+            Redshift grid.
+        
         Returns
         -------
-        bias : array-like
-            Halo bias values, shape :math:`(N_M, N_z)`.
+        b1 : array-like
+            First-order (linear) halo bias, shape (len(m), len(z)).
+        b2 : array-like
+            Second-order (quadratic) halo bias, shape (len(m), len(z)).
         """
        
        

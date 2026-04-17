@@ -86,6 +86,29 @@ class S12CIBProfile(CIBProfile):
 
 
     def sigma(self, m):
+        """
+        Compute the halo-mass dependence of the Shang et al. CIB luminosity.
+
+        The mass weighting is modeled as a log-normal function,
+
+        .. math::
+
+            \\Sigma(M) = \\frac{M}{\\sqrt{2 \\pi \\, \\sigma_{LM}^2}}
+            \\exp\\left[
+            -\\frac{\\left(\\log_{10} M - \\log_{10} M_{\\mathrm{eff}}\\right)^2}
+            {2 \\sigma_{LM}^2}
+            \\right].
+
+        Parameters
+        ----------
+        m : float or jnp.ndarray
+            Halo mass or masses.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Log-normal mass weighting :math:`\\Sigma(M)`.
+        """
         M_eff_cib, sigma2_LM = self.M_eff, self.sigma2_LM
        
         # Log-normal in mass
@@ -96,8 +119,29 @@ class S12CIBProfile(CIBProfile):
 
 
     def phi(self, z):
-        ''' 
-        Implementation of Φ(z) = (1 + z)^(δ_CIB) for z < z_plateau, 1 for z >= z_plateau from the Shang model'''
+        """
+        Compute the redshift evolution factor in the Shang et al. CIB model.
+
+        The evolution is implemented as
+
+        .. math::
+
+            \\Phi(z) =
+            \\begin{cases}
+            (1 + z)^{\\delta}, & z < z_p, \\
+            1, & z \\ge z_p.
+            \\end{cases}
+
+        Parameters
+        ----------
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Redshift evolution factor :math:`\\Phi(z)`.
+        """
         
         delta = self.delta
         z_p = self.z_p
@@ -108,7 +152,37 @@ class S12CIBProfile(CIBProfile):
 
 
     def theta(self,  z, nu):
-        """Spectral energy distribution function Theta(nu,z) for CIB, analogous to class_sz."""
+        """
+        Compute the Shang et al. spectral energy distribution factor.
+
+        The frequency dependence is modeled as
+
+        .. math::
+
+            \\Theta(\\nu, z) =
+            \\begin{cases}
+            \\left(\\nu / \\nu_0\\right)^{-\\gamma}, & \\nu \\ge \\nu_0, \\
+            \\left(\\nu / \\nu_0\\right)^{\\beta}
+            \\dfrac{B_\\nu(\\nu, T_d)}{B_\\nu(\\nu_0, T_d)}, & \\nu < \\nu_0,
+            \\end{cases}
+
+        where :math:`T_d(z) = T_0 (1 + z)^{\\alpha}` and
+        :math:`B_\\nu(\\nu, T)` is the Planck blackbody function.
+        The transition frequency :math:`\\nu_0(z)` is computed from the
+        continuity condition used in the implementation.
+
+        Parameters
+        ----------
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Frequency or frequencies in GHz.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Spectral energy distribution factor :math:`\\Theta(\\nu, z)`.
+        """
         
         T0, alpha, beta, gamma = self.T0, self.alpha, self.beta, self.gamma
     
@@ -139,6 +213,37 @@ class S12CIBProfile(CIBProfile):
 
 
     def l_gal(self, halo_model, m, z, nu):
+        """
+        Compute the Shang et al. galaxy luminosity assigned to a halo.
+
+        The luminosity is modeled as
+
+        .. math::
+
+            \\L_\\nu^{\\mathrm{gal}}(M, z) = L_0 \\, \\Phi(z) \\, \\Sigma(M)
+            \\, \\Theta\\!\\left((1+z)\\nu, z\\right),
+
+        where :math:`\\Phi(z)`, :math:`\\Sigma(M)`, and
+        :math:`\\Theta(\\nu, z)` are given by the Shang-profile helper
+        functions implemented in this class.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model. Included for interface consistency.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Galaxy luminosity :math:`L_\\nu^{\\mathrm{gal}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         # Shang model logic: L0 * Phi(z) * Sigma(m) * Theta(nu_eff)
         phi_z = jnp.atleast_1d(self.phi(z))[None, :]
         sigma_m = jnp.atleast_1d(self.sigma(m))[:, None]
@@ -148,6 +253,37 @@ class S12CIBProfile(CIBProfile):
 
 
     def l_sat(self, halo_model, m, z, nu):
+        """
+        Compute the total satellite CIB luminosity in the Shang et al. model.
+
+        The satellite contribution is evaluated as
+
+        .. math::
+
+            L_\\nu^{\\mathrm{sat}}(M, z) =
+            \\int d\\ln m_s \\, \\frac{dN}{d\\ln m_s}(m_s \\mid M)
+            \\, L_\\nu^{\\mathrm{gal}}(m_s, z),
+
+        with the integral approximated numerically over the subhalo mass grid
+        used in the implementation.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the subhalo mass function.
+        m : float or jnp.ndarray
+            Host halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Satellite luminosity :math:`L_\\nu^{\\mathrm{sat}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         def integrate_single_halo(m_single):
             ms_min = self.M_min
             ms_max = m_single
@@ -168,6 +304,36 @@ class S12CIBProfile(CIBProfile):
 
      
     def l_cen(self, halo_model, m, z, nu):
+        """
+        Compute the central-galaxy CIB luminosity in the Shang et al. model.
+
+        The central contribution is implemented as
+
+        .. math::
+
+            L_\\nu^{\\mathrm{cen}}(M, z) = N_{\\mathrm{cen}}(M)
+            \\, L_\\nu^{\\mathrm{gal}}(M, z),
+
+        where :math:`N_{\\mathrm{cen}}(M) = 1` for :math:`M > M_{\\min}` and
+        zero otherwise.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model. Included for interface consistency.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Central luminosity :math:`L_\\nu^{\\mathrm{cen}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         # Shang: Central mass is the full halo mass
         n_cen = jnp.where(m > self.M_min, 1.0, 0.0)
         l_gal = self.l_gal(halo_model, m, z, nu)
@@ -177,8 +343,40 @@ class S12CIBProfile(CIBProfile):
      
     def j_bar_nu(self, halo_model, m, z, nu):
         """
-        Compute the mean comoving emissivity j_bar_nu(z) in [Lsun / Mpc^3].
-        Integral of (L_cen + L_sat) over the halo mass function.
+        Compute the mean comoving emissivity in the Shang et al. CIB model.
+
+        The emissivity is computed as
+
+        .. math::
+
+            \\bar{j}_\\nu(z) = \\frac{h^3}{4 \\pi}
+            \\int d\\ln M \\, \\frac{dn}{d\\ln M}(M, z)
+            \\left[L_{\\nu}^{\\mathrm{cen}}(M, z) + L_{\\nu}^{\\mathrm{sat}}(M, z)\\right],
+
+        where the luminosities are evaluated at the physical halo mass.
+        If halo-model consistency is enabled, the implementation adds the
+        low-mass counterterm
+
+        .. math::
+
+            \\Delta \\bar{j}_\\nu(z) = \\frac{h^3}{4 \\pi}
+            \\, n_{\\min}(z) \\, L_{\\nu}^{\\mathrm{cen}}(M_{\\min}, z).
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology and halo mass function.
+        m : float or jnp.ndarray
+            Halo mass grid in :math:`M_\\odot / h`.
+        z : float or jnp.ndarray
+            Redshift grid.
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Mean comoving emissivity :math:`\\bar{j}_\\nu(z)`.
         """
         
         h = halo_model.cosmology.H0 / 100
@@ -206,8 +404,32 @@ class S12CIBProfile(CIBProfile):
 
     def monopole(self, halo_model, m, z, nu):
         """
-        Compute total CIB intensity I_nu [Jy/sr] using the line-of-sight integral.
-        I_nu = integral [ dchi/dz * a(z) * j_bar_nu(z) ] dz
+        Compute the CIB monopole intensity in the Shang et al. CIB model.
+
+        The specific intensity is evaluated as
+
+        .. math::
+
+            I_\\nu = \\int dz \\, \\frac{d\\chi}{dz} \\, a(z) \\, \\bar{j}_\\nu(z),
+
+        where :math:`a(z) = 1/(1+z)` and
+        :math:`d\\chi / dz = 1 / H(z)` in the units used internally.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology.
+        m : float or jnp.ndarray
+            Halo mass grid.
+        z : float or jnp.ndarray
+            Redshift grid.
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Monopole intensity :math:`I_\\nu`.
         """
        
     
@@ -254,9 +476,46 @@ class S12CIBProfile(CIBProfile):
 
 
     def u_k(self, halo_model, k, m, z, moment=1):
-        """ 
-        Compute either the first or second moment of the CIB tracer.
-        Refactored to use sat_and_cen_contribution to avoid redundant math.
+        """
+        Compute the first or second CIB profile moment in Fourier space.
+
+        Writing :math:`u_m(k, M, z)` for the normalized analytic Fourier
+        transform of the NFW matter profile returned by
+        :meth:`u_k_matter`, the implemented first moment is
+
+        .. math::
+
+            u_\\nu(k, M, z) = \\frac{1}{4\\pi}
+            \\left[L_\\nu^{\\mathrm{cen}}(M, z)
+            + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(k, M, z)\\right].
+
+        For ``moment=2``, this method returns
+
+        .. math::
+
+            u_\\nu^{(2)}(k, M, z) = \\frac{1}{(4\\pi)^2}
+            \\left[L_\\nu^{\\mathrm{sat}}(M, z)^2 u_m(k, M, z)^2
+            + 2 L_\\nu^{\\mathrm{sat}}(M, z) L_\\nu^{\\mathrm{cen}}(M, z)
+            u_m(k, M, z)\\right].
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the matter profile and CIB luminosities.
+        k : float or jnp.ndarray
+            Comoving wavenumber(s).
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        moment : int, optional
+            Profile moment to return. Supported values are ``1`` and ``2``.
+
+        Returns
+        -------
+        tuple
+            :math:`(k, u_\\nu)` where the profile array has shape
+            :math:`(N_k, N_M, N_z)`.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
         
@@ -353,7 +612,33 @@ class M21CIBProfile(CIBProfile):
 
     
     def m_dot(self, halo_model, m, z):
-        ''' Mdot =  46.1(1 + 1.11z)E(z)(m /10^12Msun)^1.1 from the Maniyar model'''
+        """
+        Compute the halo mass accretion rate in the Maniyar et al. model.
+
+        The accretion rate is given by
+
+        .. math::
+
+            \\dot{M}(M, z) = 46.1 \\, (1 + 1.11 z) \\, E(z)
+            \\left(\\frac{M}{10^{12} M_{\\odot}}\\right)^{1.1},
+
+        where :math:`E(z) = H(z) / H_0`.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology.
+        m : float or jnp.ndarray
+            Halo mass or masses in :math:`M_{\odot}`.
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        jnp.ndarray
+            Mass accretion rate :math:`\\dot{M}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
 
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
@@ -365,12 +650,49 @@ class M21CIBProfile(CIBProfile):
 
     def sfr(self, halo_model, m, z):
         """
-        Compute Maniyar et al. CIB galaxy luminosity from halo mass and redshift.
-    
+        Compute the star-formation rate in the Maniyar et al. model.
+
+        The star-formation rate is modeled as
+
+        .. math::
+
+            \\mathrm{SFR}(M, z) = 10^{10} \\, f_b \\, \\dot{M}(M, z)
+            \\, \\eta(M, z),
+
+        where :math:`f_b = \\Omega_b / \\Omega_{m,0}` and
+
+        .. math::
+
+            \\eta(M, z) = \\eta_{\\max}
+            \\exp\\left[
+            -\\frac{\\left(\\ln M - \\ln M_{\\mathrm{eff}}\\right)^2}
+            {2 \\sigma_{\\ln M}^2(z)}
+            \\right].
+
+        The width is implemented as
+
+        .. math::
+
+            \\sigma_{\\ln M}^2(z) =
+            \\begin{cases}
+            \\sigma_{LM}^2, & M < M_{\\mathrm{eff}}, \\
+            \\left(\\sqrt{\\sigma_{LM}^2} - \\tau \\max(0, z_c - z)\\right)^2,
+            & M \\ge M_{\\mathrm{eff}}.
+            \\end{cases}
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology.
+        m : float or jnp.ndarray
+            Halo mass or masses in :math:`M_{\odot}`.
+        z : float or jnp.ndarray
+            Redshift(s).
+
         Returns
         -------
-        L_gal : array
-            Galaxy luminosity [lsun] per halo
+        jnp.ndarray
+            Star-formation rate with shape :math:`(N_M, N_z)`.
         """
 
         # Gather all relevant parameters 
@@ -403,6 +725,36 @@ class M21CIBProfile(CIBProfile):
         
 
     def l_gal(self, halo_model, m, z, nu):
+        """
+        Compute the Maniyar et al. galaxy luminosity assigned to a halo.
+
+        The luminosity is modeled as
+
+        .. math::
+
+            L_\\nu^{\\mathrm{gal}}(M, z) = 4\\pi \\, s_\\nu(z, \\nu)
+            \\, \\mathrm{SFR}(M, z),
+
+        where :math:`s_\\nu(z, \\nu)` is obtained by interpolation from the
+        tabulated spectral template used in the implementation.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model. Included for interface consistency.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Galaxy luminosity :math:`L_\\nu^{\\mathrm{gal}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         # Maniyar model logic: 4pi * s_nu * SFR
         s_nu = self._s_nu_interp(z, nu)[None, :]
         sfr = self.sfr(halo_model, m, z)
@@ -411,6 +763,40 @@ class M21CIBProfile(CIBProfile):
 
 
     def l_sat(self, halo_model, m, z, nu):
+        """
+        Compute the total satellite CIB luminosity in the Maniyar et al. model.
+
+        The satellite contribution is evaluated as
+
+        .. math::
+
+            L_\\nu^{\\mathrm{sat}}(M, z) =
+            \\int d\\ln m_s \\, \\frac{dN}{d\\ln m_s}(m_s \\mid M)
+            \\, \\min\\!\\left[
+            L_\\nu^{\\mathrm{gal}}(m_s, z),
+            L_\\nu^{\\mathrm{gal}}\\!\\left(M_{\\max}, z\\right)
+            \\frac{m_s}{M_{\\max}}
+            \\right],
+
+        where :math:`M_{\\max} = M (1-f_{\\mathrm{sub}})`.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the subhalo mass function.
+        m : float or jnp.ndarray
+            Host halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Satellite luminosity :math:`L_\\nu^{\\mathrm{sat}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         def integrate_single_halo(m_single):
             ms_min = self.M_min
             # Host efficiency scaling uses mass corrected by fsub
@@ -433,6 +819,36 @@ class M21CIBProfile(CIBProfile):
 
 
     def l_cen(self, halo_model, m, z, nu):
+        """
+        Compute the central-galaxy CIB luminosity in the Maniyar et al. model.
+
+        The central contribution is implemented as
+
+        .. math::
+
+            L_\\nu^{\\mathrm{cen}}(M, z) = N_{\\mathrm{cen}}(M)
+            \\, L_\\nu^{\\mathrm{gal}}\\!\\left(M(1-f_{\\mathrm{sub}}), z\\right),
+
+        where :math:`N_{\\mathrm{cen}}(M) = 1` for
+        :math:`M(1-f_{\\mathrm{sub}}) > M_{\\min}` and zero otherwise.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model. Included for interface consistency.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Central luminosity :math:`L_\\nu^{\\mathrm{cen}}(M, z)` with shape
+            :math:`(N_M, N_z)`.
+        """
         # Maniyar: Central mass is reduced by the subhalo fraction
         m_eff = m * (1 - self.f_sub)
         n_cen = jnp.where(m_eff > self.M_min, 1.0, 0.0)
@@ -443,8 +859,40 @@ class M21CIBProfile(CIBProfile):
     
     def j_bar_nu(self, halo_model, m, z, nu):
         """
-        Compute the mean comoving emissivity j_bar_nu(z) in [Lsun / Mpc^3].
-        Integral of (L_cen + L_sat) over the halo mass function.
+        Compute the mean comoving emissivity in the Maniyar et al. CIB model.
+
+        The emissivity is computed as
+
+        .. math::
+
+            \\bar{j}_\\nu(z) = \\frac{h^3}{4 \\pi}
+            \\int d\\ln M \\, \\frac{dn}{d\\ln M}(M, z)
+            \\left[L_{\\nu}^{\\mathrm{cen}}(M, z) + L_{\\nu}^{\\mathrm{sat}}(M, z)\\right],
+
+        where the luminosities are evaluated at the physical halo mass.
+        If halo-model consistency is enabled, the implementation adds the
+        low-mass counterterm
+
+        .. math::
+
+            \\Delta \\bar{j}_\\nu(z) = \\frac{h^3}{4 \\pi}
+            \\, n_{\\min}(z) \\, L_{\\nu}^{\\mathrm{cen}}(M_{\\min}, z).
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology and halo mass function.
+        m : float or jnp.ndarray
+            Halo mass grid in :math:`M_\\odot / h`.
+        z : float or jnp.ndarray
+            Redshift grid.
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        jnp.ndarray
+            Mean comoving emissivity :math:`\\bar{j}_\\nu(z)`.
         """
        
         h = halo_model.cosmology.H0 / 100
@@ -473,8 +921,32 @@ class M21CIBProfile(CIBProfile):
 
     def monopole(self, halo_model, m, z, nu):
         """
-        Compute total CIB intensity I_nu [Jy/sr] using the line-of-sight integral.
-        I_nu = integral [ dchi/dz * a(z) * j_bar_nu(z) ] dz
+        Compute the CIB monopole intensity in the Maniyar et al. CIB model.
+
+        The specific intensity is evaluated as
+
+        .. math::
+
+            I_\\nu = \\int dz \\, \\frac{d\\chi}{dz} \\, a(z) \\, \\bar{j}_\\nu(z),
+
+        where :math:`a(z) = 1/(1+z)` and
+        :math:`d\\chi / dz = 1 / H(z)` in the units used internally.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology.
+        m : float or jnp.ndarray
+            Halo mass grid.
+        z : float or jnp.ndarray
+            Redshift grid.
+        nu : float or jnp.ndarray
+            Observed frequency or frequencies in GHz.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Monopole intensity :math:`I_\\nu`.
         """
     
         # Get the mean comoving emissivity (Shape: Nz)
@@ -519,9 +991,46 @@ class M21CIBProfile(CIBProfile):
 
 
     def u_k(self, halo_model, k, m, z, moment=1):
-        """ 
-        Compute either the first or second moment of the CIB tracer.
-        Refactored to use sat_and_cen_contribution to avoid redundant math.
+        """
+        Compute the first or second CIB profile moment in Fourier space.
+
+        Writing :math:`u_m(k, M, z)` for the normalized analytic Fourier
+        transform of the NFW matter profile returned by
+        :meth:`u_k_matter`, the implemented first moment is
+
+        .. math::
+
+            u_\\nu(k, M, z) = \\frac{1}{4\\pi}
+            \\left[L_\\nu^{\\mathrm{cen}}(M, z)
+            + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(k, M, z)\\right].
+
+        For ``moment=2``, this method returns
+
+        .. math::
+
+            u_\\nu^{(2)}(k, M, z) = \\frac{1}{(4\\pi)^2}
+            \\left[L_\\nu^{\\mathrm{sat}}(M, z)^2 u_m(k, M, z)^2
+            + 2 L_\\nu^{\\mathrm{sat}}(M, z) L_\\nu^{\\mathrm{cen}}(M, z)
+            u_m(k, M, z)\\right].
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the matter profile and CIB luminosities.
+        k : float or jnp.ndarray
+            Comoving wavenumber(s).
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+        moment : int, optional
+            Profile moment to return. Supported values are ``1`` and ``2``.
+
+        Returns
+        -------
+        tuple
+            :math:`(k, u_\\nu)` where the profile array has shape
+            :math:`(N_k, N_M, N_z)`.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
         

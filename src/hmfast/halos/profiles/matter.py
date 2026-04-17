@@ -23,11 +23,40 @@ class NFWMatterProfile(MatterProfile):
 
 
     def u_k(self, halo_model, k, m, z, moment=1):
-        """ 
-        Compute either the first or second moment of the CMB lensing tracer u_ell.
-        For CMB lensing:, 
-            First moment:     W_k_cmb * u_ell_m
-            Second moment:    W_k_cmb^2 * u_ell_m^2 
+        """
+        Compute the first or second moment of the mass-weighted NFW matter
+        profile in Fourier space.
+    
+        The returned quantity is
+    
+        .. math::
+    
+            u(k, M, z) = \\frac{M}{\\bar{\\rho}_{m,0}} \\, u^m(k, M, z),
+    
+        where :math:`u^m(k, M, z)` is the normalized analytic Fourier transform of the NFW
+        density profile.
+        
+        For ``moment=1``, this method returns :math:`u(k, M, z)`. For
+        ``moment=2``, it returns :math:`u^2(k, M, z)`.
+    
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology, concentration relation, and halo
+            radius.
+        k : float or jnp.ndarray
+            Comoving wavenumber(s).
+        m : float or jnp.ndarray
+            Halo mass(es).
+        z : float or jnp.ndarray
+            Redshift(s).
+        moment : int, optional
+            Moment of the profile to return. Supported values are ``1`` and ``2``.
+    
+        Returns
+        -------
+        tuple
+            :math:`(k, u)``, where :math:`u` has shape :math:`(N_k, N_M, N_z)`.
         """
 
         

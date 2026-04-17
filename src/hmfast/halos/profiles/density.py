@@ -234,7 +234,7 @@ class B16DensityProfile(DensityProfile):
         rho_gas : array-like
             Gas density 
         """
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         h = cparams["h"]
 
@@ -296,7 +296,7 @@ class NFWDensityProfile(DensityProfile):
         
 
     def profile(self, halo_model, x, m, z):
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
        
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
@@ -418,7 +418,7 @@ class BCMDensityProfile(DensityProfile):
             rho_gas: Gas density in [M_sun h^2 / Mpc^3] (Nx, Nm, Nz)
         """
        
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Broadcasting shapes: (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)

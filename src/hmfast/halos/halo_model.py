@@ -343,7 +343,7 @@ class HaloModel:
        
         m = jnp.atleast_1d(m)
         logm = jnp.log(m)
-        cparams = self.cosmology.get_all_cosmo_params()
+        cparams = self.cosmology._cosmo_params()
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]   # Omega0_m without neutrinos
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
@@ -544,7 +544,7 @@ class HaloModel:
             2-halo power spectrum, shape (len(k), len(z)).
         """
         
-        cparams = self.cosmology.get_all_cosmo_params()
+        cparams = self.cosmology._cosmo_params()
         h, k, m, z = cparams["h"], jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         tracer2 = tracer1 if tracer2 is None else tracer2
     

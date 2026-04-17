@@ -289,14 +289,31 @@ class Cosmology:
         return self._interp_z(z, self._z_grid_bg(), preds)
 
     @jax.jit
-    def get_all_cosmo_params(self):
+    def _cosmo_params(self):
         """
-        Get all relevant cosmological parameters.
-                
+        Get the input cosmological parameters together with derived background quantities.
+    
         Returns
         -------
         dict
-            Dictionary with all derived cosmological parameters
+            Dictionary containing the emulator input parameters and the following
+            derived quantities:
+    
+            - ``h``: Dimensionless Hubble parameter, :math:`h = H_0 / 100`
+            - ``Omega_b``: Present-day baryon density parameter
+            - ``Omega_cdm``: Present-day cold dark matter density parameter
+            - ``Omega0_g``: Present-day photon density parameter
+            - ``Omega0_ur``: Present-day ultra-relativistic density parameter
+            - ``Omega0_ncdm``: Present-day massive neutrino density parameter
+            - ``Omega_Lambda``: Present-day dark energy density parameter
+            - ``Omega0_m``: Present-day total matter density parameter
+            - ``Omega0_r``: Present-day total radiation density parameter
+            - ``Omega0_m_nonu``: Present-day matter density parameter excluding
+              massive neutrinos
+            - ``Omega0_cb``: Present-day CDM+baryon density parameter
+            - ``Rho_crit_0``: Present-day critical density in
+              :math:`(M_\\odot / h) \\, (\\mathrm{Mpc} / h)^{-3}`
+    
         """
     
         p = self._to_dict()
@@ -357,22 +374,24 @@ class Cosmology:
     @jax.jit
     def omega_m(self, z):
         """
-        Compute 
-        
-        ..:math:`\\Omega_m(z) = \\rho_m(z) / \\rho_{\\mathrm{crit}}(z)` without neutrinos.
-
+        Matter density parameter excluding neutrinos.
+    
+        .. math::
+    
+            \\Omega_m(z) = \\frac{\\Omega_{m,\\mathrm{no\\nu},0}(1+z)^3}{\\Omega_{m,0}(1+z)^3 + \\Omega_{\\Lambda,0} + \\Omega_{r,0}(1+z)^4}
+    
         Parameters
         ----------
         z : float or jnp.ndarray
             Redshift(s)
-
+    
         Returns
         -------
-        omega_m : float or array
+        float or jnp.ndarray
             Dimensionless matter density at redshift :math:`z`
         """
        
-        params = self.get_all_cosmo_params()
+        params = self._cosmo_params()
         om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
         Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
         
@@ -471,20 +490,20 @@ class Cosmology:
     def comoving_volume_element(self, z):
         """
         Comoving volume element per unit redshift and solid angle.
-
+    
         .. math::
-
-            \\frac{dV}{dz\,d\\Omega} = \\frac{(1+z)^2\, D_A(z)^2}{H(z)}
-
+    
+            \\frac{dV}{dz\\,d\\Omega} = \\frac{(1+z)^2\\, D_A(z)^2}{H(z)}
+    
         Parameters
         ----------
-        z : float
-            Redshift
-
+        z : float or jnp.ndarray
+            Redshift(s)
+    
         Returns
         -------
-        float
-            :math:`dV / dz / d\\Omega` in :math:`(\\mathrm{Mpc}/h)^3 \\, \\mathrm{sr}^{-1}`
+        float or jnp.ndarray
+            :math:`\\frac{dV}{dz\\,d\\Omega}` in :math:`(\\mathrm{Mpc}/h)^3 \\, \\mathrm{sr}^{-1}`
         """
         
         h = self.H0 / 100

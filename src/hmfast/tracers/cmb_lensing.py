@@ -82,7 +82,7 @@ class CMBLensingTracer(Tracer):
         """
         # Merge default parameters with input
         
-        cparams = cosmology.get_all_cosmo_params()
+        cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z)  # Ensure z is an array
         
         # Cosmological constants

@@ -54,7 +54,7 @@ class HaloBias(ABC):
         """
         
         z_grid = halo_model.cosmology._z_grid_pk()
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         h = cparams["h"]
     
         # Power spectra for all redshifts, shape: (n_k, n_z)

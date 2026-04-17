@@ -228,7 +228,7 @@ class S12CIBProfile(CIBProfile):
     def sat_and_cen_contribution(self, halo_model, k, m, z):
 
         
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
         h = cparams["h"]
        
@@ -375,7 +375,7 @@ class M21CIBProfile(CIBProfile):
 
         # Gather all relevant parameters 
         
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = self.M_eff, self.sigma2_LM, self.eta_max, self.tau, self.z_c, self.f_sub 
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
@@ -493,7 +493,7 @@ class M21CIBProfile(CIBProfile):
     
     def sat_and_cen_contribution(self, halo_model, k, m, z):
 
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
         h = halo_model.cosmology.H0 / 100
        

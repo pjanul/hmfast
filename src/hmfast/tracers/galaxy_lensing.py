@@ -171,7 +171,7 @@ class GalaxyLensingTracer(Tracer):
         """
         # Merge default parameters with input
        
-        cparams = cosmology.get_all_cosmo_params()
+        cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z) # Ensure z is an array
 
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s

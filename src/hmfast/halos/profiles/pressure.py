@@ -281,7 +281,7 @@ class B12PressureProfile(PressureProfile):
         Battaglia 2012 pressure profile generalized for arbitrary mass definition.
         Always normalizes and scales using the native 200c definition.
         """
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         h = cparams["h"]
         alpha, gamma = 1.0, -0.3
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)

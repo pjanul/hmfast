@@ -64,7 +64,7 @@ class HaloProfile:
         """
 
        
-        cparams = halo_model.cosmology.get_all_cosmo_params()
+        cparams = halo_model.cosmology._cosmo_params()
         h = cparams['h']
        
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)

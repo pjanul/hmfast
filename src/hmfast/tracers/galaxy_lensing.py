@@ -82,18 +82,27 @@ class GalaxyLensingTracer(Tracer):
     
     def _I_s(self, cosmology, z):
         """
-        Compute the lensing efficiency integral :math:`I_s(z)` at redshift
-        :math:`z`.
-
+        Compute the lensing efficiency integral :math:`I_s(z)` at redshift :math:`z`.
+    
+        The integral is given by:
+    
+        .. math::
+    
+            I_s(z) = \\int_z^{\\infty} dz_s\\, \\frac{dN}{dz}(z_s) \\frac{\\chi(z_s) - \\chi(z)}{\\chi(z_s)}
+    
+        where :math:`\\frac{dN}{dz}(z_s)` is the normalized source redshift distribution,
+        :math:`\\chi(z)` is the comoving distance to redshift :math:`z`, and
+        :math:`\\chi(z_s)` is the comoving distance to source redshift :math:`z_s`.
+    
         Integrates over the source redshift distribution, including only sources behind the lens.
-
+    
         Parameters
         ----------
         cosmology : Cosmology
             Cosmology object with required methods and parameters.
         z : float or array_like
             Redshift(s) at which to compute the integral.
-
+    
         Returns
         -------
         I_s : array_like
@@ -129,27 +138,32 @@ class GalaxyLensingTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the galaxy lensing kernel :math:`W_{\\kappa,g}(z)` at redshift
-        :math:`z`.
-
+        Compute the galaxy lensing kernel :math:`W_{\\kappa_g}(z)` at redshift :math:`z`.
+    
         The kernel is given by:
-
+    
         .. math::
-
-            W_{\\kappa,g}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} I_s(z)
-
+    
+            W_{\\kappa_g}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} I_s(z)
+    
         where :math:`\\Omega_m` is the matter density parameter,
         :math:`H_0` is the Hubble constant, :math:`c` is the speed of light,
         :math:`\\chi(z)` is the comoving distance to redshift :math:`z`, and
-        :math:`I_s(z)` is the lensing efficiency integral.
-
+        :math:`I_s(z)` is the lensing efficiency integral defined as
+    
+        .. math::
+    
+            I_s(z) = \\int_z^{\\infty} dz_s\\, \\frac{dN}{dz}(z_s) \\frac{\\chi(z_s) - \\chi(z)}{\\chi(z_s)}
+    
+        where :math:`\\frac{dN}{dz}(z_s)` is the normalized source redshift distribution.
+    
         Parameters
         ----------
         cosmology : Cosmology
             Cosmology object with required methods and parameters.
         z : float or array_like
             Redshift(s) at which to compute the kernel.
-
+    
         Returns
         -------
         W_kappa_g : array_like

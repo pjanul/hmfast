@@ -79,8 +79,8 @@ class tSZTracer(Tracer):
     
         Returns
         -------
-        kernel : float or array-like
-            tSZ kernel.
+        W_tsz : float or array-like
+            tSZ kernel evaluated at redshift(s) :math:`z`.
         """
         
         h = cosmology.H0/100 

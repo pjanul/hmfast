@@ -63,7 +63,7 @@ class CMBLensingTracer(Tracer):
     
             .. math::
     
-                W_{\\kappa,\\mathrm{cmb}}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} \\frac{\\chi_* - \\chi(z)}{\\chi_*}
+                W_{\\kappa_{\\mathrm{CMB}}}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} \\frac{\\chi_* - \\chi(z)}{\\chi_*}
     
         where :math:`\\chi_*` is the comoving distance to the last scattering
         surface.

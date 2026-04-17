@@ -80,27 +80,42 @@ class Cosmology:
         
         return obj
     
-    def update(self, **kwargs):
+    def update(self, H0=None, omega_cdm=None, omega_b=None, ln1e10A_s=None, n_s=None,
+        tau_reio=None, m_ncdm=None, N_ur=None, w0_fld=None, fEDE=None, log10z_c=None,
+        thetai_scf=None, r=None, T_cmb=None, deg_ncdm=None):
+        """
+        Return a new Cosmology instance with updated parameters.
+    
+        Each parameter defaults to None. Only those not None are updated.
+    
+        Parameters
+        ----------
+        H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio, m_ncdm, N_ur, w0_fld, fEDE, log10z_c, thetai_scf, r, T_cmb, deg_ncdm : float or None
+            Cosmological parameters to update.
+    
+        Returns
+        -------
+        Cosmology
+            New instance with updated parameters.
+        """
+        # Flatten the current instance to get aux_data (static metadata)
+        leaves, aux_data = self._tree_flatten()
         names = [
             'H0', 'omega_cdm', 'omega_b', 'ln1e10A_s', 'n_s', 'tau_reio',
-            'm_ncdm', 'N_ur', 'w0_fld', 
+            'm_ncdm', 'N_ur', 'w0_fld',
             'fEDE', 'log10z_c', 'thetai_scf', 'r',
             'T_cmb', 'deg_ncdm'
         ]
-        
-        invalid = set(kwargs) - set(names)
-        if invalid:
-            raise ValueError(f"Invalid cosmological parameter(s): {invalid}")
-    
-        # Flatten the current instance
-        leaves, treedef = self._tree_flatten()
-        
-        # Update the parameter list
-        new_leaves = [kwargs.get(name, val) for name, val in zip(names, leaves)]
-        
-        # Unflatten returns a new instance with the SAME aux_data (the cache)
-        return self._tree_unflatten(treedef, new_leaves)
-        
+        values = [
+            H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio,
+            m_ncdm, N_ur, w0_fld,
+            fEDE, log10z_c, thetai_scf, r,
+            T_cmb, deg_ncdm
+        ]
+        # Only update values that are not None
+        new_leaves = [v if v is not None else old for v, old in zip(values, leaves)]
+        return self._tree_unflatten(aux_data, new_leaves)
+            
     # ------------------------------------------------------------------
     # atomic lazy loader (Python-side only)
     # ------------------------------------------------------------------
@@ -342,7 +357,9 @@ class Cosmology:
     @jax.jit
     def omega_m(self, z):
         """
-        Compute :math:`\\Omega_m(z) = \\rho_m(z) / \\rho_{\\mathrm{crit}}(z)` without neutrinos.
+        Compute 
+        
+        ..:math:`\\Omega_m(z) = \\rho_m(z) / \\rho_{\\mathrm{crit}}(z)` without neutrinos.
 
         Parameters
         ----------
@@ -457,7 +474,7 @@ class Cosmology:
 
         .. math::
 
-            \\frac{dV}{dz d\\Omega} = (1+z)^2 D_A(z)^2 / H(z)
+            \\frac{dV}{dz\,d\\Omega} = \\frac{(1+z)^2\, D_A(z)^2}{H(z)}
 
         Parameters
         ----------
@@ -495,8 +512,8 @@ class Cosmology:
 
         Returns
         -------
-        tuple[jnp.ndarray, jnp.ndarray]
-            :math:`k` array and :math:`P(k)` array
+        tuple
+            :math:`(k, P(k))`
         """
         params = self._to_dict()
         params["z_pk_save_nonclass"] = jnp.atleast_1d(z)[0]
@@ -616,11 +633,26 @@ class Cosmology:
     def derived_parameters(self):
         """
         Get derived cosmological parameters from the emulator.
-
+    
         Returns
         -------
         dict
-            Dictionary of derived parameters.
+            Dictionary of derived parameters with the following keys:
+    
+            - '100*theta_s' : Sound horizon angle (in units of 1/100 radians)
+            - 'sigma8' : RMS matter fluctuation in 8 Mpc/h spheres
+            - 'YHe' : Primordial helium fraction
+            - 'z_reio' : Redshift of reionization
+            - 'Neff' : Effective number of relativistic species
+            - 'tau_rec' : Conformal time at recombination (maximum visibility)
+            - 'z_rec' : Redshift at recombination (maximum visibility)
+            - 'rs_rec' : Comoving sound horizon at recombination [Mpc]
+            - 'chi_rec' : Comoving distance to recombination [Mpc]
+            - 'tau_star' : Conformal time at last scattering (optical depth = 1)
+            - 'z_star' : Redshift at last scattering (optical depth = 1)
+            - 'rs_star' : Comoving sound horizon at last scattering [Mpc]
+            - 'chi_star' : Comoving distance to last scattering [Mpc]
+            - 'rs_drag' : Comoving sound horizon at baryon drag [Mpc]
         """
         params = self._to_dict()
         emu = self._load_emulator("DER")
@@ -643,9 +675,7 @@ class Cosmology:
 
         
         out = {n: preds[i] for i, n in enumerate(names) if i < len(preds)}
-        out["h"] = params["H0"] / 100.0
-        out["Omega_m"] = (params["omega_b"] + params["omega_cdm"]) / out["h"]**2
-
+        
         return out
 
 

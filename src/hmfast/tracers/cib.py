@@ -32,12 +32,24 @@ class CIBTracer(Tracer):
         obj.profile = profile
         return obj
 
-    def update(self, **kwargs):
+    def update(self, profile=None):
         """
-        Passes all parameter updates (including 'nu') down to the profile.
+        Return a new CIBTracer instance with updated attributes using PyTree logic.
+
+        Parameters
+        ----------
+        profile : CIBProfile, optional
+            New CIB profile to use for the tracer. If None, the profile is unchanged.
+
+        Returns
+        -------
+        CIBTracer
+            New tracer instance with updated attributes.
         """
-        new_profile = self.profile.update(**kwargs)
-        return CIBTracer(profile=new_profile)
+        flat, aux = self._tree_flatten()
+        if profile is not None:
+            flat = (profile,)
+        return self._tree_unflatten(aux, flat)
     
     def kernel(self, cosmology, z):
         

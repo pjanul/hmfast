@@ -50,7 +50,7 @@ class GalaxyHODTracer(Tracer):
         obj._dndz_data = dndz_data
         return obj
 
-    def update(self, **kwargs):
+    def update(self, profile=None, dndz=None):
         """
         Return a new GalaxyHODTracer instance with updated attributes using PyTree logic.
 
@@ -66,30 +66,31 @@ class GalaxyHODTracer(Tracer):
         GalaxyHODTracer
             New tracer instance with updated attributes.
         """
-        
-        new_profile = self.profile.update(**kwargs)
-        return GalaxyHODTracer(profile=new_profile, dndz=self._dndz_data)
+        flat, aux = self._tree_flatten()
+        new_profile = profile if profile is not None else flat[0]
+        new_dndz = dndz if dndz is not None else flat[1]
+        return self._tree_unflatten(aux, (new_profile, new_dndz))
 
 
     def kernel(self, cosmology, z):
         """
         Compute the galaxy kernel :math:`W_g(z)` at redshift :math:`z`.
-
+    
         The kernel is given by:
-
+    
         .. math::
-
-            W_g(z) = H(z) \\frac{\\phi'(z)}{\\chi^2(z)}
-
-        where :math:`\\phi'(z)` is the normalized redshift distribution.
-
+    
+            W_g(z) = \\frac{H(z)}{c\\,\\chi^2(z)} \\frac{dN}{dz}
+    
+        where :math:`dN/dz` is the normalized redshift distribution of galaxies.
+    
         Parameters
         ----------
         cosmology : Cosmology
             Cosmology object with required methods and parameters.
         z : float or array_like
             Redshift(s) at which to compute the kernel.
-
+    
         Returns
         -------
         W_g : array_like

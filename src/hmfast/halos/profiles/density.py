@@ -266,24 +266,21 @@ class B16DensityProfile(DensityProfile):
         """
         Compute the Battaglia et al. (2016) electron-density profile.
 
-        The profile is evaluated as a function of the dimensionless radius
-        :math:`x = r / r_{200c}`. The implemented model is
+        The profile is written in generalized NFW (gNFW) form as
 
         .. math::
 
-            \\rho_e(x, M, z) =
-            \\rho_{\\mathrm{crit}}(z) \\, f_b \\, \\rho_0(M, z) \\, p(x, M, z),
+            \\rho_{\\mathrm{gas,free}}(r)
+            = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \, C
+            \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\gamma}
+            \\left[1 + \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}},
 
-        where :math:`f_b = \\Omega_b / \\Omega_{m,0}` and the profile shape is
+        where :math:`r_{200c}` is the characteristic radius associated with the
+        overdensity mass :math:`M_{200c}`.
 
-        .. math::
-
-            p(x, M, z)
-            = \\left(\\frac{x}{x_c}\\right)^\\gamma
-            \\left[1 + \\left(\\frac{x}{x_c}\\right)^\\alpha\\right]^{-(\\beta + \\gamma)/\\alpha}.
-
-        In this implementation, :math:`x_c = 0.5` and :math:`\\gamma = -0.2`. The
-        remaining profile parameters follow the generic Battaglia scaling
+        With :math:`x_c = 0.5` and :math:`\\gamma = -0.2` kept fixed throughout the
+        paper, the mass- and redshift-dependent parameters :math:`C`, :math:`\\alpha`,
+        and :math:`\\beta` obey the scaling relation
 
         .. math::
 
@@ -291,15 +288,14 @@ class B16DensityProfile(DensityProfile):
             \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
             (1 + z)^{\\alpha_z^X},
 
-        where :math:`X` stands for the mass- and redshift-dependent profile parameters
-        used in the model, such as :math:`\\rho_0`, :math:`\\alpha`, and :math:`\\beta`.
+        where :math:`X \\in \\{C, \\alpha, \\beta\\}`.
 
         Parameters
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
         x : float or jnp.ndarray
-            Dimensionless radius :math:`x = r / r_{200c}`.
+            Dimensionless radius corresponding to :math:`r / r_{200c}`.
         m : float or jnp.ndarray
             Halo mass or masses in :math:`M_\\odot / h`.
         z : float or jnp.ndarray
@@ -376,11 +372,12 @@ class NFWDensityProfile(DensityProfile):
         Compute the NFW-based electron-density profile.
 
         The profile is obtained by taking an NFW matter profile and scaling it by the
-        cosmic baryon fraction. Writing :math:`x = r / r_s`, the implemented profile is
+        cosmic baryon fraction. Writing the expression in terms of radius :math:`r`,
+        the implemented profile is
 
         .. math::
 
-            \\rho_e(x, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(x)
+            \\rho_e(r, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(r)
 
         where :math:`\\rho_{\\mathrm{NFW}}(r) = \\rho_{m,0} \, u_{\\mathrm{NFW}}(r)`.
 

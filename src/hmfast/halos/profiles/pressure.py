@@ -412,7 +412,7 @@ class B12PressureProfile(PressureProfile):
 
         .. math::
 
-            P_e(x, M, z) \\propto P_0(M_{200c}, z) \\, p(x_{200c}, M_{200c}, z),
+            P_e(x, M, z) = P_0(M_{200c}, z) \\, p(x_{200c}, M_{200c}, z),
 
         where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}` and the
         generalized NFW shape is

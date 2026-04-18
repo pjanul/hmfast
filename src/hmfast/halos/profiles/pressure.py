@@ -61,7 +61,7 @@ class PressureProfile(HaloProfile):
             and the transformed profile has shape :math:`(N_k, N_M, N_z)`.
         """
         h = halo_model.cosmology.H0 / 100 
-        B = self.B
+        B = 1.0 #self.B
         delta = halo_model.mass_definition.delta
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -239,7 +239,7 @@ class GNFWPressureProfile(PressureProfile):
 
         .. math::
 
-            P_e(x, M, z) = P_{500c} \\, P_0 \\,
+            P_e(x, M, z) = P_{500c}(M_{500c}, z) \\, P_0 \\,
             \\left(c_{500} x_{500c}\\right)^{-\\gamma}
             \\left[1 + \\left(c_{500} x_{500c}\\right)^\\alpha\\right]^{(\\gamma-\\beta)/\\alpha},
 
@@ -412,16 +412,12 @@ class B12PressureProfile(PressureProfile):
 
         .. math::
 
-            P_e(x, M, z) = P_0(M_{200c}, z) \\, p(x_{200c}, M_{200c}, z),
+            P_e(x, M, z)
+            = P_{200c} \, P_0
+            \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
+            \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta},
 
-        where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}` and the
-        generalized NFW shape is
-
-        .. math::
-
-            p(x_{200c}, M_{200c}, z)
-            = \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
-            \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta}.
+        where :math:`x_{200c} = r / r_{200c} = x \, r_\\Delta / r_{200c}`.
 
         In this implementation, :math:`\\alpha = 1` and :math:`\\gamma = -0.3`. The
         remaining profile parameters follow the generic Battaglia scaling

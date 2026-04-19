@@ -153,6 +153,29 @@ class DensityProfile(HaloProfile):
 class B16DensityProfile(DensityProfile):
     """
     Electron density profile from `Battaglia et al. (2016) <https://ui.adsabs.harvard.edu/abs/2016JCAP...08..058B/abstract>`_.
+
+    Attributes
+    ----------
+    x : jnp.ndarray
+        Dimensionless radial grid :math:`x = r / r_\Delta` used to tabulate the profile and define the Hankel transform.
+    A_rho0 : float
+        Amplitude of the density normalization scaling.
+    A_alpha : float
+        Amplitude of the transition-slope scaling.
+    A_beta : float
+        Amplitude of the outer-slope scaling.
+    alpha_m_rho0 : float
+        Mass-scaling exponent of :math:`\rho_0`.
+    alpha_m_alpha : float
+        Mass-scaling exponent of :math:`\alpha`.
+    alpha_m_beta : float
+        Mass-scaling exponent of :math:`\beta`.
+    alpha_z_rho0 : float
+        Redshift-scaling exponent of :math:`\rho_0`.
+    alpha_z_alpha : float
+        Redshift-scaling exponent of :math:`\alpha`.
+    alpha_z_beta : float
+        Redshift-scaling exponent of :math:`\beta`.
     """
     def __init__(self, x=None, 
                  A_rho0=4000.0, A_alpha=0.88, A_beta=3.83,
@@ -206,19 +229,12 @@ class B16DensityProfile(DensityProfile):
                alpha_m_rho0=None, alpha_m_alpha=None, alpha_m_beta=None,
                alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None):
         """
-        Return a new profile instance with updated calibration parameters.
+        Return a new profile instance with updated Battaglia density parameters.
 
         Parameters
         ----------
-        A_rho0 : float, optional
-        A_alpha : float, optional
-        A_beta : float, optional
-        alpha_m_rho0 : float, optional
-        alpha_m_alpha : float, optional
-        alpha_m_beta : float, optional
-        alpha_z_rho0 : float, optional
-        alpha_z_alpha : float, optional
-        alpha_z_beta : float, optional
+        A_rho0, A_alpha, A_beta, alpha_m_rho0, alpha_m_alpha, alpha_m_beta, alpha_z_rho0, alpha_z_alpha, alpha_z_beta : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
         -------
@@ -349,6 +365,11 @@ jax.tree_util.register_pytree_node(
 class NFWDensityProfile(DensityProfile):
     """
     Matter density profile from `Navarro, Frenk & White (1997) <https://ui.adsabs.harvard.edu/abs/1997ApJ...490..493N/abstract>`_.
+
+    Attributes
+    ----------
+    x : jnp.ndarray
+        Dimensionless radial grid :math:`x = r / r_s` used to tabulate the profile and define the Hankel transform.
     """
     def __init__(self, x=None):
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(1.0), 256)
@@ -425,6 +446,25 @@ class BCMDensityProfile(DensityProfile):
     """
     Electron density profile from `Schneider et al. (2019) <https://ui.adsabs.harvard.edu/abs/2019JCAP...03..020S/abstract>`_, 
     also known as the Baryon Correction Model (BCM).
+
+    Attributes
+    ----------
+    x : jnp.ndarray
+        Dimensionless radial grid :math:`x = r / r_{\mathrm{vir}}` used to tabulate the profile and define the Hankel transform.
+    log10Mc : float
+        Characteristic halo-mass scale controlling the gas fraction suppression.
+    theta_ej : float
+        Ejection-radius parameter in units of the virial radius.
+    eta_star : float
+        Stellar-fraction amplitude parameter.
+    delta : float
+        Inner-slope parameter of the gas profile.
+    gamma : float
+        Outer-slope parameter of the gas profile.
+    mu : float
+        Transition-shape parameter controlling the stellar component.
+    nu_log10Mc : float
+        Redshift dependence of the characteristic mass scale.
     """
     def __init__(self, x=None, 
                  log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2, 
@@ -475,17 +515,12 @@ class BCMDensityProfile(DensityProfile):
     def update(self, log10Mc=None, theta_ej=None, eta_star=None, 
                delta=None, gamma=None, mu=None, nu_log10Mc=None):
         """
-        Return a new profile instance with updated calibration parameters.
+        Return a new profile instance with updated BCM parameters.
 
         Parameters
         ----------
-        log10Mc : float, optional
-        theta_ej : float, optional
-        eta_star : float, optional
-        delta : float, optional
-        gamma : float, optional
-        mu : float, optional
-        nu_log10Mc : float, optional
+        log10Mc, theta_ej, eta_star, delta, gamma, mu, nu_log10Mc : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
         -------

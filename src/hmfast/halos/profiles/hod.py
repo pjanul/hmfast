@@ -18,6 +18,19 @@ class GalaxyHODProfile(HaloProfile):
 class StandardGalaxyHODProfile(GalaxyHODProfile):
     """
     Standard Galaxy HOD profile.
+
+    Attributes
+    ----------
+    sigma_log10M : float
+        Scatter in :math:`\log_{10} M` for the central-galaxy occupation threshold.
+    alpha_s : float
+        Power-law slope of the satellite occupation.
+    M1_prime : float
+        Characteristic satellite mass scale.
+    M_min : float
+        Minimum halo mass for central occupation.
+    M0 : float
+        Satellite cutoff mass.
     """
 
     def __init__(self, sigma_log10M=0.68, alpha_s=1.30, M1_prime=10**12.7, M_min=10**11.8, M0=0.0):        
@@ -47,16 +60,8 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
         Parameters
         ----------
-        sigma_log10M : float, optional
-            Scatter in log10 halo mass for central occupation.
-        alpha_s : float, optional
-            Power-law slope for satellite occupation.
-        M1_prime : float, optional
-            Characteristic mass for satellites.
-        M_min : float, optional
-            Minimum mass for central occupation.
-        M0 : float, optional
-            Cutoff mass for satellites.
+        sigma_log10M, alpha_s, M1_prime, M_min, M0 : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
         -------

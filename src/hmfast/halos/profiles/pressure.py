@@ -153,6 +153,23 @@ class PressureProfile(HaloProfile):
 class GNFWPressureProfile(PressureProfile):
     """
     Electron pressure profile from `Nagai, Kravtsov & Vikhlinin (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...668....1N/abstract>`_.
+
+    Attributes
+    ----------
+    x : jnp.ndarray
+        Dimensionless radial grid :math:`x = r / r_\Delta` used to tabulate the profile and define the Hankel transform.
+    P0 : float
+        Dimensionless gNFW normalization.
+    c500 : float
+        Concentration parameter of the :math:`500c` pressure profile.
+    alpha : float
+        Intermediate-slope parameter of the gNFW profile.
+    beta : float
+        Outer-slope parameter of the gNFW profile.
+    gamma : float
+        Inner-slope parameter of the gNFW profile.
+    B : float
+        Hydrostatic mass bias factor used in the :math:`M_{500c}` normalization.
     """
     
     def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4):
@@ -199,16 +216,12 @@ class GNFWPressureProfile(PressureProfile):
 
     def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None):
         """
-        Return a new profile instance with updated GNFW pressure profile parameters.
+        Return a new profile instance with updated GNFW parameters.
     
         Parameters
         ----------
-        P0 : float, optional
-        c500 : float, optional
-        alpha : float, optional
-        beta : float, optional
-        gamma : float, optional
-        B : float, optional
+        P0, c500, alpha, beta, gamma, B : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
     
         Returns
         -------
@@ -317,6 +330,29 @@ jax.tree_util.register_pytree_node(
 class B12PressureProfile(PressureProfile):
     """
     Electron pressure profile from `Battaglia et al. (2012) <https://ui.adsabs.harvard.edu/abs/2012ApJ...758...74B/abstract>`_.
+
+    Attributes
+    ----------
+    x : jnp.ndarray
+        Dimensionless radial grid :math:`x = r / r_\Delta` used to tabulate the profile and define the Hankel transform.
+    A_P0 : float
+        Amplitude of the pressure normalization scaling.
+    A_xc : float
+        Amplitude of the core-radius scaling.
+    A_beta : float
+        Amplitude of the outer-slope scaling.
+    alpha_m_P0 : float
+        Mass-scaling exponent of :math:`P_0`.
+    alpha_m_xc : float
+        Mass-scaling exponent of :math:`x_c`.
+    alpha_m_beta : float
+        Mass-scaling exponent of :math:`\beta`.
+    alpha_z_P0 : float
+        Redshift-scaling exponent of :math:`P_0`.
+    alpha_z_xc : float
+        Redshift-scaling exponent of :math:`x_c`.
+    alpha_z_beta : float
+        Redshift-scaling exponent of :math:`\beta`.
     """
     def __init__(self, x=None, 
                  A_P0=18.1, A_xc=0.497, A_beta=4.35,
@@ -367,19 +403,12 @@ class B12PressureProfile(PressureProfile):
                alpha_m_P0=None, alpha_m_xc=None, alpha_m_beta=None,
                alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None):
         """
-        Return a new profile instance with updated B12 pressure profile parameters.
+        Return a new profile instance with updated B12 parameters.
     
         Parameters
         ----------
-        A_P0 : float, optional
-        A_xc : float, optional
-        A_beta : float, optional
-        alpha_m_P0 : float, optional
-        alpha_m_xc : float, optional
-        alpha_m_beta : float, optional
-        alpha_z_P0 : float, optional
-        alpha_z_xc : float, optional
-        alpha_z_beta : float, optional
+        A_P0, A_xc, A_beta, alpha_m_P0, alpha_m_xc, alpha_m_beta, alpha_z_P0, alpha_z_xc, alpha_z_beta : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
     
         Returns
         -------

@@ -19,6 +19,31 @@ class CIBProfile(HaloProfile):
 class S12CIBProfile(CIBProfile):
     """
     CIB profile from `Shang et al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.421.2832S/abstract>`_.
+
+    Attributes
+    ----------
+    nu : float
+        Observed frequency in GHz.
+    L0 : float
+        Luminosity normalization.
+    alpha : float
+        Redshift scaling exponent of the dust temperature.
+    beta : float
+        Low-frequency spectral slope of the SED.
+    gamma : float
+        High-frequency spectral slope of the SED.
+    T0 : float
+        Dust temperature at :math:`z = 0` in Kelvin.
+    M_eff : float
+        Halo mass scale that maximizes the log-normal emissivity weighting.
+    sigma2_LM : float
+        Variance of the log-normal mass weighting.
+    delta : float
+        Redshift evolution exponent of the luminosity amplitude.
+    z_p : float
+        Pivot redshift above which the luminosity evolution saturates.
+    M_min : float
+        Minimum subhalo mass used in the satellite luminosity integral.
     """
     def __init__(self, nu, L0=6.4e-8, alpha=0.36, beta=1.75, gamma=1.7,
                  T0=24.4, M_eff=10**12.6, sigma2_LM=0.5, 
@@ -47,21 +72,12 @@ class S12CIBProfile(CIBProfile):
                T0=None, M_eff=None, sigma2_LM=None, 
                delta=None, z_p=None, M_min=None):
         """
-        Return a new profile instance with updated CIB parameters.
+        Return a new profile instance with updated Shang CIB parameters.
 
         Parameters
         ----------
-        nu : float, optional
-        L0 : float, optional
-        alpha : float, optional
-        beta : float, optional
-        gamma : float, optional
-        T0 : float, optional
-        M_eff : float, optional
-        sigma2_LM : float, optional
-        delta : float, optional
-        z_p : float, optional
-        M_min : float, optional
+        nu, L0, alpha, beta, gamma, T0, M_eff, sigma2_LM, delta, z_p, M_min : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
         -------
@@ -522,6 +538,27 @@ jax.tree_util.register_pytree_node(
 class M21CIBProfile(CIBProfile):
     """
     CIB profile from `Maniyar et al. (2021) <https://ui.adsabs.harvard.edu/abs/2021A%26A...645A..40M/abstract>`_.
+
+    Attributes
+    ----------
+    nu : float
+        Observed frequency in GHz.
+    eta_max : float
+        Maximum star-formation efficiency.
+    z_c : float
+        Redshift pivot controlling the width of the high-mass efficiency branch.
+    tau : float
+        Parameter controlling the redshift evolution of the high-mass width.
+    f_sub : float
+        Fraction of infrared luminosity assigned to subhalos.
+    M_min : float
+        Minimum halo mass contributing to the emissivity.
+    M_eff : float
+        Halo mass scale of peak star-formation efficiency.
+    sigma2_LM : float
+        Variance parameter entering the log-normal efficiency model.
+    s_nu : tuple
+        Tabulated Maniyar spectral energy distribution grid stored as :math:`(z, \nu, S_\nu)`.
     """
     def __init__(self, nu, eta_max=0.4028, z_c=1.5, tau=1.204, f_sub=0.134, 
                  M_min=10**11.5, M_eff=10**12.6, sigma2_LM=0.5, s_nu=None):
@@ -557,18 +594,12 @@ class M21CIBProfile(CIBProfile):
     def update(self, nu=None, eta_max=None, z_c=None, tau=None, f_sub=None, 
                M_min=None, M_eff=None, sigma2_LM=None):
         """
-        Return a new profile instance with updated CIB parameters.
+        Return a new profile instance with updated Maniyar CIB parameters.
 
         Parameters
         ----------
-        nu : float, optional
-        eta_max : float, optional
-        z_c : float, optional
-        tau : float, optional
-        f_sub : float, optional
-        M_min : float, optional
-        M_eff : float, optional
-        sigma2_LM : float, optional
+        nu, eta_max, z_c, tau, f_sub, M_min, M_eff, sigma2_LM : float, optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
         -------

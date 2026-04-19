@@ -6,7 +6,7 @@
    :members:
    :undoc-members:
    :show-inheritance:
-   :exclude-members: __init__, profile, dndz
+   :exclude-members: __init__, profile, dndz, x, has_central_contribution
 
    {% block methods %}
    {% set public_methods = [] %}
@@ -28,7 +28,7 @@
    {% block attributes %}
    {% set public_attributes = [] %}
    {% for item in attributes %}
-   {% if not item.startswith('_') and item not in ['profile', 'dndz'] %}
+   {% if not item.startswith('_') and item not in ['profile', 'dndz', 'x', 'has_central_contribution'] %}
    {% set _ = public_attributes.append(item) %}
    {% endif %}
    {% endfor %}

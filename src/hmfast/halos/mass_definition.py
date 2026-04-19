@@ -7,28 +7,20 @@ from hmfast.utils import newton_root
 
 class MassDefinition:
     """
-    Mass definition for halos, specifying the overdensity threshold and reference density.
+    Mass definition for halos specified by an overdensity threshold and a reference density.
 
-    This class encapsulates the definition of a halo mass in terms of an overdensity
-    parameter (`delta`) and a reference density (`reference`). The mass can be defined
-    with respect to either the critical density or the mean matter density of the universe,
-    and can use a fixed overdensity (e.g., 200) or the redshift-dependent 'virial' value.
-
-    Parameters
-    ----------
-    delta : int, float, or str, optional
-        Overdensity parameter. Can be a numeric value (e.g., 200, 500) or the string 'vir'
-        for the redshift-dependent virial overdensity. Default is 200.
-    reference : {'critical', 'mean'}, optional
-        Reference density for the overdensity threshold. Must be either 'critical' (for
-        critical density) or 'mean' (for mean matter density). Default is 'critical'.
+    For example, :math:`200c` corresponds to ``delta=200`` and
+    ``reference='critical'``, while :math:`200m` corresponds to ``delta=200``
+    and ``reference='mean'``. The special value ``delta='vir'`` denotes the
+    redshift-dependent virial overdensity and can only be used with
+    ``reference='critical'``.
 
     Attributes
     ----------
     delta : int, float, or str
-        The overdensity parameter. If 'vir', the virial overdensity is used.
+        Overdensity threshold used to define the halo boundary. This can be a numeric value such as ``200`` or ``500``, or the string ``'vir'`` for the redshift-dependent virial overdensity. The value ``'vir'`` is only valid with ``reference='critical'``.
     reference : str
-        The reference density, either 'critical' or 'mean'.
+        Reference density associated with ``delta``, either ``'critical'`` or ``'mean'``.
 
     Raises
     ------

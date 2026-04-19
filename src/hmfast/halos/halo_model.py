@@ -26,6 +26,25 @@ class HaloModel:
     Provides halo-model predictions for arbitrary tracers using a configurable
     cosmology, halo mass function, halo bias model, concentration relation,
     and subhalo mass function.
+
+    Attributes
+    ----------
+    cosmology : Cosmology
+        Cosmology object supplying background, growth, and power-spectrum quantities.
+    mass_definition : MassDefinition
+        Native spherical-overdensity mass definition used throughout the halo model.
+    mass_model : object
+        Halo mass-function model used to compute :math:`dn / d\ln M`.
+    bias_model : object
+        Halo bias model used for large-scale halo bias predictions.
+    subhalo_mass_model : object
+        Subhalo mass-function model used in observables with satellite or subhalo contributions.
+    concentration : object
+        Halo concentration relation used to map halo mass and redshift to concentration.
+    hm_consistency : bool
+        Flag controlling whether halo-model consistency counterterms are applied.
+    convert_masses : bool
+        Flag controlling whether profile-specific native mass definitions are converted automatically.
     """
    
 
@@ -88,7 +107,16 @@ class HaloModel:
                hm_consistency=None, convert_masses=None):
         """
         Return a new HaloModel instance with updated components.
-        Only provided arguments are updated; others remain unchanged.
+
+        Parameters
+        ----------
+        cosmology, mass_model, bias_model, subhalo_mass_model, concentration, mass_definition, hm_consistency, convert_masses : optional
+            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
+
+        Returns
+        -------
+        HaloModel
+            New halo-model instance with updated attributes.
         """
         # Flatten current state
         children, aux_data = self._tree_flatten()

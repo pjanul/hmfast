@@ -35,6 +35,9 @@ class GalaxyHODTracer(Tracer):
 
     @property
     def dndz(self):
+        """
+        :meta private:
+        """
         return self._dndz_data
 
     @dndz.setter

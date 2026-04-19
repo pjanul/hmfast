@@ -25,7 +25,7 @@ class Tracer(ABC):
     @property
     def profile(self):
         """
-        :noindex:
+        :meta private:
         """
         return self._profile
 

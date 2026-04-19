@@ -55,7 +55,7 @@ class HaloMass(ABC):
     
     
         # Halo mass function grid, shape: (n_z, n_R)
-        hmf_grid = halo_model.mass_model.f_sigma(halo_model, sigma_grid, z_grid)
+        hmf_grid = halo_model.halo_mass_function.f_sigma(halo_model, sigma_grid, z_grid)
     
         # Compute d n / d ln(M)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)

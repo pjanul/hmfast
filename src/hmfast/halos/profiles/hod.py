@@ -164,7 +164,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         z = jnp.atleast_1d(z)
 
         Ntot = self.n_cen(m) + self.n_sat(m)
-        dndlnm = halo_model.mass_model.halo_mass_function(halo_model, m, z)
+        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z)
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
@@ -201,8 +201,8 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         z = jnp.atleast_1d(z)
 
         Ntot = self.n_cen(m) + self.n_sat(m)
-        dndlnm = halo_model.mass_model.halo_mass_function(halo_model, m, z)
-        bh = halo_model.halo_bias(m, z, order=1)
+        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z)
+        bh = halo_model.halo_bias.halo_bias(halo_model, m, z, order=1)
         ng = self.ng_bar(halo_model, m, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)

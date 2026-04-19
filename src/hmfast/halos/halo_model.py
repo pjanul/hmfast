@@ -30,16 +30,16 @@ class HaloModel:
     Attributes
     ----------
     cosmology : Cosmology
-        Cosmology object supplying background, growth, and power-spectrum quantities.
+        Cosmology object supplying background, growth, and matter power spectra quantities.
     mass_definition : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
-    mass_model : object
-        Halo mass-function model used to compute :math:`dn / d\ln M`.
-    bias_model : object
+    halo_mass_function : HaloMass
+        Halo mass function model used to compute :math:`dn / d\ln M`.
+    halo_bias : HaloBias
         Halo bias model used for large-scale halo bias predictions.
-    subhalo_mass_model : object
-        Subhalo mass-function model used in observables with satellite or subhalo contributions.
-    concentration : object
+    subhalo_mass_function : SubHaloMass
+        Subhalo mass function model used in observables with satellite or subhalo contributions.
+    concentration : Concentration
         Halo concentration relation used to map halo mass and redshift to concentration.
     hm_consistency : bool
         Flag controlling whether halo-model consistency counterterms are applied.
@@ -52,9 +52,9 @@ class HaloModel:
     def __init__(self, 
                  cosmology=Cosmology(cosmo_model=0), 
                  mass_definition=MassDefinition(delta=200, reference="critical"), 
-                 mass_model = T08HaloMass(), 
-                 bias_model = T10HaloBias(), 
-                 subhalo_mass_model = TW10SubHaloMass(),
+                 halo_mass_function=T08HaloMass(), 
+                 halo_bias=T10HaloBias(), 
+                 subhalo_mass_function=TW10SubHaloMass(),
                  concentration=D08Concentration(), 
                  hm_consistency=True, 
                  convert_masses=False):
@@ -67,9 +67,9 @@ class HaloModel:
         self.cosmology._load_emulator("PKL")
         self.cosmology._load_emulator("DER")
         
-        self.mass_model = mass_model
-        self.bias_model = bias_model
-        self.subhalo_mass_model = subhalo_mass_model
+        self.halo_mass_function = halo_mass_function
+        self.halo_bias = halo_bias
+        self.subhalo_mass_function = subhalo_mass_function
         self.concentration = concentration
 
         self.mass_definition = mass_definition
@@ -86,7 +86,7 @@ class HaloModel:
         # The cosmology is a Pytree, so it is a child.
         # Everything else is configuration/metadata.
         children = (self.cosmology,)
-        aux_data = (self.mass_model, self.bias_model, self.subhalo_mass_model, self.concentration,
+        aux_data = (self.halo_mass_function, self.halo_bias, self.subhalo_mass_function, self.concentration,
             self.mass_definition, self.hm_consistency, self.convert_masses, self._tophat_instance
         )
         return (children, aux_data)
@@ -96,21 +96,21 @@ class HaloModel:
         cosmology, = children
         obj = cls.__new__(cls)
         obj.cosmology = cosmology
-        (obj.mass_model, obj.bias_model, obj.subhalo_mass_model, 
+        (obj.halo_mass_function, obj.halo_bias, obj.subhalo_mass_function, 
          obj.concentration, obj.mass_definition, obj.hm_consistency, 
          obj.convert_masses, obj._tophat_instance) = aux_data
         return obj
 
    
 
-    def update(self, cosmology=None, mass_model=None, bias_model=None, subhalo_mass_model=None, concentration=None, mass_definition=None, 
+    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_definition=None, 
                hm_consistency=None, convert_masses=None):
         """
         Return a new HaloModel instance with updated components.
 
         Parameters
         ----------
-        cosmology, mass_model, bias_model, subhalo_mass_model, concentration, mass_definition, hm_consistency, convert_masses : optional
+        cosmology, halo_mass_function, halo_bias, subhalo_mass_function, concentration, mass_definition, hm_consistency, convert_masses : optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
@@ -123,15 +123,15 @@ class HaloModel:
         # Unpack
         (cosmo_child,) = children
         (
-            mass_model0, bias_model0, subhalo_mass_model0, concentration0,
+            halo_mass_function0, halo_bias0, subhalo_mass_function0, concentration0,
             mass_definition0, hm_consistency0, convert_masses0, tophat_instance0
         ) = aux_data
     
         # Update only provided components
         new_cosmo = cosmology if cosmology is not None else cosmo_child
-        new_mass_model = mass_model if mass_model is not None else mass_model0
-        new_bias_model = bias_model if bias_model is not None else bias_model0
-        new_subhalo_mass_model = subhalo_mass_model if subhalo_mass_model is not None else subhalo_mass_model0
+        new_halo_mass_function = halo_mass_function if halo_mass_function is not None else halo_mass_function0
+        new_halo_bias = halo_bias if halo_bias is not None else halo_bias0
+        new_subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else subhalo_mass_function0
         new_concentration = concentration if concentration is not None else concentration0
         new_mass_definition = mass_definition if mass_definition is not None else mass_definition0
         new_hm_consistency = hm_consistency if hm_consistency is not None else hm_consistency0
@@ -139,7 +139,7 @@ class HaloModel:
     
         # Reuse the existing tophat instance (or update if needed)
         new_aux_data = (
-            new_mass_model, new_bias_model, new_subhalo_mass_model, new_concentration,
+            new_halo_mass_function, new_halo_bias, new_subhalo_mass_function, new_concentration,
             new_mass_definition, new_hm_consistency, new_convert_masses, tophat_instance0
         )
         # Use _tree_unflatten to create the new instance efficiently
@@ -388,9 +388,9 @@ class HaloModel:
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
         # Compute dn/dlnM and bias for each z
-        dn_dlnm = self.mass_model.halo_mass_function(self, m=m, z=z)  # (Nm, Nz)
-        b1 = self.bias_model.halo_bias(self, m=m, z=z, order=1)      # (Nm, Nz)
-        b2 = self.bias_model.halo_bias(self, m=m, z=z, order=2)      # (Nm, Nz)
+        dn_dlnm = self.halo_mass_function.halo_mass_function(self, m=m, z=z)  # (Nm, Nz)
+        b1 = self.halo_bias.halo_bias(self, m=m, z=z, order=1)      # (Nm, Nz)
+        b2 = self.halo_bias.halo_bias(self, m=m, z=z, order=2)      # (Nm, Nz)
     
         # Compute integrals I0, I1, I2
         I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
@@ -447,7 +447,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = self.mass_model.halo_mass_function(self, m, z)
+        dndlnm = self.halo_mass_function.halo_mass_function(self, m, z)
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
@@ -593,8 +593,8 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = self.mass_model.halo_mass_function(self, m, z)
-        bias = self.bias_model.halo_bias(self, m, z)
+        dndlnm = self.halo_mass_function.halo_mass_function(self, m, z)
+        bias = self.halo_bias.halo_bias(self, m, z)
         total_weights = dndlnm * bias * w[:, None]
     
         def get_I(tracer):

@@ -301,7 +301,7 @@ class S12CIBProfile(CIBProfile):
             dlnms = jnp.log(ms_grid[1] / ms_grid[0])
             
             # Subhalo mass function
-            dn_dlnms = halo_model.subhalo_mass_model.dndlnmu(m_single, ms_grid)
+            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(m_single, ms_grid)
             # Standard Shang luminosity
             l_gal_grid = self.l_gal(halo_model, ms_grid, z)
             
@@ -384,7 +384,7 @@ class S12CIBProfile(CIBProfile):
         ls = self.l_sat(halo_model, m_phys, z) # Shape: (Nm, Nz)
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function(m, z) # Shape: (Nm, Nz)
+        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
@@ -810,7 +810,7 @@ class M21CIBProfile(CIBProfile):
             ms_grid = jnp.logspace(jnp.log10(ms_min), jnp.log10(ms_max), ngrid)
             dlnms = jnp.log(ms_grid[1] / ms_grid[0])
             
-            dn_dlnms = halo_model.subhalo_mass_model.dndlnmu(m_single, ms_grid)
+            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(m_single, ms_grid)
             
             # Maniyar Clamping Logic
             sfr_i = self.l_gal(halo_model, ms_grid, z)
@@ -896,7 +896,7 @@ class M21CIBProfile(CIBProfile):
         ls = self.l_sat(halo_model, m_phys, z) # Shape: (Nm, Nz)
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function(m, z) # Shape: (Nm, Nz)
+        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 

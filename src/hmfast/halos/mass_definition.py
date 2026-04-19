@@ -9,11 +9,12 @@ class MassDefinition:
     """
     Mass definition for halos specified by an overdensity threshold and a reference density.
 
-    For example, :math:`200c` corresponds to ``delta=200`` and
-    ``reference='critical'``, while :math:`200m` corresponds to ``delta=200``
-    and ``reference='mean'``. The special value ``delta='vir'`` denotes the
-    redshift-dependent virial overdensity and can only be used with
-    ``reference='critical'``.
+    For example, :math:`M_{200c}` corresponds to
+    ``MassDefinition(delta=200, reference="critical")``, while
+    :math:`M_{200m}` corresponds to
+    ``MassDefinition(delta=200, reference="mean")``. The special value
+    ``delta='vir'`` denotes the redshift-dependent virial overdensity and can
+    only be used with ``reference='critical'``.
 
     Attributes
     ----------

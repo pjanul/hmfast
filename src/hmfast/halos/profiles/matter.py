@@ -97,6 +97,7 @@ class NFWMatterProfile(MatterProfile):
             Halo mass(es).
         z : float or jnp.ndarray
             Redshift(s).
+            
         Returns
         -------
         tuple

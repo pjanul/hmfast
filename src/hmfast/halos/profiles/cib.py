@@ -492,6 +492,7 @@ class S12CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
+            
         Returns
         -------
         tuple
@@ -984,6 +985,7 @@ class M21CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
+            
         Returns
         -------
         tuple

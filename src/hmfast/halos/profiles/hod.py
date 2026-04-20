@@ -90,7 +90,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         The value is given by:
     
             .. math::
-        # HOD model logic: L0 * Phi(z) * Sigma(m) * Theta(nu_eff)
+
                 N_\\mathrm{cen}(m) = \\frac{1}{2} \\left[1 + \\mathrm{erf}\\left(\\frac{\\log_{10} m - \\log_{10} M_\\mathrm{min}}{\\sigma_{\\log_{10} M}}\\right)\\right]
     
         Parameters
@@ -180,7 +180,8 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     
                 b_g(z) = \\frac{1}{\\bar{n}_g(z)} \\langle b^{(1)} (N_\\mathrm{cen} + N_\\mathrm{sat}) \\rangle_n
     
-        where $b^{(1)}$ is the first-order halo bias and the average is over the halo mass function.
+        where :math:`b^{(1)}` is the first-order halo bias and the average is over
+        the halo mass function.
     
         Parameters
         ----------
@@ -236,9 +237,9 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     
             .. math::
     
-                    u_k(k, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g(z)}
-    
-        where $u_m(k, m, z)$ is the normalized matter profile in Fourier space.
+                u_k(k, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g(z)}
+
+        where :math:`u_m(k, m, z)` is the normalized matter profile in Fourier space.
     
         Parameters
         ----------
@@ -250,6 +251,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
             Halo mass grid.
         z : array-like
             Redshift grid.
+
         Returns
         -------
         k : array-like

@@ -47,6 +47,7 @@ class DensityProfile(HaloProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
+
         Returns
         -------
         tuple

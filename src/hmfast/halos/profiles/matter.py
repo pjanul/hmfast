@@ -21,11 +21,61 @@ class NFWMatterProfile(MatterProfile):
     def __init__(self):
         pass
 
-
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_r(self, halo_model, r, m, z):
         """
-        Compute the first or second moment of the mass-weighted NFW matter
-        profile in Fourier space.
+        Compute the real-space mass-weighted NFW matter profile.
+
+        The returned quantity is the real-space counterpart of ``u_k``:
+
+        .. math::
+
+            u_r(r, M, z) = \\frac{\\rho_{\\mathrm{NFW}}(r, M, z)}{\\bar{\\rho}_{m,0}}
+            = \\frac{M}{\\bar{\\rho}_{m,0}} \\, u_r^m(r, M, z),
+
+        where
+
+        .. math::
+
+            u_r^m(r, M, z)
+            = \\frac{1}{4\\pi r_s^3}
+            \\left[\\ln(1+c) - \\frac{c}{1+c}\\right]^{-1}
+            \\frac{1}{x(1+x)^2},
+
+        with :math:`x = r / r_s` and :math:`r_s = r_\\Delta / c`.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the cosmology, concentration relation, and halo
+            radius.
+        r : float or jnp.ndarray
+            Physical radius or radii in the same units as :math:`r_\\Delta`.
+        m : float or jnp.ndarray
+            Halo mass(es).
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        jnp.ndarray
+            Real-space profile with shape :math:`(N_r, N_M, N_z)`.
+        """
+        cparams = halo_model.cosmology._cosmo_params()
+
+        r = jnp.atleast_1d(r)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        # Normalized real-space profile (unit mass)
+        u_r_norm = self._u_r_matter(halo_model, r, m, z)
+        # Mass-weighted profile
+        return (m[:, None] / rho_mean_0)[None, :, :] * u_r_norm
+
+
+    def u_k(self, halo_model, k, m, z):
+        """
+        Compute the mass-weighted NFW matter profile in Fourier space.
     
         The returned quantity is
     
@@ -35,9 +85,6 @@ class NFWMatterProfile(MatterProfile):
     
         where :math:`u^m(k, M, z)` is the normalized analytic Fourier transform of the NFW
         density profile.
-        
-        For ``moment=1``, this method returns :math:`u(k, M, z)`. For
-        ``moment=2``, it returns :math:`u^2(k, M, z)`.
     
         Parameters
         ----------
@@ -50,9 +97,6 @@ class NFWMatterProfile(MatterProfile):
             Halo mass(es).
         z : float or jnp.ndarray
             Redshift(s).
-        moment : int, optional
-            Moment of the profile to return. Supported values are ``1`` and ``2``.
-    
         Returns
         -------
         tuple
@@ -73,11 +117,4 @@ class NFWMatterProfile(MatterProfile):
 
         u_m *= m_over_rho_mean
     
-        moment_funcs = [
-            lambda _:   u_m ,
-            lambda _:   u_m**2,
-        ]
-    
-        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
-    
-        return k, u_k
+        return k, u_m

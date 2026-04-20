@@ -14,7 +14,6 @@ from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
 from hmfast.halos.mass_definition import MassDefinition
 from hmfast.cosmology import Cosmology
-from hmfast.utils import newton_root
 
 jax.config.update("jax_enable_x64", True)
 
@@ -141,36 +140,33 @@ class HaloModel:
         # Use _tree_unflatten to create the new instance efficiently
         return self._tree_unflatten(new_aux_data, (new_cosmo,))
        
-
-    #@partial(jax.jit, static_argnums=0)
-    def _delta_vir_to_crit(self, z):
+    def r_delta(self, m, z, mass_definition=None):
         """
-        Compute the virial overdensity with respect to the critical density,
-        :math:`\\Delta_{\\mathrm{vir}}(z)`,
-        using the Bryan & Norman (1998) fitting formula for a flat universe.
-
-        The formula is:
+        Compute the halo radius :math:`r_\\Delta` associated with a halo mass.
 
         .. math::
 
-            \\Delta_{\\mathrm{vir}}(z) = 18\\pi^2 + 82x - 39x^2
-
-        where :math:`x = \\Omega_m(z) - 1`.
+            r_\\Delta = \\left[\\frac{3M}{4\\pi \\Delta \\rho_{\\mathrm{ref}}(z)}\\right]^{1/3}
 
         Parameters
         ----------
-        z : float or array-like
-            Redshift(s) at which to compute the virial overdensity.
+        m : float
+            Halo mass enclosed within the overdensity radius.
+        z : float
+            Redshift at which to compute the radius.
+        mass_definition : MassDefinition, optional
+            Mass definition (default: self.mass_definition).
 
         Returns
         -------
-        delta_vir : float or array-like
-            Virial overdensity relative to the critical density at redshift :math:`z`.
+        float
+            Radius :math:`r_\\Delta` within which the mean enclosed density is
+            :math:`\\Delta \\rho_{\\mathrm{ref}}(z)`.
         """
-        omega_m = self.cosmology.omega_m(z)
-        x = omega_m - 1.0
-    
-        return 18.0 * jnp.pi**2 + 82.0 * x - 39.0 * x**2
+        mass_definition = self.mass_definition if mass_definition is None else mass_definition
+        return mass_definition.r_delta(self.cosmology, m, z)
+
+
     
     @jax.jit
     def _counter_terms(self, m, z):
@@ -266,21 +262,23 @@ class HaloModel:
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
         tracer2 = tracer1 if tracer2 is None else tracer2
 
-    
         # Process a single mass bin at a time and extract the uk^2 at the lowest mass for the halo model consistency term
         def process_bin(i):
             # We need the profiles for index 'i' while squaring uk if the user is doing an autocorrelation
             if is_same_tracer:
-                _, uk_sq_full = tracer1.profile.u_k(self, k/h, m, z, moment=2)
-                uk_sq_row = uk_sq_full[:, i, :]
+                if tracer1.profile.has_central_contribution:
+                    s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k/h, m, z)
+                    uk_sq_row = s1[:, i, :] * s1[:, i, :] + 2.0 * s1[:, i, :] * c1[:, i, :]
+                else:
+                    _, u1 = tracer1.profile.u_k(self, k/h, m, z)
+                    uk_sq_row = u1[:, i, :] ** 2
             elif tracer1.profile.has_central_contribution and tracer2.profile.has_central_contribution:
                 s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k/h, m, z)
                 s2, c2 = tracer2.profile._sat_and_cen_contribution(self, k/h, m, z)
-                # Pull only row i
                 uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
             else:
-                _, u1 = tracer1.profile.u_k(self, k/h, m, z, moment=1)
-                _, u2 = tracer2.profile.u_k(self, k/h, m, z, moment=1)
+                _, u1 = tracer1.profile.u_k(self, k/h, m, z)
+                _, u2 = tracer2.profile.u_k(self, k/h, m, z)
                 uk_sq_row = u1[:, i, :] * u2[:, i, :]
     
             return uk_sq_row * total_weights[i], uk_sq_row
@@ -413,7 +411,7 @@ class HaloModel:
         def get_I(tracer):
             # This function processes a single index 'i' of the mass axis
             def process_bin(i):
-                _, uk_full = tracer.profile.u_k(self, k/h, m, z, moment=1)
+                _, uk_full = tracer.profile.u_k(self, k/h, m, z)
                 uk_slice = uk_full[:, i, :] 
                 return uk_slice * total_weights[i], uk_slice
     
@@ -493,4 +491,3 @@ jax.tree_util.register_pytree_node(
     lambda obj: obj._tree_flatten(),
     lambda aux_data, children: HaloModel._tree_unflatten(aux_data, children)
 )
-

@@ -469,9 +469,9 @@ class S12CIBProfile(CIBProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_k(self, halo_model, k, m, z):
         """
-        Compute the first or second CIB profile moment in Fourier space.
+        Compute the first CIB profile moment in Fourier space.
 
         Writing :math:`u_m(k, M, z)` for the normalized analytic Fourier
         transform of the NFW profile, the implemented first moment is
@@ -481,15 +481,6 @@ class S12CIBProfile(CIBProfile):
             u_\\nu(k, M, z) = \\frac{1}{4\\pi}
             \\left[L_\\nu^{\\mathrm{cen}}(M, z)
             + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(k, M, z)\\right].
-
-        For ``moment=2``, this method returns
-
-        .. math::
-
-            u_\\nu^{(2)}(k, M, z) = \\frac{1}{(4\\pi)^2}
-            \\left[L_\\nu^{\\mathrm{sat}}(M, z)^2 u_m(k, M, z)^2
-            + 2 L_\\nu^{\\mathrm{sat}}(M, z) L_\\nu^{\\mathrm{cen}}(M, z)
-            u_m(k, M, z)\\right].
 
         Parameters
         ----------
@@ -501,9 +492,6 @@ class S12CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-        moment : int, optional
-            Profile moment to return. Supported values are ``1`` and ``2``.
-
         Returns
         -------
         tuple
@@ -514,14 +502,7 @@ class S12CIBProfile(CIBProfile):
         
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        moment_funcs = [
-            lambda _: cen_term + sat_term,                         # prefactor * (lc[None, :, :] + ls[None, :, :] * u_m ) 
-            lambda _: sat_term**2 + 2 * sat_term * cen_term,       # prefactor * (ls[None, :, :]**2 * u_m**2 + 2 * ls[None, :, :] * lc[None, :, :] * u_m ) 
-        ]
-
-        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
-    
-        return k, u_k
+        return k, cen_term + sat_term
 
         
 
@@ -980,9 +961,9 @@ class M21CIBProfile(CIBProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_k(self, halo_model, k, m, z):
         """
-        Compute the first or second CIB profile moment in Fourier space.
+        Compute the first CIB profile moment in Fourier space.
 
         Writing :math:`u_m(k, M, z)` for the normalized analytic Fourier
         transform of the NFW profile, the implemented first moment is
@@ -992,15 +973,6 @@ class M21CIBProfile(CIBProfile):
             u_\\nu(k, M, z) = \\frac{1}{4\\pi}
             \\left[L_\\nu^{\\mathrm{cen}}(M, z)
             + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(k, M, z)\\right].
-
-        For ``moment=2``, this method returns
-
-        .. math::
-
-            u_\\nu^{(2)}(k, M, z) = \\frac{1}{(4\\pi)^2}
-            \\left[L_\\nu^{\\mathrm{sat}}(M, z)^2 u_m(k, M, z)^2
-            + 2 L_\\nu^{\\mathrm{sat}}(M, z) L_\\nu^{\\mathrm{cen}}(M, z)
-            u_m(k, M, z)\\right].
 
         Parameters
         ----------
@@ -1012,9 +984,6 @@ class M21CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-        moment : int, optional
-            Profile moment to return. Supported values are ``1`` and ``2``.
-
         Returns
         -------
         tuple
@@ -1024,14 +993,7 @@ class M21CIBProfile(CIBProfile):
     
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        moment_funcs = [
-            lambda _: cen_term + sat_term,                         # prefactor * (lc[None, :, :] + ls[None, :, :] * u_m ) 
-            lambda _: sat_term**2 + 2 * sat_term * cen_term,       # prefactor * (ls[None, :, :]**2 * u_m**2 + 2 * ls[None, :, :] * lc[None, :, :] * u_m ) 
-        ]
-
-        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
-    
-        return k, u_k
+        return k, cen_term + sat_term
 
 
 jax.tree_util.register_pytree_node(

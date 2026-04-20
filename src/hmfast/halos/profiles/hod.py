@@ -90,7 +90,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         The value is given by:
     
             .. math::
-    
+        # HOD model logic: L0 * Phi(z) * Sigma(m) * Theta(nu_eff)
                 N_\\mathrm{cen}(m) = \\frac{1}{2} \\left[1 + \\mathrm{erf}\\left(\\frac{\\log_{10} m - \\log_{10} M_\\mathrm{min}}{\\sigma_{\\log_{10} M}}\\right)\\right]
     
         Parameters
@@ -212,11 +212,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
         """ 
-        Compute either the first or second moment of the galaxy HOD tracer u_ell.
-        For galaxy HOD:, 
-            First moment:     W_g / ng_bar * [Nc + Ns * u_ell_m]
-            Second moment:    W_g^2 / ng_bar^2 * [Ns^2 * u_ell_m^2 + 2 * Ns * u_ell_m]
-        You cannot simply take u_ell_g**2.
+        Compute the satellite and central pieces of the galaxy HOD tracer.
         """
 
        
@@ -232,19 +228,15 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         return sat_term, cen_term
 
 
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_k(self, halo_model, k, m, z):
         """
-        Fourier-space moment of the galaxy HOD profile.
+        Fourier-space galaxy HOD profile.
     
-        Computes the first or second moment of the galaxy HOD Fourier-space profile:
-    
-            .. math::
-    
-                u_k^{(1)}(k, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g(z)}
+        Computes the first moment of the galaxy HOD Fourier-space profile:
     
             .. math::
     
-                u_k^{(2)}(k, m, z) = \\frac{N_\\mathrm{sat}^2(m) \\, u_m^2(k, m, z) + 2 N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g^2(z)}
+                    u_k(k, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g(z)}
     
         where $u_m(k, m, z)$ is the normalized matter profile in Fourier space.
     
@@ -258,15 +250,12 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
             Halo mass grid.
         z : array-like
             Redshift grid.
-        moment : int, optional
-            Moment to compute (1 for first, 2 for second). Default is 1.
-    
         Returns
         -------
         k : array-like
             Wavenumber grid.
         u_k : array-like
-            Fourier-space profile moment.
+            Fourier-space profile.
         """
        
         Ns = self.n_sat(m)
@@ -275,13 +264,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
         _, u_m = self._u_k_matter(halo_model, k, m, z)
     
-        moment_funcs = [
-            
-            lambda _: (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m),
-            lambda _: (1/ng**2) * (Ns[None, :, None]**2 * u_m**2 + 2 * Ns[None, :, None] * u_m),
-        ]
-    
-        u_k = jax.lax.switch(moment - 1, moment_funcs, None)
+        u_k = (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
         return k, u_k
         
 

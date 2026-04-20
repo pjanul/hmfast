@@ -13,7 +13,7 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
 class PressureProfile(HaloProfile):
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_k(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space pressure profile for halo-model calculations.
 
@@ -37,10 +37,6 @@ class PressureProfile(HaloProfile):
         :math:`\\ell \\approx k \\chi(z) - 1/2`, with
         :math:`\\chi(z) = (1+z) d_A(z)`.
 
-        For ``moment=1``, the method returns :math:`u_\\ell(\\ell, M, z)`. For
-        ``moment=2``, it returns the squared profile
-        :math:`u_\\ell^{(2)}(\\ell, M, z) = u_\\ell(\\ell, M, z)^2`.
-
         Parameters
         ----------
         halo_model : HaloModel
@@ -51,9 +47,6 @@ class PressureProfile(HaloProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-        moment : int, optional
-            Profile moment to return. Supported values are ``1`` and ``2``.
-
         Returns
         -------
         tuple
@@ -84,9 +77,9 @@ class PressureProfile(HaloProfile):
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None])) 
         ell_native = k_native[:, None, None] * ell_delta[None, :, :] # (Nk_native, Nm, Nz)
         
-        # Apply prefactor and moment
+        # Apply prefactor
         u_ell_base = prefactor[None, :, :] * u_ell_native # (Nk_native, Nm, Nz)
-        u_ell_val = jax.lax.select(moment == 1, u_ell_base, u_ell_base**2)
+        u_ell_val = u_ell_base
     
         # Interpolate over the native k-axis (axis 0) for every combination of m and z    
         def interp_at_z(ell_t, ell_n, u_n):
@@ -216,20 +209,24 @@ class GNFWPressureProfile(PressureProfile):
 
     def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None):
         """
-        Return a new profile instance with updated GNFW parameters.
-    
+        Return a new profile instance with updated GNFW pressure profile parameters.
+
         Parameters
         ----------
-        P0, c500, alpha, beta, gamma, B : float, optional
-            Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
-    
+        P0 : float, optional
+        c500 : float, optional
+        alpha : float, optional
+        beta : float, optional
+        gamma : float, optional
+        B : float, optional
+
         Returns
         -------
         GNFWPressureProfile
             New profile instance with updated parameters.
         """
         leaves, treedef = self._tree_flatten()
-        
+
         new_leaves = (
             P0 if P0 is not None else self.P0,
             c500 if c500 is not None else self.c500,
@@ -238,9 +235,8 @@ class GNFWPressureProfile(PressureProfile):
             gamma if gamma is not None else self.gamma,
             B if B is not None else self.B,
         )
-        
+
         return self._tree_unflatten(treedef, new_leaves)
-    
 
     def pressure_profile(self, halo_model, x, m, z):
         """

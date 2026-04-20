@@ -13,7 +13,7 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 class DensityProfile(HaloProfile):
     
-    def u_k(self, halo_model, k, m, z, moment=1):
+    def u_k(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
 
@@ -37,10 +37,6 @@ class DensityProfile(HaloProfile):
         The transform is evaluated on the native radial grid ``self.x`` using a
         Hankel transform and then interpolated to the target wavenumbers.
 
-        For ``moment=1``, the method returns :math:`u_k(k, M, z)`. For
-        ``moment=2``, it returns the squared profile
-        :math:`u_k^{(2)}(k, M, z) = u_k(k, M, z)^2`.
-
         Parameters
         ----------
         halo_model : HaloModel
@@ -51,9 +47,6 @@ class DensityProfile(HaloProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-        moment : int, optional
-            Profile moment to return. Supported values are ``1`` and ``2``.
-
         Returns
         -------
         tuple
@@ -87,9 +80,9 @@ class DensityProfile(HaloProfile):
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
         ell_native = k_native[:, None, None] * ell_delta[None, :, :]
         
-        # Apply prefactor and moment logic
+        # Apply prefactor
         u_ell_base = prefactor[None, :, :] * u_ell_native
-        u_ell_val = jax.lax.select(moment == 1, u_ell_base, u_ell_base**2)
+        u_ell_val = u_ell_base
     
         # 5. Vectorized Interpolation (Double vmap)
         def interp_single_column(target_x, native_x, native_y):

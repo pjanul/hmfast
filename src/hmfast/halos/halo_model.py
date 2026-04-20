@@ -172,68 +172,68 @@ class HaloModel:
     
         return 18.0 * jnp.pi**2 + 82.0 * x - 39.0 * x**2
 
-    #@partial(jax.jit, static_argnums=0)
-    def _delta_numeric(self, z):
-        """ 
-        Always return numeric delta at redshift z
-        in the native reference (self.reference).
-        """
-        if self.mass_definition.delta == "vir":
-            if self.mass_definition.reference != "critical":
-                raise ValueError("virial overdensity only defined w.r.t. critical density")
-            return self._delta_vir_to_crit(z)
+    # #@partial(jax.jit, static_argnums=0)
+    # def _delta_numeric(self, z):
+    #     """ 
+    #     Always return numeric delta at redshift z
+    #     in the native reference (self.reference).
+    #     """
+    #     if self.mass_definition.delta == "vir":
+    #         if self.mass_definition.reference != "critical":
+    #             raise ValueError("virial overdensity only defined w.r.t. critical density")
+    #         return self._delta_vir_to_crit(z)
     
-        return self.mass_definition.delta
+    #     return self.mass_definition.delta
 
 
-     #@partial(jax.jit, static_argnums=(0,1))
-    def _convert_reference(self, z, delta, from_ref='critical', to_ref='mean'):
-        """
-        Convert overdensity between 'critical' and 'mean' definitions.
+    #  #@partial(jax.jit, static_argnums=(0,1))
+    # def _convert_reference(self, z, delta, from_ref='critical', to_ref='mean'):
+    #     """
+    #     Convert overdensity between 'critical' and 'mean' definitions.
         
-        Parameters
-        ----------
-        delta : float or array
-        z : float or array
-        from_ref, to_ref : {'critical', 'mean'}
-        """
-        if from_ref == to_ref:
-            return jnp.full_like(z, delta)
+    #     Parameters
+    #     ----------
+    #     delta : float or array
+    #     z : float or array
+    #     from_ref, to_ref : {'critical', 'mean'}
+    #     """
+    #     if from_ref == to_ref:
+    #         return jnp.full_like(z, delta)
             
-        omega_m = self.cosmology.omega_m(z)
-        if from_ref == 'critical' and to_ref == 'mean':
-            return delta / omega_m
-        elif from_ref == 'mean' and to_ref == 'critical':
-            return delta * omega_m
-        else:
-            raise ValueError("from_ref and to_ref must be 'critical' or 'mean'")
+    #     omega_m = self.cosmology.omega_m(z)
+    #     if from_ref == 'critical' and to_ref == 'mean':
+    #         return delta / omega_m
+    #     elif from_ref == 'mean' and to_ref == 'critical':
+    #         return delta * omega_m
+    #     else:
+    #         raise ValueError("from_ref and to_ref must be 'critical' or 'mean'")
 
 
-    def r_delta(self, m, z, mass_definition=None):
-        """
-        Compute the halo radius :math:`r_\\Delta` associated with a halo mass.
+    # def r_delta(self, m, z, mass_definition=None):
+    #     """
+    #     Compute the halo radius :math:`r_\\Delta` associated with a halo mass.
 
-        .. math::
+    #     .. math::
 
-            r_\\Delta = \\left[\\frac{3M}{4\\pi \\Delta \\rho_{\\mathrm{ref}}(z)}\\right]^{1/3}
+    #         r_\\Delta = \\left[\\frac{3M}{4\\pi \\Delta \\rho_{\\mathrm{ref}}(z)}\\right]^{1/3}
 
-        Parameters
-        ----------
-        m : float
-            Halo mass enclosed within the overdensity radius.
-        z : float
-            Redshift at which to compute the radius.
-        mass_definition : MassDefinition, optional
-            Mass definition (default: self.mass_definition).
+    #     Parameters
+    #     ----------
+    #     m : float
+    #         Halo mass enclosed within the overdensity radius.
+    #     z : float
+    #         Redshift at which to compute the radius.
+    #     mass_definition : MassDefinition, optional
+    #         Mass definition (default: self.mass_definition).
 
-        Returns
-        -------
-        float
-            Radius :math:`r_\\Delta` within which the mean enclosed density is
-            :math:`\\Delta \\rho_{\\mathrm{ref}}(z)`.
-        """
-        mass_definition = self.mass_definition if mass_definition is None else mass_definition
-        return mass_definition.r_delta(self.cosmology, m, z)
+    #     Returns
+    #     -------
+    #     float
+    #         Radius :math:`r_\\Delta` within which the mean enclosed density is
+    #         :math:`\\Delta \\rho_{\\mathrm{ref}}(z)`.
+    #     """
+    #     mass_definition = self.mass_definition if mass_definition is None else mass_definition
+    #     return mass_definition.r_delta(self.cosmology, m, z)
 
 
     

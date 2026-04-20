@@ -145,8 +145,14 @@ class T08HaloMass(HaloMass):
         """
         
         # Overdensity threshold converted to log scale
-        delta_numeric = halo_model._delta_numeric(z)
-        delta_mean = halo_model._convert_reference(z, delta_numeric, from_ref=halo_model.mass_definition.reference, to_ref='mean') 
+        delta_numeric = halo_model.mass_definition._delta_numeric(halo_model.cosmology, z)
+        delta_mean = halo_model.mass_definition._convert_reference(
+            halo_model.cosmology,
+            z,
+            delta_numeric,
+            from_ref=halo_model.mass_definition.reference,
+            to_ref='mean',
+        )
         delta_mean = jnp.log10(delta_mean)
         
         # Define parameters as JAX arrays

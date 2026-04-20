@@ -245,8 +245,14 @@ class T10HaloBias(HaloBias):
         sigma_M = jnp.exp(_sigma_interp(pts))
 
         # Handle delta values
-        delta_numeric = halo_model._delta_numeric(z)
-        delta_mean = halo_model._convert_reference(z, delta_numeric, from_ref=halo_model.mass_definition.reference, to_ref='mean')
+        delta_numeric = halo_model.mass_definition._delta_numeric(halo_model.cosmology, z)
+        delta_mean = halo_model.mass_definition._convert_reference(
+            halo_model.cosmology,
+            z,
+            delta_numeric,
+            from_ref=halo_model.mass_definition.reference,
+            to_ref='mean',
+        )
         
         # Ensure delta_mean is 1D before indexing
         delta_mean = jnp.atleast_1d(delta_mean)

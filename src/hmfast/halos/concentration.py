@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from functools import partial
 from abc import ABC, abstractmethod
 
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.mass_definition import MassDefinition, convert_m_delta
 
 
 
@@ -86,8 +86,6 @@ class D08Concentration(Concentration):
         # Conversion Logic (Native 200c)
         A, B, C, M_pivot = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
-        from hmfast.halos.halo_model import convert_m_delta
-
         c_seed = A * (m[:, None] / M_pivot)**B * (1 + z[None, :])**C
         m_200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
         
@@ -153,8 +151,6 @@ class B13Concentration(Concentration):
         # Use 200c as native reference for conversion
         A, B, C = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
-        from hmfast.halos.halo_model import convert_m_delta
-
         # c_seed for the solver
         c_seed = compute_c(m[:, None], z[None, :], D[None, :], A, B, C)
         
@@ -222,8 +218,6 @@ class SC14Concentration(Concentration):
         # Use 200c as native reference
         native_coeffs = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
-        from hmfast.halos.halo_model import convert_m_delta
-
         # c_seed for the solver
         c_seed = compute_c(m[:, None], z[None, :], native_coeffs)
         

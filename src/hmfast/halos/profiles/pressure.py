@@ -7,7 +7,7 @@ import functools
 
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.mass_definition import MassDefinition, convert_m_delta
 from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
@@ -296,7 +296,6 @@ class GNFWPressureProfile(PressureProfile):
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
         mass_def_old = halo_model.mass_definition
         mass_def_500c = MassDefinition(500, "critical")
-        from hmfast.halos.halo_model import convert_m_delta
         c_old = halo_model.concentration.c_delta(halo_model, m, z)
         m500c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old)
     
@@ -489,7 +488,6 @@ class B12PressureProfile(PressureProfile):
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
         mass_def_200c = MassDefinition(200, "critical")
-        from hmfast.halos.halo_model import convert_m_delta
         c_old = halo_model.concentration.c_delta(halo_model, m, z)
         m200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old)
     

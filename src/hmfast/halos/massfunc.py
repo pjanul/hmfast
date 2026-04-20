@@ -55,7 +55,7 @@ class HaloMass(ABC):
     
     
         # Halo mass function grid, shape: (n_z, n_R)
-        hmf_grid = halo_model.halo_mass_function.f_sigma(halo_model, sigma_grid, z_grid)
+        hmf_grid = halo_model.halo_mass_function._f_sigma(halo_model, sigma_grid, z_grid)
     
         # Compute d n / d ln(M)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)
@@ -70,17 +70,10 @@ class HaloMass(ABC):
 
 
     @abstractmethod
-    def f_sigma(self, halo_model, sigma, z):
+    def _f_sigma(self, halo_model, sigma, z):
         """
-        Evaluate the dimensionless function :math:`f(\\sigma)` entering the
-        halo mass function.
-
-        In these models,
-
-        .. math::
-
-            \\frac{dn}{d\\ln M} = f(\\sigma) \\, \\frac{d\\ln \\nu}{d\\ln R}
-            \\frac{1}{4\\pi R^3 h^3}
+        Evaluate the internal dimensionless fitting function entering the halo
+        mass function.
 
         Parameters
         ----------
@@ -96,7 +89,8 @@ class HaloMass(ABC):
         Returns
         -------
         array-like
-            Values of :math:`f(\\sigma)` evaluated at the requested inputs.
+            Values of the internal fitting function evaluated at the requested
+            inputs.
         """
         pass
 
@@ -115,16 +109,9 @@ class T08HaloMass(HaloMass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def f_sigma(self, halo_model, sigma, z):
+    def _f_sigma(self, halo_model, sigma, z):
         """
-        Evaluate the Tinker et al. (2008) fitting function :math:`f(\\sigma)`.
-
-        .. math::
-
-            f(\\sigma) = 0.5 A \\left[\\left(\\frac{\\sigma}{b}\\right)^{-a} + 1\\right]
-            \\exp\\left(-\\frac{c}{\\sigma^2}\\right)
-
-        where :math:`A`, :math:`a`, :math:`b`, and :math:`c` are redshift-dependent fitting parameters. 
+        Evaluate the internal Tinker et al. (2008) fitting function.
     
         Parameters
         ----------
@@ -141,7 +128,8 @@ class T08HaloMass(HaloMass):
         Returns
         -------
         f_sigma : jnp.ndarray
-            Values of :math:`f(\\sigma)` with shape matching ``sigma``.
+            Values of the internal fitting function with shape matching
+            ``sigma``.
         """
         
         # Overdensity threshold converted to log scale
@@ -183,11 +171,19 @@ class T08HaloMass(HaloMass):
         .. math::
     
             \\frac{dn}{d\\ln M} = f(\\sigma) \\frac{\\rho_{m,0}}{M} \\left| \\frac{d\\ln \\sigma^{-1}}{d\\ln M} \\right|
+
+        In this model,
+
+        .. math::
+
+            f(\\sigma) = 0.5 A \\left[\\left(\\frac{\\sigma}{b}\\right)^{-a} + 1\\right]
+            \\exp\\left(-\\frac{c}{\\sigma^2}\\right),
     
         where :math:`f(\\sigma)` is the Tinker et al. (2008) fitting function,
         calibrated over a tabulated set of spherical-overdensity definitions,
-        and :math:`\\sigma(M)` is the variance of the density field smoothed on
-        the mass scale :math:`M`.
+        :math:`A`, :math:`a`, :math:`b`, and :math:`c` are redshift-dependent
+        fitting parameters, and :math:`\\sigma(M)` is the variance of the
+        density field smoothed on the mass scale :math:`M`.
     
         Parameters
         ----------
@@ -229,20 +225,9 @@ class T10HaloMass(HaloMass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def f_sigma(self, halo_model, sigma, z):
+    def _f_sigma(self, halo_model, sigma, z):
         """
-        Evaluate the Tinker et al. (2010) fitting function entering
-        :math:`dn / d\\ln M`.
-
-        .. math::
-
-            f(\\nu) = 0.5 \\alpha \\left[1 + (\\beta^2 \\nu)^{-\\phi}\\right]
-             \\nu^{\\eta} \\exp\\left(-\\frac{\\gamma \\nu}{2}\\right) \\sqrt{\\nu}
-
-        where :math:`\\nu = \\delta_c^2 / \\sigma^2` with
-        :math:`\\delta_c = 1.686`, 
-        and :math:`\\alpha`, :math:`\\beta`, :math:`\\gamma`, :math:`\\eta`, and :math:`\\phi` 
-        are redshift-dependent fitting parameters.
+        Evaluate the internal Tinker et al. (2010) fitting function.
     
         Parameters
         ----------
@@ -300,9 +285,18 @@ class T10HaloMass(HaloMass):
         .. math::
     
             \\frac{dn}{d\\ln M} = f(\\sigma) \\frac{\\rho_{m,0}}{M} \\left| \\frac{d\\ln \\sigma^{-1}}{d\\ln M} \\right|
+
+        In this model,
+
+        .. math::
+
+            f(\\nu) = 0.5 \\alpha \\left[1 + (\\beta^2 \\nu)^{-\\phi}\\right]
+            \\nu^{\\eta} \\exp\\left(-\\frac{\\gamma \\nu}{2}\\right) \\sqrt{\\nu},
     
         where :math:`\\nu = \\delta_c^2 / \\sigma^2(M)` with
         :math:`\\delta_c = 1.686`, :math:`f(\\nu)` is the fitting function,
+        :math:`\\alpha`, :math:`\\beta`, :math:`\\gamma`, :math:`\\eta`, and
+        :math:`\\phi` are redshift-dependent fitting parameters,
         :math:`\\rho_{m,0}` is the present-day mean matter density,
         :math:`M` is the halo mass, and :math:`\\sigma(M)` is the variance of
         the density field smoothed on mass scale :math:`M`.

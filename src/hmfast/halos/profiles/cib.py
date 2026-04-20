@@ -301,7 +301,7 @@ class S12CIBProfile(CIBProfile):
             dlnms = jnp.log(ms_grid[1] / ms_grid[0])
             
             # Subhalo mass function
-            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(m_single, ms_grid)
+            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model, m_single, ms_grid)
             # Standard Shang luminosity
             l_gal_grid = self.l_gal(halo_model, ms_grid, z)
             
@@ -810,7 +810,7 @@ class M21CIBProfile(CIBProfile):
             ms_grid = jnp.logspace(jnp.log10(ms_min), jnp.log10(ms_max), ngrid)
             dlnms = jnp.log(ms_grid[1] / ms_grid[0])
             
-            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(m_single, ms_grid)
+            dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model, m_single, ms_grid)
             
             # Maniyar Clamping Logic
             sfr_i = self.l_gal(halo_model, ms_grid, z)

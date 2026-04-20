@@ -54,7 +54,7 @@ class HaloProfile:
         
         # Get c_delta and r_delta
         c_delta = halo_model.concentration.c_delta(halo_model, m, z)
-        r_delta = halo_model.r_delta(m, z)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
         lambda_val = 1.0 
         
         # Compute analytical profile q terms with shape: (N_k, N_m, N_z)

@@ -86,16 +86,17 @@ class D08Concentration(Concentration):
         # Conversion Logic (Native 200c)
         A, B, C, M_pivot = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
+        from hmfast.halos.halo_model import convert_m_delta
 
         c_seed = A * (m[:, None] / M_pivot)**B * (1 + z[None, :])**C
-        m_200c = halo_model.convert_m_delta(m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
         
         # Compute r_s from native 200c mesh
         c_200c = A * (m_200c / M_pivot)**B * (1 + z[None, :])**C
-        r_200c = jax.vmap(lambda mc, zi: halo_model.r_delta(mc, zi, native_def), (1, 0))(m_200c, z).T
+        r_200c = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), (1, 0))(m_200c, z).T
         
         # Final Target Radius / r_s
-        r_target = halo_model.r_delta(m, z, mdef)
+        r_target = mdef.r_delta(halo_model.cosmology, m, z)
         return (r_target * c_200c / r_200c).reshape(len(m), len(z))
 
 
@@ -152,20 +153,21 @@ class B13Concentration(Concentration):
         # Use 200c as native reference for conversion
         A, B, C = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
+        from hmfast.halos.halo_model import convert_m_delta
 
         # c_seed for the solver
         c_seed = compute_c(m[:, None], z[None, :], D[None, :], A, B, C)
         
-        m_native = halo_model.convert_m_delta(m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_native = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
         
         # Re-compute concentration and scale radius at native definition
         c_native = compute_c(m_native, z[None, :], D[None, :], A, B, C)
         
-        r_native = jax.vmap(lambda mc, zi: halo_model.r_delta(mc, zi, mass_definition=native_def), in_axes=(1, 0))(m_native, z).T
+        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = halo_model.r_delta(m, z, mass_definition=mdef)
+        r_target = mdef.r_delta(halo_model.cosmology, m, z)
         return (r_target / r_s).reshape(len(m), len(z))
 
 
@@ -220,21 +222,22 @@ class SC14Concentration(Concentration):
         # Use 200c as native reference
         native_coeffs = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
+        from hmfast.halos.halo_model import convert_m_delta
 
         # c_seed for the solver
         c_seed = compute_c(m[:, None], z[None, :], native_coeffs)
         
-        m_native = halo_model.convert_m_delta(m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_native = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
         
         # Re-compute concentration and radii at native definition
         c_native = compute_c(m_native, z[None, :], native_coeffs)
         
-        r_native = jax.vmap(lambda mc, zi: halo_model.r_delta(mc, zi, native_def), in_axes=(1, 0))(m_native, z).T
+        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
         
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = halo_model.r_delta(m, z, mdef)
+        r_target = mdef.r_delta(halo_model.cosmology, m, z)
         return (r_target / r_s).reshape(len(m), len(z))
 
 

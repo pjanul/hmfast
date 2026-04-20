@@ -79,7 +79,7 @@ class HaloMass(ABC):
 
         .. math::
 
-            \\frac{dn}{d\\ln M} = f(\\sigma) \, \\frac{d\\ln \\nu}{d\\ln R}
+            \\frac{dn}{d\\ln M} = f(\\sigma) \\, \\frac{d\\ln \\nu}{d\\ln R}
             \\frac{1}{4\\pi R^3 h^3}
 
         Parameters
@@ -336,9 +336,18 @@ class SubHaloMass(ABC):
     Abstract base class for subhalo mass function models.
     """
     @abstractmethod
-    def dndlnmu(self, halo_model, m, z):
+    def dndlnmu(self, halo_model, m_host, m_sub):
         """
         Compute the subhalo abundance per logarithmic mass ratio.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing any cosmology- or mass-definition-dependent context.
+        m_host : float or array_like
+            Host halo mass [Msun].
+        m_sub : float or array_like
+            Subhalo mass [Msun].
 
         Returns
         -------
@@ -356,7 +365,7 @@ class TW10SubHaloMass(SubHaloMass):
     def __init__(self):
         pass
     
-    def dndlnmu(self, M_host, M_sub):
+    def dndlnmu(self, halo_model, m_host, m_sub):
         """
         Compute the Tinker and Wetzel (2010) subhalo mass function.
 
@@ -368,9 +377,11 @@ class TW10SubHaloMass(SubHaloMass):
     
         Parameters
         ----------
-        M_host : float or array_like
+        halo_model : HaloModel
+            Halo model providing any cosmology- or mass-definition-dependent context.
+        m_host : float or array_like
             Host halo mass [Msun]
-        M_sub : float or array_like
+        m_sub : float or array_like
             Subhalo mass [Msun]
     
         Returns
@@ -378,7 +389,7 @@ class TW10SubHaloMass(SubHaloMass):
         dN_dlnmu : float or array_like
             Number of subhalos per host per :math:`dN/d\\ln \\mu`.
         """
-        mu = M_sub / M_host
+        mu = m_sub / m_host
         dN_dlnmu = 0.30 * mu ** (-0.7) * jnp.exp(-9.9 * mu ** 2.5)
         return dN_dlnmu
 
@@ -399,7 +410,7 @@ class JvdB14SubHaloMass(SubHaloMass):
         self.beta = 5.67
         self.zeta = 1.19
 
-    def dndlnmu(self, M_host, M_sub):
+    def dndlnmu(self, halo_model, m_host, m_sub):
         """
         Compute the Jiang and van den Bosch (2014) subhalo mass function.
 
@@ -409,13 +420,17 @@ class JvdB14SubHaloMass(SubHaloMass):
             (\\gamma_1 \\mu^{\\alpha_1} + \\gamma_2 \\mu^{\\alpha_2})
             \\exp(-\\beta \\mu^{\\zeta})
 
-        where :math:`\\mu = M_{\\rm sub} / M_{\\rm host}`.
+        where :math:`\\mu = m_{\\rm sub} / m_{\\rm host}` and
+        :math:`(\\gamma_1, \\alpha_1, \\gamma_2, \\alpha_2, \\beta, \\zeta)`
+        :math:`= (0.13, -0.83, 1.33, -0.02, 5.67, 1.19)` are fitting parameters.
     
         Parameters
         ----------
-        M_host : float or array_like
+        halo_model : HaloModel
+            Halo model providing any cosmology- or mass-definition-dependent context.
+        m_host : float or array_like
             Host halo mass [Msun]
-        M_sub : float or array_like
+        m_sub : float or array_like
             Subhalo mass [Msun]
     
         Returns
@@ -424,7 +439,7 @@ class JvdB14SubHaloMass(SubHaloMass):
             Number of subhalos per host per :math:`dN/d\\ln \\mu`.
         """
         
-        mu = M_sub / M_host
+        mu = m_sub / m_host
         dN_dlnmu = (self.gamma1 * mu**self.alpha1 + self.gamma2 * mu**self.alpha2) * \
                     jnp.exp(-self.beta * mu**self.zeta)
         return dN_dlnmu

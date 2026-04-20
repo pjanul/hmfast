@@ -66,7 +66,7 @@ class DensityProfile(HaloProfile):
     
         # Compute r_delta and ell_delta
         delta = halo_model.mass_definition.delta
-        r_delta = halo_model.r_delta(m, z)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
         ell_delta = d_A_z[None, :] / r_delta
         
@@ -287,7 +287,7 @@ class B16DensityProfile(DensityProfile):
         .. math::
 
             \\rho_{\\mathrm{gas,free}}(r)
-            = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \, C
+            = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \\, C
             \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\gamma}
             \\left[1 + \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}},
 
@@ -400,7 +400,7 @@ class NFWDensityProfile(DensityProfile):
 
             \\rho_e(r, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(r)
 
-        where :math:`\\rho_{\\mathrm{NFW}}(r) = \\rho_{m,0} \, u_{\\mathrm{NFW}}(r)`.
+        where :math:`\\rho_{\\mathrm{NFW}}(r) = \\rho_{m,0} \\, u_{\\mathrm{NFW}}(r)`.
 
         Parameters
         ----------
@@ -424,7 +424,7 @@ class NFWDensityProfile(DensityProfile):
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Get scale radius r_s
-        r_delta = halo_model.r_delta(m, z)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
         c_delta = halo_model.concentration.c_delta(halo_model, m, z)
         r_s = r_delta / c_delta # (Nm, Nz)
         
@@ -604,7 +604,7 @@ class BCMDensityProfile(DensityProfile):
         xb, mb, zb = x[:, None, None], m[None, :, None], z[None, None, :]
         
         # This model is calibrated for the virial radius 
-        r_vir = halo_model.r_delta(m, z, mass_definition=MassDefinition("vir", "critical"))
+        r_vir = MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z)
         r_asked = xb * r_vir
         
         # Redshift Dependent Mc (Matching your C logic)

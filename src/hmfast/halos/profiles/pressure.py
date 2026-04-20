@@ -66,7 +66,7 @@ class PressureProfile(HaloProfile):
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         
-        r_delta = halo_model.r_delta(m, z) / B**(1/3) # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) / B**(1/3) # (Nm, Nz)
         d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
         ell_delta = d_A[None, :] / r_delta  # (Nm, Nz)
         
@@ -296,11 +296,13 @@ class GNFWPressureProfile(PressureProfile):
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
         mass_def_old = halo_model.mass_definition
         mass_def_500c = MassDefinition(500, "critical")
-        m500c = halo_model.convert_m_delta(m, z, mass_def_old, mass_def_500c)
+        from hmfast.halos.halo_model import convert_m_delta
+        c_old = halo_model.concentration.c_delta(halo_model, m, z)
+        m500c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old)
     
         # Compute r_delta (input) and r_500c (for GNFW scaling)
-        r_delta = halo_model.r_delta(m, z)  # (Nm, Nz)
-        r_500c = halo_model.r_delta(m500c, z, mass_definition=mass_def_500c)  # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
+        r_500c = mass_def_500c.r_delta(halo_model.cosmology, m500c, z)  # (Nm, Nz)
     
         # Convert input x = r/r_delta to x_500c = r/r_500c
         x_500c = x[:, None, None] * (r_delta[None, :, :] / r_500c[None, :, :])  # (Nx, Nm, Nz)
@@ -442,11 +444,11 @@ class B12PressureProfile(PressureProfile):
         .. math::
 
             P_e(x, M, z)
-            = P_{200c} \, P_0
+            = P_{200c} \\, P_0
             \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
             \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta},
 
-        where :math:`x_{200c} = r / r_{200c} = x \, r_\\Delta / r_{200c}`.
+        where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}`.
 
         In this implementation, :math:`\\alpha = 1` and :math:`\\gamma = -0.3`. The
         remaining profile parameters follow the generic Battaglia scaling
@@ -487,11 +489,13 @@ class B12PressureProfile(PressureProfile):
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
         mass_def_200c = MassDefinition(200, "critical")
-        m200c = halo_model.convert_m_delta(m, z, mass_def_old, mass_def_200c)
+        from hmfast.halos.halo_model import convert_m_delta
+        c_old = halo_model.concentration.c_delta(halo_model, m, z)
+        m200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old)
     
         # Compute r_delta (input) and r_200c (for B12 scaling)
-        r_delta = halo_model.r_delta(m, z)  # (Nm, Nz)
-        r_200c = halo_model.r_delta(m200c, z, mass_definition=mass_def_200c)  # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
+        r_200c = mass_def_200c.r_delta(halo_model.cosmology, m200c, z)  # (Nm, Nz)
     
         # Rescale x: x_200c = x * (r_delta / r_200c)
         x_200c = x[:, None, None] * (r_delta[None, :, :] / r_200c[None, :, :])  # (Nx, Nm, Nz)

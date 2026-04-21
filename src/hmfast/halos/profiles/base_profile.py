@@ -43,11 +43,27 @@ class HaloProfile:
 
     def _u_r_matter(self, halo_model, r, m, z):
         """
-        Compute the real-space NFW profile, which has an analogous Fourier-space function _u_k_matter.
+        Calculate the normalized real-space NFW matter profile.
 
+        This is the real-space analogue of ``_u_k_matter`` and returns the
+        unit-mass NFW profile sampled on a radial grid.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the concentration relation and mass definition.
+        r : float or jnp.ndarray
+            Physical radius or radii in the same units as :math:`r_\Delta`.
+        m : float or jnp.ndarray
+            Halo mass(es).
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        jnp.ndarray
+            Normalized real-space profile with shape :math:`(N_r, N_M, N_z)`.
         """
-        cparams = halo_model.cosmology._cosmo_params()
-
         r = jnp.atleast_1d(r)
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
@@ -58,12 +74,9 @@ class HaloProfile:
 
         f_nfw = 1.0 / (jnp.log1p(c_delta) - c_delta / (1.0 + c_delta))
         x = r[:, None, None] / r_s[None, :, :]
-
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
-        prefactor = 1 / (4.0 * jnp.pi * r_s**3)
+        prefactor = 1.0 / (4.0 * jnp.pi * r_s**3)
 
         return prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2)
-
 
     
     def _u_k_matter(self, halo_model, k, m, z):

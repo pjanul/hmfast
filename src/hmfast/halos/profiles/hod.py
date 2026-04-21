@@ -229,6 +229,49 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         return sat_term, cen_term
 
 
+    def u_r(self, halo_model, r, m, z):
+        """
+        Real-space galaxy HOD profile.
+
+        Computes the real-space analogue of the galaxy HOD profile using the
+        same central-plus-satellite decomposition as ``u_k``:
+
+        .. math::
+
+            u_r(r, m, z) = \frac{N_\mathrm{cen}(m) + N_\mathrm{sat}(m) \, u_m(r, m, z)}{\bar{n}_g(z)},
+
+        where :math:`u_m(r, m, z)` is the normalized matter profile in real
+        space.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            The parent halo model instance.
+        r : float or jnp.ndarray
+            Physical radius or radii in the same units as :math:`r_\Delta`.
+        m : float or jnp.ndarray
+            Halo mass grid.
+        z : float or jnp.ndarray
+            Redshift grid.
+
+        Returns
+        -------
+        jnp.ndarray
+            Real-space profile with shape :math:`(N_r, N_M, N_z)`.
+        """
+        r = jnp.atleast_1d(r)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        Ns = self.n_sat(m)
+        Nc = self.n_cen(m)
+        ng = self.ng_bar(halo_model, m, z) * (halo_model.cosmology.H0 / 100)**3
+
+        u_m = self._u_r_matter(halo_model, r, m, z)
+
+        return (1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
+
+
     def u_k(self, halo_model, k, m, z):
         """
         Fourier-space galaxy HOD profile.

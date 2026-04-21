@@ -130,7 +130,7 @@ class DensityProfile(HaloProfile):
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(m_val, z_val):
-            profile = jnp.squeeze(self.density_profile(halo_model, x, m_val, z_val))  # remove extra axes
+            profile = jnp.squeeze(self.u_r(halo_model, x, m_val, z_val))  # remove extra axes
             return profile * x**0.5 * W_x  # shape (Nx,)
 
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
@@ -272,7 +272,7 @@ class B16DensityProfile(DensityProfile):
         return presets[key]
         
 
-    def density_profile(self, halo_model, x, m, z):
+    def u_r(self, halo_model, x, m, z):
         """
         Compute the Battaglia et al. (2016) electron-density profile.
 
@@ -347,6 +347,10 @@ class B16DensityProfile(DensityProfile):
         
         return rho_gas
 
+    def density_profile(self, halo_model, x, m, z):
+        """Backward-compatible alias for :meth:`u_r`."""
+        return self.u_r(halo_model, x, m, z)
+
 
 jax.tree_util.register_pytree_node(
     B16DensityProfile,
@@ -382,7 +386,7 @@ class NFWDensityProfile(DensityProfile):
         self._hankel = HankelTransform(self._x, nu=0.5)
         
 
-    def density_profile(self, halo_model, x, m, z):
+    def u_r(self, halo_model, x, m, z):
         """
         Compute the NFW-based electron-density profile.
 
@@ -431,6 +435,10 @@ class NFWDensityProfile(DensityProfile):
         rho_gas = f_b * rho_s[None, :, :] / (x[:, None, None] * (1 + x[:, None, None])**2)
         
         return rho_gas
+
+    def density_profile(self, halo_model, x, m, z):
+        """Backward-compatible alias for :meth:`u_r`."""
+        return self.u_r(halo_model, x, m, z)
 
 
 
@@ -536,7 +544,7 @@ class BCMDensityProfile(DensityProfile):
         return self._tree_unflatten(treedef, new_leaves)
 
 
-    def density_profile(self, halo_model, x, m, z):
+    def u_r(self, halo_model, x, m, z):
         """
         Compute the BCM gas-density profile.
 
@@ -624,6 +632,10 @@ class BCMDensityProfile(DensityProfile):
     
         
         return num / (denom1 * denom2) 
+
+    def density_profile(self, halo_model, x, m, z):
+        """Backward-compatible alias for :meth:`u_r`."""
+        return self.u_r(halo_model, x, m, z)
 
 
 jax.tree_util.register_pytree_node(

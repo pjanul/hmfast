@@ -127,7 +127,7 @@ class PressureProfile(HaloProfile):
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(m_val, z_val):
-            pressure_profile = jnp.squeeze(self.pressure_profile(halo_model, x, m_val, z_val))  # remove extra axes
+            pressure_profile = jnp.squeeze(self.u_r(halo_model, x, m_val, z_val))  # remove extra axes
             return pressure_profile * x**0.5 * W_x  # shape (Nx,)
 
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
@@ -239,7 +239,7 @@ class GNFWPressureProfile(PressureProfile):
 
         return self._tree_unflatten(treedef, new_leaves)
 
-    def pressure_profile(self, halo_model, x, m, z):
+    def u_r(self, halo_model, x, m, z):
         """
         Compute the generalized NFW electron-pressure profile.
 
@@ -316,6 +316,10 @@ class GNFWPressureProfile(PressureProfile):
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
     
         return Pe  # shape: (Nx, Nm, Nz)
+
+    def pressure_profile(self, halo_model, x, m, z):
+        """Backward-compatible alias for :meth:`u_r`."""
+        return self.u_r(halo_model, x, m, z)
 
 
 jax.tree_util.register_pytree_node(
@@ -429,7 +433,7 @@ class B12PressureProfile(PressureProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
-    def pressure_profile(self, halo_model, x, m, z):
+    def u_r(self, halo_model, x, m, z):
         """
         Compute the Battaglia et al. (2012) electron-pressure profile.
 
@@ -515,6 +519,10 @@ class B12PressureProfile(PressureProfile):
         P_200c = ((m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :])**2)
     
         return P_200c * P0 * p_x
+
+    def pressure_profile(self, halo_model, x, m, z):
+        """Backward-compatible alias for :meth:`u_r`."""
+        return self.u_r(halo_model, x, m, z)
 
 
 jax.tree_util.register_pytree_node(

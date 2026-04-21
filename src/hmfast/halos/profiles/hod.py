@@ -19,6 +19,48 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     """
     Standard Galaxy HOD profile.
 
+    In this model, the real-space galaxy profile is written as
+
+    .. math::
+
+        u_r(r, m, z) = \\frac{1}{\\bar{n}_g(z)}
+        \\left[N_{\\mathrm{cen}}(m) + N_{\\mathrm{sat}}(m) \\, u_{\\mathrm{sat}}(r, m, z)\\right],
+
+    where :math:`u_{\\mathrm{sat}}(r, m, z)` is taken to be the NFW satellite
+    profile. Central galaxies are naturally assumed to live at the halo center,
+    so their real-space density profile is a Dirac delta function, while
+    satellite galaxies are assumed to be randomly distributed according to an
+    NFW-like radial profile.
+
+    The occupation functions are
+
+    .. math::
+
+        N_{\\mathrm{cen}}(m) = \\frac{1}{2} \\left[1 + \\mathrm{erf}\\left(
+        \\frac{\\log_{10} m - \\log_{10} M_{\\mathrm{min}}}{\\sigma_{\\log_{10} M}}
+        \\right)\\right],
+
+    .. math::
+
+        N_{\\mathrm{sat}}(m) = H(m - M_0) \\, N_{\\mathrm{cen}}(m)
+        \\, \\left(\\frac{m - M_0}{M_1'}\\right)^{\\alpha_s},
+
+    with the power-law term set to zero when :math:`m < M_0`.
+
+    The mean comoving galaxy number density is
+
+    .. math::
+
+        \\bar{n}_g(z) = \\int d\\ln M \\, \\frac{dn}{d\\ln M}(M, z)
+        \\left[N_{\\mathrm{cen}}(M) + N_{\\mathrm{sat}}(M)\\right],
+
+    and the large-scale galaxy bias is
+
+    .. math::
+
+        b_g(z) = \\frac{1}{\\bar{n}_g(z)} \\int d\\ln M \\, \\frac{dn}{d\\ln M}(M, z)
+        \\, b^{(1)}_h(M, z) \\left[N_{\\mathrm{cen}}(M) + N_{\\mathrm{sat}}(M)\\right].
+
     Attributes
     ----------
     sigma_log10M : float
@@ -85,14 +127,11 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def n_cen(self, m):
         """
-        Expected number of central galaxies in a halo of mass m.
-    
-        The value is given by:
-    
-            .. math::
+        Expected number of central galaxies in a halo of mass ``m``.
 
-                N_\\mathrm{cen}(m) = \\frac{1}{2} \\left[1 + \\mathrm{erf}\\left(\\frac{\\log_{10} m - \\log_{10} M_\\mathrm{min}}{\\sigma_{\\log_{10} M}}\\right)\\right]
-    
+        See the class-level HOD definition above for the explicit form of
+        :math:`N_{\\mathrm{cen}}(m)`.
+
         Parameters
         ----------
         m : array-like
@@ -109,17 +148,11 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def n_sat(self, m):
         """
-        Expected number of satellite galaxies in a halo of mass m.
-    
-        The value is given by:
-    
-            .. math::
-    
-                N_\\mathrm{sat}(m) = H(m - M_0) \\, N_\\mathrm{cen}(m) \\, \\left(\\frac{m - M_0}{M_1'}\\right)^{\\alpha_s}
+        Expected number of satellite galaxies in a halo of mass ``m``.
 
-    
-        where the term in parentheses is set to zero if negative.
-    
+        See the class-level HOD definition above for the explicit form of
+        :math:`N_{\\mathrm{sat}}(m)`.
+
         Parameters
         ----------
         m : array-like
@@ -135,16 +168,10 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def ng_bar(self, halo_model, m, z):
         """
-        Comoving mean galaxy number density at redshift z.
-    
-        The value is given by:
-    
-            .. math::
-    
-                \\bar{n}_g(z) = \\langle N_\\mathrm{cen} + N_\\mathrm{sat} \\rangle_n
-    
-        where the average is over the halo mass function.
-    
+        Comoving mean galaxy number density at redshift ``z``.
+
+        See the class-level HOD definition above for :math:`\\bar{n}_g(z)`.
+
         Parameters
         ----------
         halo_model : HaloModel
@@ -172,17 +199,10 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
     def galaxy_bias(self, halo_model, m, z):
         """
-        Large-scale galaxy bias at redshift z.
-    
-        The value is given by:
-    
-            .. math::
-    
-                b_g(z) = \\frac{1}{\\bar{n}_g(z)} \\langle b^{(1)} (N_\\mathrm{cen} + N_\\mathrm{sat}) \\rangle_n
-    
-        where :math:`b^{(1)}` is the first-order halo bias and the average is over
-        the halo mass function.
-    
+        Large-scale galaxy bias at redshift ``z``.
+
+        See the class-level HOD definition above for :math:`b_g(z)`.
+
         Parameters
         ----------
         halo_model : HaloModel
@@ -233,15 +253,9 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         """
         Real-space galaxy HOD profile.
 
-        Computes the real-space analogue of the galaxy HOD profile using the
-        same central-plus-satellite decomposition as ``u_k``:
-
-        .. math::
-
-            u_r(r, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(r, m, z)}{\\bar{n}_g(z)},
-
-        where :math:`u_m(r, m, z)` is the normalized matter profile in real
-        space.
+        This evaluates the class-level HOD expression for the real-space
+        profile, with :math:`u_{\\mathrm{sat}}` identified with the NFW
+        satellite profile.
 
         Parameters
         ----------
@@ -275,14 +289,10 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
     def u_k(self, halo_model, k, m, z):
         """
         Fourier-space galaxy HOD profile.
-    
-        Computes the first moment of the galaxy HOD Fourier-space profile:
-    
-            .. math::
-    
-                u_k(k, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(k, m, z)}{\\bar{n}_g(z)}
 
-        where :math:`u_m(k, m, z)` is the normalized matter profile in Fourier space.
+        This is the Fourier-space analogue of the class-level HOD profile,
+        with the satellite term traced by the NFW matter profile in Fourier
+        space.
     
         Parameters
         ----------

@@ -12,30 +12,11 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
 class DensityProfile(HaloProfile):
+    pass
     
     def u_k(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
-
-        For a three-dimensional density profile :math:`\\rho(r, M, z)`, this method
-        computes the projected transform used in the kSZ halo model. The input radial
-        coordinate is the dimensionless variable :math:`x = r / r_\\Delta`, and the
-        projected profile is evaluated as
-
-        .. math::
-
-            u_k(k, M, z) =
-            4 \\pi \\, r_\\Delta^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
-            \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
-            \\int dx \\, x^2 \\, \\rho(x, M, z) \\, 
-            \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
-            {(k r_\\Delta) x},
-
-        where :math:`\\mu_e = 1.14`, :math:`f_{\\mathrm{free}} = 1`, and
-        :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
-
-        The transform is evaluated on the native radial grid ``self.x`` using a
-        Hankel transform and then interpolated to the target wavenumbers.
 
         Parameters
         ----------
@@ -148,28 +129,68 @@ class B16DensityProfile(DensityProfile):
     """
     Electron density profile from `Battaglia et al. (2016) <https://ui.adsabs.harvard.edu/abs/2016JCAP...08..058B/abstract>`_.
 
+    The profile is written in generalized NFW form as
+
+    .. math::
+
+        \\rho_{\\mathrm{gas,free}}(r)
+        = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \\, C
+        \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\gamma}
+        \\left[1 + \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}}
+        \\tag{1}
+
+    where :math:`r_{200c}` is the characteristic radius associated with the
+    overdensity mass :math:`M_{200c}`. With :math:`x_c = 0.5` and
+    :math:`\\gamma = -0.2` fixed, the mass- and redshift-dependent parameters
+    obey
+
+    .. math::
+
+        X(M_{200c}, z) = A_X
+        \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
+        (1 + z)^{\\alpha_z^X}
+        \\tag{2}
+
+    where :math:`X \\in \\{C, \\alpha, \\beta\\}`.
+
+    The projected Fourier-space profile is evaluated as
+
+    .. math::
+
+        u_k(k, M, z) =
+        4 \\pi \\, r_\\Delta^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
+        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        \\int dx \\, x^2 \\, \\rho(x, M, z)
+        \\, \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
+        {(k r_\\Delta) x}
+        \\tag{3}
+
+    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
+    :math:`f_{\\mathrm{free}} = 1`, and
+    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
+
     Attributes
     ----------
     x : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
     A_rho0 : float
-        Amplitude of the density normalization scaling.
+        Amplitude :math:`A_C` of the density normalization scaling.
     A_alpha : float
-        Amplitude of the transition-slope scaling.
+        Amplitude :math:`A_\\alpha` of the transition-slope scaling.
     A_beta : float
-        Amplitude of the outer-slope scaling.
+        Amplitude :math:`A_\\beta` of the outer-slope scaling.
     alpha_m_rho0 : float
-        Mass-scaling exponent of :math:`\\rho_0`.
+        Mass-scaling exponent :math:`\\alpha_m^C`.
     alpha_m_alpha : float
-        Mass-scaling exponent of :math:`\\alpha`.
+        Mass-scaling exponent :math:`\\alpha_m^\\alpha`.
     alpha_m_beta : float
-        Mass-scaling exponent of :math:`\\beta`.
+        Mass-scaling exponent :math:`\\alpha_m^\\beta`.
     alpha_z_rho0 : float
-        Redshift-scaling exponent of :math:`\\rho_0`.
+        Redshift-scaling exponent :math:`\\alpha_z^C`.
     alpha_z_alpha : float
-        Redshift-scaling exponent of :math:`\\alpha`.
+        Redshift-scaling exponent :math:`\\alpha_z^\\alpha`.
     alpha_z_beta : float
-        Redshift-scaling exponent of :math:`\\beta`.
+        Redshift-scaling exponent :math:`\\alpha_z^\\beta`.
     """
     def __init__(self, x=None, 
                  A_rho0=4000.0, A_alpha=0.88, A_beta=3.83,
@@ -274,31 +295,7 @@ class B16DensityProfile(DensityProfile):
 
     def u_r(self, halo_model, x, m, z):
         """
-        Compute the Battaglia et al. (2016) electron-density profile.
-
-        The profile is written in generalized NFW (gNFW) form as
-
-        .. math::
-
-            \\rho_{\\mathrm{gas,free}}(r)
-            = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \\, C
-            \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\gamma}
-            \\left[1 + \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}},
-
-        where :math:`r_{200c}` is the characteristic radius associated with the
-        overdensity mass :math:`M_{200c}`.
-
-        With :math:`x_c = 0.5` and :math:`\\gamma = -0.2` kept fixed throughout the
-        paper, the mass- and redshift-dependent parameters :math:`C`, :math:`\\alpha`,
-        and :math:`\\beta` obey the scaling relation
-
-        .. math::
-
-            X(M_{200c}, z) = A_X
-            \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
-            (1 + z)^{\\alpha_z^X},
-
-        where :math:`X \\in \\{C, \\alpha, \\beta\\}`.
+        Compute the electron-density profile.
 
         Parameters
         ----------
@@ -357,7 +354,47 @@ jax.tree_util.register_pytree_node(
 
 class NFWDensityProfile(DensityProfile):
     """
-    Matter density profile from `Navarro, Frenk & White (1997) <https://ui.adsabs.harvard.edu/abs/1997ApJ...490..493N/abstract>`_.
+    Electron density profile based on `Navarro, Frenk & White (1997) <https://ui.adsabs.harvard.edu/abs/1997ApJ...490..493N/abstract>`_.
+
+    The profile is obtained by scaling the NFW matter density by the cosmic
+    baryon fraction,
+
+    .. math::
+
+        \\rho_e(r, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(r)
+        \\tag{1}
+
+    where
+
+    .. math::
+
+        \\rho_{\\mathrm{NFW}}(r)
+        = \\frac{\\rho_s}{(r/r_s) \\left(1+r/r_s\\right)^2}
+        \\tag{2}
+
+    .. math::
+
+        \\rho_s = \\frac{M}{4\\pi r_s^3}
+        \\left[\\ln(1+c_\\Delta) - \\frac{c_\\Delta}{1+c_\\Delta}\\right]^{-1}
+        \\tag{3}
+
+    with :math:`r_s = r_\\Delta / c_\\Delta`.
+
+    The projected Fourier-space profile is evaluated as
+
+    .. math::
+
+        u_k(k, M, z) =
+        4 \\pi \\, r_\\Delta^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
+        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        \\int dx \\, x^2 \\, \\rho(x, M, z)
+        \\, \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
+        {(k r_\\Delta) x}
+        \\tag{4}
+
+    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
+    :math:`f_{\\mathrm{free}} = 1`, and
+    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
     ----------
@@ -383,17 +420,7 @@ class NFWDensityProfile(DensityProfile):
 
     def u_r(self, halo_model, x, m, z):
         """
-        Compute the NFW-based electron-density profile.
-
-        The profile is obtained by taking an NFW matter profile and scaling it by the
-        cosmic baryon fraction. Writing the expression in terms of radius :math:`r`,
-        the implemented profile is
-
-        .. math::
-
-            \\rho_e(r, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(r)
-
-        where :math:`\\rho_{\\mathrm{NFW}}(r) = \\rho_{m,0} \\, u_{\\mathrm{NFW}}(r)`.
+        Compute the electron-density profile.
 
         Parameters
         ----------
@@ -439,24 +466,73 @@ class BCMDensityProfile(DensityProfile):
     Electron density profile from `Schneider et al. (2019) <https://ui.adsabs.harvard.edu/abs/2019JCAP...03..020S/abstract>`_, 
     also known as the Baryon Correction Model (BCM).
 
+    The profile is evaluated using the virial radius and dimensionless radius
+    :math:`x = r / r_{\\mathrm{vir}}`:
+
+    .. math::
+
+        \\rho_{\\mathrm{gas}}(x, M, z)
+        = \\frac{f_b - f_\\star(M)}
+        {\\left(1 + 10 x\\right)^{\\beta_M(M, z)}
+        \\left[1 + \\left(\\frac{x}{\\theta_{\\mathrm{ej}}}\\right)^\\gamma\\right]^{(\\delta - \\beta_M(M, z))/\\gamma}}
+        \\tag{1}
+
+    where
+
+    .. math::
+
+        f_\\star(M) = f_{\\star, M_s}
+        \\left(\\frac{M}{M_s}\\right)^{-\\eta_\\star}
+        \\tag{2}
+
+    .. math::
+
+        \\beta_M(M, z) =
+        \\frac{3 (M / M_c(z))^\\mu}{1 + (M / M_c(z))^\\mu}
+        \\tag{3}
+
+    .. math::
+
+        \\log_{10} M_c(z) = \\log_{10} M_c \\, (1+z)^{\\nu_{\\log_{10} M_c}}
+        \\tag{4}
+
+    In the implementation, :math:`M_s = 2.5 \\times 10^{11} \\, M_\\odot / h`
+    and :math:`f_{\\star, M_s} = 0.055` are fixed constants.
+
+    The projected Fourier-space profile is evaluated as
+
+    .. math::
+
+        u_k(k, M, z) =
+        4 \\pi \\, r_\\Delta^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
+        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        \\int dx \\, x^2 \\, \\rho(x, M, z)
+        \\, \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
+        {(k r_\\Delta) x}
+        \\tag{5}
+
+    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
+    :math:`f_{\\mathrm{free}} = 1`, and
+    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
+
     Attributes
     ----------
     x : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_{\\mathrm{vir}}` used to tabulate the profile and define the Hankel transform.
     log10Mc : float
-        Characteristic halo-mass scale controlling the gas fraction suppression.
+        Characteristic mass scale :math:`\\log_{10} M_c` controlling the gas fraction suppression.
     theta_ej : float
-        Ejection-radius parameter in units of the virial radius.
+        Ejection-radius parameter :math:`\\theta_{\\mathrm{ej}}` in units of the virial radius.
     eta_star : float
-        Stellar-fraction amplitude parameter.
+        Stellar-fraction parameter :math:`\\eta_\\star`.
     delta : float
-        Inner-slope parameter of the gas profile.
+        Inner-slope parameter :math:`\\delta` of the gas profile.
     gamma : float
-        Outer-slope parameter of the gas profile.
+        Outer-slope parameter :math:`\\gamma` of the gas profile.
     mu : float
-        Transition-shape parameter controlling the stellar component.
+        Transition-shape parameter :math:`\\mu` controlling the stellar component.
     nu_log10Mc : float
-        Redshift dependence of the characteristic mass scale.
+        Redshift exponent :math:`\\nu_{\\log_{10} M_c}` of the characteristic mass scale.
     """
     def __init__(self, x=None, 
                  log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2, 
@@ -536,40 +612,7 @@ class BCMDensityProfile(DensityProfile):
 
     def u_r(self, halo_model, x, m, z):
         """
-        Compute the BCM gas-density profile.
-
-        The profile is evaluated using the virial radius, with dimensionless radius
-        :math:`x = r / r_{\\mathrm{vir}}`. The implemented model is
-
-        .. math::
-
-            \\rho_{\\mathrm{gas}}(x, M, z)
-            = \\frac{f_b - f_\\star(M)}
-            {\\left(1 + 10 x\\right)^{\\beta_M(M, z)}
-            \\left[1 + \\left(\\frac{x}{\\theta_{\\mathrm{ej}}}\\right)^\\gamma\\right]^{(\\delta - \\beta_M(M, z))/\\gamma}},
-
-        where the stellar fraction is
-
-        .. math::
-
-            f_\\star(M) = f_{\\star, M_s}
-            \\left(\\frac{M}{M_s}\\right)^{-\\eta_\\star},
-
-        and the mass-dependent outer slope is
-
-        .. math::
-
-            \\beta_M(M, z) =
-            \\frac{3 (M / M_c(z))^\\mu}{1 + (M / M_c(z))^\\mu}.
-
-        The characteristic mass scale evolves as
-
-        .. math::
-
-            \\log_{10} M_c(z) = \\log_{10} M_c \\, (1+z)^{\\nu_{\\log_{10} M_c}}.
-
-        In the implementation, :math:`M_s = 2.5 \\times 10^{11} \\, M_\\odot / h` and
-        :math:`f_{\\star, M_s} = 0.055` are fixed constants.
+        Compute the gas-density profile.
 
         Parameters
         ----------

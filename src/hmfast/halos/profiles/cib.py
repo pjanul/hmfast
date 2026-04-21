@@ -20,7 +20,7 @@ class S12CIBProfile(CIBProfile):
     """
     CIB profile from `Shang et al. (2012) <https://ui.adsabs.harvard.edu/abs/2012MNRAS.421.2832S/abstract>`_.
 
-    In this model, the real-space first CIB moment is written as
+    In this model, the real-space CIB profile is written as
 
     .. math::
 
@@ -113,27 +113,27 @@ class S12CIBProfile(CIBProfile):
     Attributes
     ----------
     nu : float
-        Observed frequency :math:`\nu` in GHz.
+        Observed frequency :math:`\\nu` in GHz.
     L0 : float
         Luminosity normalization :math:`L_0`.
     alpha : float
-        Redshift scaling exponent :math:`\alpha` of the dust temperature.
+        Redshift scaling exponent :math:`\\alpha` of the dust temperature.
     beta : float
-        Low-frequency spectral slope :math:`\beta` of the SED.
+        Low-frequency spectral slope :math:`\\beta` of the SED.
     gamma : float
-        High-frequency spectral slope :math:`\gamma` of the SED.
+        High-frequency spectral slope :math:`\\gamma` of the SED.
     T0 : float
         Dust temperature normalization :math:`T_0` at :math:`z = 0` in Kelvin.
     M_eff : float
-        Characteristic halo mass :math:`M_{\mathrm{eff}}` of peak emissivity.
+        Characteristic halo mass :math:`M_{\\mathrm{eff}}` of peak emissivity.
     sigma2_LM : float
-        Log-normal variance :math:`\sigma_{LM}^2` entering :math:`\Sigma(M)`.
+        Log-normal variance :math:`\\sigma_{LM}^2` entering :math:`\\Sigma(M)`.
     delta : float
-        Redshift evolution exponent :math:`\delta` in :math:`\Phi(z)`.
+        Redshift evolution exponent :math:`\\delta` in :math:`\\Phi(z)`.
     z_p : float
-        Pivot redshift :math:`z_p` above which :math:`\Phi(z)` saturates.
+        Pivot redshift :math:`z_p` above which :math:`\\Phi(z)` saturates.
     M_min : float
-        Minimum halo mass :math:`M_{\min}` entering the central and satellite terms.
+        Minimum halo mass :math:`M_{\\min}` entering the central and satellite terms.
     """
     def __init__(self, nu, L0=6.4e-8, alpha=0.36, beta=1.75, gamma=1.7,
                  T0=24.4, M_eff=10**12.6, sigma2_LM=0.5, 
@@ -196,7 +196,7 @@ class S12CIBProfile(CIBProfile):
 
     def _sigma(self, m):
         """
-        Compute the Shang et al. halo-mass weighting factor.
+        Compute the halo-mass weighting factor.
 
         Parameters
         ----------
@@ -219,7 +219,7 @@ class S12CIBProfile(CIBProfile):
 
     def _phi(self, z):
         """
-        Compute the Shang et al. redshift evolution factor.
+        Compute the redshift evolution factor.
 
         Parameters
         ----------
@@ -241,7 +241,7 @@ class S12CIBProfile(CIBProfile):
 
     def _theta(self, z):
         """
-        Compute the Shang et al. spectral energy distribution factor.
+        Compute the spectral energy distribution factor.
 
         Parameters
         ----------
@@ -284,7 +284,7 @@ class S12CIBProfile(CIBProfile):
 
     def l_gal(self, halo_model, m, z):
         """
-        Compute the Shang et al. galaxy luminosity assigned to a halo.
+        Compute the galaxy luminosity assigned to a halo.
 
         Parameters
         ----------
@@ -311,7 +311,7 @@ class S12CIBProfile(CIBProfile):
 
     def l_sat(self, halo_model, m, z):
         """
-        Compute the total satellite CIB luminosity in the Shang et al. model.
+        Compute the total satellite CIB luminosity.
 
         Parameters
         ----------
@@ -349,7 +349,7 @@ class S12CIBProfile(CIBProfile):
      
     def l_cen(self, halo_model, m, z):
         """
-        Compute the central-galaxy CIB luminosity in the Shang et al. model.
+        Compute the central-galaxy CIB luminosity.
 
         Parameters
         ----------
@@ -375,7 +375,7 @@ class S12CIBProfile(CIBProfile):
      
     def j_bar_nu(self, halo_model, m, z):
         """
-        Compute the mean emissivity in the Shang et al. CIB model.
+        Compute the mean emissivity.
     
         Parameters
         ----------
@@ -416,7 +416,7 @@ class S12CIBProfile(CIBProfile):
 
     def monopole(self, halo_model, m, z):
         """
-        Compute the CIB monopole intensity in the Shang et al. CIB model.
+        Compute the CIB monopole intensity.
 
         Parameters
         ----------
@@ -475,7 +475,7 @@ class S12CIBProfile(CIBProfile):
 
     def u_r(self, halo_model, r, m, z):
         """
-        Compute the first CIB profile moment in real space.
+        Compute the CIB profile in real space.
 
         Parameters
         ----------
@@ -512,7 +512,7 @@ class S12CIBProfile(CIBProfile):
 
     def u_k(self, halo_model, k, m, z):
         """
-        Compute the first CIB profile moment in Fourier space.
+        Compute the CIB profile in Fourier space.
 
         Parameters
         ----------
@@ -553,7 +553,7 @@ class M21CIBProfile(CIBProfile):
     """
     CIB profile from `Maniyar et al. (2021) <https://ui.adsabs.harvard.edu/abs/2021A%26A...645A..40M/abstract>`_.
 
-    In this model, the real-space first CIB moment is written as
+    In this model, the real-space CIB profile is written as
 
     .. math::
 
@@ -651,24 +651,24 @@ class M21CIBProfile(CIBProfile):
     Attributes
     ----------
     nu : float
-        Observed frequency :math:`\nu` in GHz.
+        Observed frequency :math:`\\nu` in GHz.
     eta_max : float
-        Maximum star-formation efficiency :math:`\eta_{\max}`.
+        Maximum star-formation efficiency :math:`\\eta_{\\max}`.
     z_c : float
         Redshift pivot :math:`z_c` controlling the time-dependent width term.
     tau : float
-        Width-evolution parameter :math:`\tau`.
+        Width-evolution parameter :math:`\\tau`.
     f_sub : float
-        Subhalo luminosity fraction :math:`f_{\mathrm{sub}}`.
+        Subhalo luminosity fraction :math:`f_{\\mathrm{sub}}`.
     M_min : float
-        Minimum halo mass :math:`M_{\min}` contributing to the emissivity.
+        Minimum halo mass :math:`M_{\\min}` contributing to the emissivity.
     M_eff : float
-        Characteristic mass :math:`M_{\mathrm{eff}}` of peak star-formation efficiency.
+        Characteristic mass :math:`M_{\\mathrm{eff}}` of peak star-formation efficiency.
     sigma2_LM : float
-        Variance parameter :math:`\sigma_{LM}^2` entering the efficiency model.
+        Variance parameter :math:`\\sigma_{LM}^2` entering the efficiency model.
     s_nu : tuple
-        Tabulated spectral template :math:`(z, \nu, S_\nu)` used to interpolate
-        :math:`S_\nu(z, \nu)`. If not provided, it is read from the default
+        Tabulated spectral template :math:`(z, \\nu, S_\\nu)` used to interpolate
+        :math:`S_\\nu(z, \\nu)`. If not provided, it is read from the default
         auxiliary data files.
     """
     def __init__(self, nu, eta_max=0.4028, z_c=1.5, tau=1.204, f_sub=0.134, 
@@ -705,7 +705,7 @@ class M21CIBProfile(CIBProfile):
     def update(self, nu=None, eta_max=None, z_c=None, tau=None, f_sub=None, 
                M_min=None, M_eff=None, sigma2_LM=None):
         """
-        Return a new profile instance with updated Maniyar CIB parameters.
+        Return a new profile instance with updated CIB parameters.
 
         Parameters
         ----------
@@ -735,7 +735,7 @@ class M21CIBProfile(CIBProfile):
     
     def _m_dot(self, halo_model, m, z):
         """
-        Compute the Maniyar et al. halo mass accretion rate.
+        Compute the halo mass accretion rate.
 
         Parameters
         ----------
@@ -762,7 +762,7 @@ class M21CIBProfile(CIBProfile):
 
     def _sfr(self, halo_model, m, z):
         """
-        Compute the Maniyar et al. star-formation rate.
+        Compute the star-formation rate.
 
         Parameters
         ----------
@@ -809,7 +809,7 @@ class M21CIBProfile(CIBProfile):
 
     def l_gal(self, halo_model, m, z):
         """
-        Compute the Maniyar et al. galaxy luminosity assigned to a halo.
+        Compute the galaxy luminosity assigned to a halo.
 
         Parameters
         ----------
@@ -835,7 +835,7 @@ class M21CIBProfile(CIBProfile):
 
     def l_sat(self, halo_model, m, z):
         """
-        Compute the total satellite CIB luminosity in the Maniyar et al. model.
+        Compute the total satellite CIB luminosity.
 
         Parameters
         ----------
@@ -875,7 +875,7 @@ class M21CIBProfile(CIBProfile):
 
     def l_cen(self, halo_model, m, z):
         """
-        Compute the central-galaxy CIB luminosity in the Maniyar et al. model.
+        Compute the central-galaxy CIB luminosity.
 
         Parameters
         ----------
@@ -902,7 +902,7 @@ class M21CIBProfile(CIBProfile):
     
     def j_bar_nu(self, halo_model, m, z):
         """
-        Compute the mean emissivity in the Maniyar et al. CIB model.
+        Compute the mean emissivity.
 
         Parameters
         ----------
@@ -944,7 +944,7 @@ class M21CIBProfile(CIBProfile):
 
     def monopole(self, halo_model, m, z):
         """
-        Compute the CIB monopole intensity in the Maniyar et al. CIB model.
+        Compute the CIB monopole intensity.
 
         Parameters
         ----------
@@ -1002,7 +1002,7 @@ class M21CIBProfile(CIBProfile):
 
     def u_r(self, halo_model, r, m, z):
         """
-        Compute the first CIB profile moment in real space.
+        Compute the CIB profile in real space.
 
         Parameters
         ----------
@@ -1039,7 +1039,7 @@ class M21CIBProfile(CIBProfile):
 
     def u_k(self, halo_model, k, m, z):
         """
-        Compute the first CIB profile moment in Fourier space.
+        Compute the CIB profile in Fourier space.
 
         Parameters
         ----------

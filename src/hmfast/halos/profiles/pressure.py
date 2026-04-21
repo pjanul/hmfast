@@ -17,26 +17,6 @@ class PressureProfile(HaloProfile):
         """
         Compute the projected Fourier-space pressure profile for halo-model calculations.
 
-        For a three-dimensional electron-pressure profile :math:`P_e(r, M, z)`, this
-        method computes the spherically symmetric transform used in the halo model.
-        The input radial coordinate is the dimensionless variable
-        :math:`x = r / r_\\Delta`, and the projected profile is evaluated as
-
-        .. math::
-
-            u_\\ell(\\ell, M, z) =
-            \\frac{4 \\pi (1+z) r_\\Delta}{\\ell_\\Delta^2}
-            \\int dx \\, x^2 \\, P_e(x, M, z) \\,
-            \\frac{\\sin\\!\\left[(\\ell / \\ell_\\Delta) x\\right]}
-            {(\\ell / \\ell_\\Delta) x},
-
-        where :math:`\\ell_\\Delta(M, z) = d_A(z) / r_\\Delta(M, z)` and :math:`d_A(z)`
-        is the angular-diameter distance. In the implementation, the transform is
-        evaluated on the native radial grid ``self.x`` using a Hankel transform and
-        then interpolated to the Limber-related target multipoles
-        :math:`\\ell \\approx k \\chi(z) - 1/2`, with
-        :math:`\\chi(z) = (1+z) d_A(z)`.
-
         Parameters
         ----------
         halo_model : HaloModel
@@ -148,22 +128,63 @@ class GNFWPressureProfile(PressureProfile):
     """
     Electron pressure profile from `Nagai, Kravtsov & Vikhlinin (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...668....1N/abstract>`_.
 
+    The profile is evaluated as a function of the dimensionless radius
+    :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
+    the native :math:`500c` calibration mass and radius:
+
+    .. math::
+
+        P_e(x, M, z) = P_{500c} \\, P_0
+        \\left(c_{500} x_{500c}\\right)^{-\\gamma}
+        \\left[1 + \\left(c_{500} x_{500c}\\right)^\\alpha\\right]^{(\\gamma-\\beta)/\\alpha}
+        \\tag{1}
+
+    where :math:`x_{500c} = r / r_{500c} = x \\, r_\\Delta / r_{500c}` and
+
+    .. math::
+
+        P_{500c} =
+        1.65
+        \\left(\\frac{h}{0.7}\\right)^2
+        E(z)^{8/3}
+        \\left(\\frac{M_{500c} / B}{0.7 \\times 3 \\times 10^{14} \\, M_\\odot}\\right)^{2/3 + 0.12}
+        \\left(\\frac{0.7}{h}\\right)^{3/2}
+        \\tag{2}
+
+    with :math:`E(z) = H(z) / H_0`. In the implementation, the input halo mass
+    is first converted from the halo model's mass definition to
+    :math:`M_{500c}`.
+
+    The projected Fourier-space pressure profile is evaluated as
+
+    .. math::
+
+        u_\\ell(\\ell, M, z) =
+        \\frac{4 \\pi (1+z) r_\\Delta}{\\ell_\\Delta^2}
+        \\int dx \\, x^2 \\, P_e(x, M, z)
+        \\, \\frac{\\sin\\!\\left[(\\ell / \\ell_\\Delta) x\\right]}
+        {(\\ell / \\ell_\\Delta) x}
+        \\tag{3}
+
+    where :math:`\\ell_\\Delta(M, z) = d_A(z) / r_\\Delta(M, z)` and
+    :math:`\\chi(z) = (1+z) d_A(z)`.
+
     Attributes
     ----------
     x : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
     P0 : float
-        Dimensionless gNFW normalization.
+        Dimensionless gNFW normalization :math:`P_0`.
     c500 : float
-        Concentration parameter of the :math:`500c` pressure profile.
+        Concentration parameter :math:`c_{500}` of the :math:`500c` pressure profile.
     alpha : float
-        Intermediate-slope parameter of the gNFW profile.
+        Intermediate-slope parameter :math:`\\alpha` of the gNFW profile.
     beta : float
-        Outer-slope parameter of the gNFW profile.
+        Outer-slope parameter :math:`\\beta` of the gNFW profile.
     gamma : float
-        Inner-slope parameter of the gNFW profile.
+        Inner-slope parameter :math:`\\gamma` of the gNFW profile.
     B : float
-        Hydrostatic mass bias factor used in the :math:`M_{500c}` normalization.
+        Hydrostatic mass bias factor :math:`B` used in the :math:`M_{500c}` normalization.
     """
     
     def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4):
@@ -241,33 +262,7 @@ class GNFWPressureProfile(PressureProfile):
 
     def u_r(self, halo_model, x, m, z):
         """
-        Compute the generalized NFW electron-pressure profile.
-
-        The profile is evaluated as a function of the dimensionless radius
-        :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
-        the native :math:`500c` calibration mass and radius. The implemented profile is
-
-        .. math::
-
-            P_e(x, M, z) = P_{500c} \\, P_0 \\,
-            \\left(c_{500} x_{500c}\\right)^{-\\gamma}
-            \\left[1 + \\left(c_{500} x_{500c}\\right)^\\alpha\\right]^{(\\gamma-\\beta)/\\alpha},
-
-        where :math:`x_{500c} = r / r_{500c} = x \\, r_\\Delta / r_{500c}`.
-
-        The pressure normalization is
-
-        .. math::
-
-            P_{500c} =
-            1.65
-            \\left(\\frac{h}{0.7}\\right)^2
-            E(z)^{8/3}
-            \\left(\\frac{M_{500c} / B}{0.7 \\times 3 \\times 10^{14} \\, M_\\odot}\\right)^{2/3 + 0.12}
-            \\left(\\frac{0.7}{h}\\right)^{3/2},
-
-        with :math:`E(z) = H(z) / H_0`. In the implementation, the input halo mass is
-        first converted from the halo model's mass definition to :math:`M_{500c}`.
+        Compute the electron-pressure profile.
 
         Parameters
         ----------
@@ -328,28 +323,69 @@ class B12PressureProfile(PressureProfile):
     """
     Electron pressure profile from `Battaglia et al. (2012) <https://ui.adsabs.harvard.edu/abs/2012ApJ...758...74B/abstract>`_.
 
+    The profile is evaluated as a function of the dimensionless radius
+    :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
+    the native :math:`200c` calibration mass and radius:
+
+    .. math::
+
+        P_e(x, M, z)
+        = P_{200c} \\, P_0
+        \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
+        \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta}
+        \\tag{1}
+
+    where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}`.
+    In this implementation, :math:`\\alpha = 1` and :math:`\\gamma = -0.3`,
+    and the remaining profile parameters follow the Battaglia scaling
+
+    .. math::
+
+        X(M_{200c}, z) = A_X
+        \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
+        (1 + z)^{\\alpha_z^X}
+        \\tag{2}
+
+    where :math:`X \\in \\{P_0, x_c, \\beta\\}`. In the implementation, the
+    input halo mass is first converted from the halo model's mass definition to
+    :math:`M_{200c}`.
+
+    The projected Fourier-space pressure profile is evaluated as
+
+    .. math::
+
+        u_\\ell(\\ell, M, z) =
+        \\frac{4 \\pi (1+z) r_\\Delta}{\\ell_\\Delta^2}
+        \\int dx \\, x^2 \\, P_e(x, M, z)
+        \\, \\frac{\\sin\\!\\left[(\\ell / \\ell_\\Delta) x\\right]}
+        {(\\ell / \\ell_\\Delta) x}
+        \\tag{3}
+
+    where :math:`\\ell_\\Delta(M, z) = d_A(z) / r_\\Delta(M, z)` and
+    :math:`\\chi(z) = (1+z) d_A(z)`.
+
     Attributes
     ----------
     x : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
     A_P0 : float
-        Amplitude of the pressure normalization scaling.
+        Amplitude :math:`A_{P_0}` of the pressure normalization scaling.
     A_xc : float
-        Amplitude of the core-radius scaling.
+        Amplitude :math:`A_{x_c}` of the core-radius scaling.
     A_beta : float
-        Amplitude of the outer-slope scaling.
+        Amplitude :math:`A_\\beta` of the outer-slope scaling.
     alpha_m_P0 : float
-        Mass-scaling exponent of :math:`P_0`.
+        Mass-scaling exponent :math:`\\alpha_m^{P_0}`.
     alpha_m_xc : float
-        Mass-scaling exponent of :math:`x_c`.
+        Mass-scaling exponent :math:`\\alpha_m^{x_c}`.
     alpha_m_beta : float
-        Mass-scaling exponent of :math:`\\beta`.
+        Mass-scaling exponent :math:`\\alpha_m^\\beta`.
     alpha_z_P0 : float
-        Redshift-scaling exponent of :math:`P_0`.
+        Redshift-scaling exponent :math:`\\alpha_z^{P_0}`.
     alpha_z_xc : float
-        Redshift-scaling exponent of :math:`x_c`.
+        Redshift-scaling exponent :math:`\\alpha_z^{x_c}`.
     alpha_z_beta : float
-        Redshift-scaling exponent of :math:`\\beta`.
+        Redshift-scaling exponent :math:`\\alpha_z^\\beta`.
     """
     def __init__(self, x=None, 
                  A_P0=18.1, A_xc=0.497, A_beta=4.35,
@@ -430,34 +466,7 @@ class B12PressureProfile(PressureProfile):
 
     def u_r(self, halo_model, x, m, z):
         """
-        Compute the Battaglia et al. (2012) electron-pressure profile.
-
-        The profile is evaluated as a function of the dimensionless radius
-        :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
-        the native :math:`200c` calibration mass and radius. The implemented model is
-
-        .. math::
-
-            P_e(x, M, z)
-            = P_{200c} \\, P_0
-            \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
-            \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta},
-
-        where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}`.
-
-        In this implementation, :math:`\\alpha = 1` and :math:`\\gamma = -0.3`. The
-        remaining profile parameters follow the generic Battaglia scaling
-
-        .. math::
-
-            X(M_{200c}, z) = A_X
-            \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
-            (1 + z)^{\\alpha_z^X},
-
-        where :math:`X` stands for the mass- and redshift-dependent profile parameters
-        used in the model, such as :math:`P_0`, :math:`x_c`, and :math:`\\beta`. In the
-        implementation, the input halo mass is first converted from the halo model's
-        mass definition to :math:`M_{200c}`.
+        Compute the electron-pressure profile.
 
         Parameters
         ----------

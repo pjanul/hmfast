@@ -238,7 +238,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
         .. math::
 
-            u_r(r, m, z) = \frac{N_\mathrm{cen}(m) + N_\mathrm{sat}(m) \, u_m(r, m, z)}{\bar{n}_g(z)},
+            u_r(r, m, z) = \\frac{N_\\mathrm{cen}(m) + N_\\mathrm{sat}(m) \\, u_m(r, m, z)}{\\bar{n}_g(z)},
 
         where :math:`u_m(r, m, z)` is the normalized matter profile in real
         space.
@@ -248,7 +248,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         halo_model : HaloModel
             The parent halo model instance.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\Delta`.
+            Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
             Halo mass grid.
         z : float or jnp.ndarray

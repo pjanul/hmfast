@@ -347,11 +347,6 @@ class B16DensityProfile(DensityProfile):
         
         return rho_gas
 
-    def density_profile(self, halo_model, x, m, z):
-        """Backward-compatible alias for :meth:`u_r`."""
-        return self.u_r(halo_model, x, m, z)
-
-
 jax.tree_util.register_pytree_node(
     B16DensityProfile,
     lambda obj: obj._tree_flatten(),
@@ -435,11 +430,6 @@ class NFWDensityProfile(DensityProfile):
         rho_gas = f_b * rho_s[None, :, :] / (x[:, None, None] * (1 + x[:, None, None])**2)
         
         return rho_gas
-
-    def density_profile(self, halo_model, x, m, z):
-        """Backward-compatible alias for :meth:`u_r`."""
-        return self.u_r(halo_model, x, m, z)
-
 
 
 
@@ -632,11 +622,6 @@ class BCMDensityProfile(DensityProfile):
     
         
         return num / (denom1 * denom2) 
-
-    def density_profile(self, halo_model, x, m, z):
-        """Backward-compatible alias for :meth:`u_r`."""
-        return self.u_r(halo_model, x, m, z)
-
 
 jax.tree_util.register_pytree_node(
     BCMDensityProfile,

@@ -444,7 +444,7 @@ class S12CIBProfile(CIBProfile):
 
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
 
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        
         cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
         h = cparams["h"]
@@ -467,6 +467,52 @@ class S12CIBProfile(CIBProfile):
         cen_term =  1  / (4*jnp.pi)    *   (lc[None, :, :])       
 
         return sat_term, cen_term
+
+
+    def u_r(self, halo_model, r, m, z):
+        """
+        Compute the first CIB profile moment in real space.
+
+        Writing :math:`u_m(r, M, z)` for the normalized real-space NFW
+        profile, the implemented first moment is
+
+        .. math::
+
+            u_\\nu(r, M, z) = \\frac{1}{4\\pi}
+            \\left[L_\\nu^{\\mathrm{cen}}(M, z)
+            + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(r, M, z)\\right].
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the matter profile and CIB luminosities.
+        r : float or jnp.ndarray
+            Physical radius or radii in the same units as :math:`r_\\Delta`.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        jnp.ndarray
+            Real-space profile array with shape :math:`(N_r, N_M, N_z)`.
+        """
+        r = jnp.atleast_1d(r)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        h = halo_model.cosmology.H0 / 100
+        m_physical = m / h
+
+        ls = self.l_sat(halo_model, m_physical, z)
+        lc = self.l_cen(halo_model, m_physical, z)
+        u_m = self._u_r_matter(halo_model, r, m, z)
+
+        sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
+        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
+
+        return cen_term + sat_term
 
 
     def u_k(self, halo_model, k, m, z):
@@ -492,7 +538,7 @@ class S12CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-            
+
         Returns
         -------
         tuple
@@ -938,8 +984,6 @@ class M21CIBProfile(CIBProfile):
     
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
 
-        
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
         h = halo_model.cosmology.H0 / 100
@@ -962,6 +1006,52 @@ class M21CIBProfile(CIBProfile):
         cen_term =  1  / (4*jnp.pi)    *   (lc[None, :, :])       
 
         return sat_term, cen_term
+
+
+    def u_r(self, halo_model, r, m, z):
+        """
+        Compute the first CIB profile moment in real space.
+
+        Writing :math:`u_m(r, M, z)` for the normalized real-space NFW
+        profile, the implemented first moment is
+
+        .. math::
+
+            u_\\nu(r, M, z) = \\frac{1}{4\\pi}
+            \\left[L_\\nu^{\\mathrm{cen}}(M, z)
+            + L_\\nu^{\\mathrm{sat}}(M, z) \\, u_m(r, M, z)\\right].
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+            Halo model providing the matter profile and CIB luminosities.
+        r : float or jnp.ndarray
+            Physical radius or radii in the same units as :math:`r_\\Delta`.
+        m : float or jnp.ndarray
+            Halo mass or masses.
+        z : float or jnp.ndarray
+            Redshift(s).
+
+        Returns
+        -------
+        jnp.ndarray
+            Real-space profile array with shape :math:`(N_r, N_M, N_z)`.
+        """
+        r = jnp.atleast_1d(r)
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        h = halo_model.cosmology.H0 / 100
+        m_physical = m / h
+
+        ls = self.l_sat(halo_model, m_physical, z)
+        lc = self.l_cen(halo_model, m_physical, z)
+        u_m = self._u_r_matter(halo_model, r, m, z)
+
+        sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
+        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
+
+        return cen_term + sat_term
 
 
     def u_k(self, halo_model, k, m, z):
@@ -987,7 +1077,7 @@ class M21CIBProfile(CIBProfile):
             Halo mass or masses.
         z : float or jnp.ndarray
             Redshift(s).
-            
+
         Returns
         -------
         tuple

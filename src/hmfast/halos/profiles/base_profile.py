@@ -53,7 +53,7 @@ class HaloProfile:
         halo_model : HaloModel
             Halo model providing the concentration relation and mass definition.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\Delta`.
+            Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
             Halo mass(es).
         z : float or jnp.ndarray

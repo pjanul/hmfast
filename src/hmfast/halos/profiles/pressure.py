@@ -317,11 +317,6 @@ class GNFWPressureProfile(PressureProfile):
     
         return Pe  # shape: (Nx, Nm, Nz)
 
-    def pressure_profile(self, halo_model, x, m, z):
-        """Backward-compatible alias for :meth:`u_r`."""
-        return self.u_r(halo_model, x, m, z)
-
-
 jax.tree_util.register_pytree_node(
     GNFWPressureProfile,
     lambda obj: obj._tree_flatten(),
@@ -519,11 +514,6 @@ class B12PressureProfile(PressureProfile):
         P_200c = ((m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :])**2)
     
         return P_200c * P0 * p_x
-
-    def pressure_profile(self, halo_model, x, m, z):
-        """Backward-compatible alias for :meth:`u_r`."""
-        return self.u_r(halo_model, x, m, z)
-
 
 jax.tree_util.register_pytree_node(
     B12PressureProfile,

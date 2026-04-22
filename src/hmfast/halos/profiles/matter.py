@@ -65,7 +65,7 @@ class NFWMatterProfile(MatterProfile):
             Halo model providing the cosmology, concentration relation, and halo
             radius.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\\Delta`.
+            Radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass(es) in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -102,7 +102,7 @@ class NFWMatterProfile(MatterProfile):
             Halo model providing the cosmology, concentration relation, and halo
             radius.
         k : float or jnp.ndarray
-            Comoving wavenumber(s).
+            Comoving wavenumber(s) in Mpc^-1.
         m : float or jnp.ndarray
             Halo mass(es) in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -110,8 +110,8 @@ class NFWMatterProfile(MatterProfile):
             
         Returns
         -------
-            jnp.ndarray
-                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
+        jnp.ndarray
+            Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
 
         

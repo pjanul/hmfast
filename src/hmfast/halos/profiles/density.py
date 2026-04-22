@@ -23,7 +23,7 @@ class DensityProfile(HaloProfile):
         halo_model : HaloModel
             Halo model providing the cosmology and halo-radius relation.
         k : float or jnp.ndarray
-            Comoving wavenumber(s).
+            Comoving wavenumber(s) in Mpc^-1.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -31,17 +31,15 @@ class DensityProfile(HaloProfile):
 
         Returns
         -------
-            jnp.ndarray
-                Transformed profile with shape :math:`(N_k, N_M, N_z)`.
+        jnp.ndarray
+            Transformed profile with shape :math:`(N_k, N_M, N_z)`.
         """
-        
-        h = halo_model.cosmology.H0 / 100
+        h = halo_model.cosmology.H0 / 100.0
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Compute r_delta and ell_delta
-        delta = halo_model.mass_definition.delta
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h
-        d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_delta = d_A_z[None, :] / r_delta
         
         # chi: (Nz,) -> Target ell grid: (Nk, Nz)
@@ -51,7 +49,20 @@ class DensityProfile(HaloProfile):
         # Calculate kSZ Prefactor as (Nm, Nz)
         vrms = jnp.sqrt(halo_model.cosmology.v_rms_squared(z))
         mu_e = 1.14
-        prefactor = (4 * jnp.pi * r_delta**3 / mu_e * (1 + z)[None, :]**3 / chi[None, :]**2 * vrms[None, :])
+        # The density profiles below are still normalized in the legacy
+        # (M_sun / h) (Mpc / h)^-3 convention, so the projected wrapper
+        # retains one factor of h to preserve the kSZ normalization while
+        # exposing k in Mpc^-1.
+        prefactor = (
+            h
+            * 4
+            * jnp.pi
+            * r_delta**3
+            / mu_e
+            * (1 + z)[None, :]**3
+            / chi[None, :]**2
+            * vrms[None, :]
+        )
     
         # Get native Hankel transform outputs, which may not align with the k from this function's input
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, m, z)   # New way

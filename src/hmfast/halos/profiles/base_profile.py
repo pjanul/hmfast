@@ -53,7 +53,7 @@ class HaloProfile:
         halo_model : HaloModel
             Halo model providing the concentration relation and mass definition.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\\Delta`.
+            Radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass(es) in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -71,7 +71,7 @@ class HaloProfile:
         m_internal = m * h
 
         c_delta = halo_model.concentration.c_delta(halo_model, m_internal, z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
         r_s = r_delta / c_delta
 
         f_nfw = 1.0 / (jnp.log1p(c_delta) - c_delta / (1.0 + c_delta))
@@ -83,7 +83,8 @@ class HaloProfile:
     
     def _u_k_matter(self, halo_model, k, m, z):
         """
-        Calculate u^m(k, M, z) supporting independent dimensions for k, m, and z.
+        Calculate :math:`u^m(k, M, z)` for wavenumbers in Mpc^-1
+        supporting independent dimensions for ``k``, ``m``, and ``z``.
         
         Returns u_k_m with shape (N_k, N_m, N_z).
         """
@@ -96,7 +97,7 @@ class HaloProfile:
         
         # Get c_delta and r_delta
         c_delta = halo_model.concentration.c_delta(halo_model, m_internal, z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
         lambda_val = 1.0 
         
         # Compute analytical profile q terms with shape: (N_k, N_m, N_z)

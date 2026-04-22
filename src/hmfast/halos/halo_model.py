@@ -206,7 +206,7 @@ class HaloModel:
         tracer2 : Tracer or None
             Second tracer object (if None, uses tracer1).
         k : array-like
-            Wavenumber grid.
+            Wavenumber grid in Mpc^-1.
         m : array-like
             Mass grid.
         z : array-like
@@ -239,18 +239,18 @@ class HaloModel:
             # We need the profiles for index 'i' while squaring uk if the user is doing an autocorrelation
             if is_same_tracer:
                 if tracer1.profile.has_central_contribution:
-                    s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k/h, m/h, z)
+                    s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m/h, z)
                     uk_sq_row = s1[:, i, :] * s1[:, i, :] + 2.0 * s1[:, i, :] * c1[:, i, :]
                 else:
-                    u1 = tracer1.profile.u_k(self, k/h, m/h, z)
+                    u1 = tracer1.profile.u_k(self, k, m/h, z)
                     uk_sq_row = u1[:, i, :] ** 2
             elif tracer1.profile.has_central_contribution and tracer2.profile.has_central_contribution:
-                s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k/h, m/h, z)
-                s2, c2 = tracer2.profile._sat_and_cen_contribution(self, k/h, m/h, z)
+                s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m/h, z)
+                s2, c2 = tracer2.profile._sat_and_cen_contribution(self, k, m/h, z)
                 uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
             else:
-                u1 = tracer1.profile.u_k(self, k/h, m/h, z)
-                u2 = tracer2.profile.u_k(self, k/h, m/h, z)
+                u1 = tracer1.profile.u_k(self, k, m/h, z)
+                u2 = tracer2.profile.u_k(self, k, m/h, z)
                 uk_sq_row = u1[:, i, :] * u2[:, i, :]
     
             return uk_sq_row * total_weights[i], uk_sq_row
@@ -354,7 +354,7 @@ class HaloModel:
         tracer2 : Tracer or None
             Second tracer object (if None, uses tracer1).
         k : array-like
-            Wavenumber grid.
+            Wavenumber grid in Mpc^-1.
         m : array-like
             Mass grid.
         z : array-like
@@ -383,7 +383,7 @@ class HaloModel:
         def get_I(tracer):
             # This function processes a single index 'i' of the mass axis
             def process_bin(i):
-                uk_full = tracer.profile.u_k(self, k/h, m/h, z)
+                uk_full = tracer.profile.u_k(self, k, m/h, z)
                 uk_slice = uk_full[:, i, :] 
                 return uk_slice * total_weights[i], uk_slice
     

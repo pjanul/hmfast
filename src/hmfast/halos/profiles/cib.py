@@ -478,7 +478,7 @@ class S12CIBProfile(CIBProfile):
         halo_model : HaloModel
             Halo model providing the matter profile and CIB luminosities.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\\Delta`.
+            Radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -512,7 +512,7 @@ class S12CIBProfile(CIBProfile):
         halo_model : HaloModel
             Halo model providing the matter profile and CIB luminosities.
         k : float or jnp.ndarray
-            Comoving wavenumber(s).
+            Comoving wavenumber(s) in Mpc^-1.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -520,8 +520,8 @@ class S12CIBProfile(CIBProfile):
 
         Returns
         -------
-            jnp.ndarray
-                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
+        jnp.ndarray
+            Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
         
@@ -998,7 +998,7 @@ class M21CIBProfile(CIBProfile):
         halo_model : HaloModel
             Halo model providing the matter profile and CIB luminosities.
         r : float or jnp.ndarray
-            Physical radius or radii in the same units as :math:`r_\\Delta`.
+            Radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -1032,7 +1032,7 @@ class M21CIBProfile(CIBProfile):
         halo_model : HaloModel
             Halo model providing the matter profile and CIB luminosities.
         k : float or jnp.ndarray
-            Comoving wavenumber(s).
+            Comoving wavenumber(s) in Mpc^-1.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -1040,8 +1040,8 @@ class M21CIBProfile(CIBProfile):
 
         Returns
         -------
-            jnp.ndarray
-                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
+        jnp.ndarray
+            Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 

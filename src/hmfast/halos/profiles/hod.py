@@ -325,8 +325,10 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
         Returns
         -------
-            jnp.ndarray
-                Fourier-space profile.
+        k : array-like
+            Wavenumber grid.
+        u_k : array-like
+            Fourier-space profile.
         """
        
         h = halo_model.cosmology.H0 / 100.0

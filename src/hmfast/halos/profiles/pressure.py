@@ -22,7 +22,7 @@ class PressureProfile(HaloProfile):
         halo_model : HaloModel
             Halo model providing the cosmology and halo-radius relation.
         k : float or jnp.ndarray
-            Comoving wavenumber(s).
+            Comoving wavenumber(s) in Mpc^-1.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -30,21 +30,19 @@ class PressureProfile(HaloProfile):
 
         Returns
         -------
-            jnp.ndarray
-                Transformed profile with shape :math:`(N_k, N_M, N_z)`.
+        jnp.ndarray
+            Transformed profile with shape :math:`(N_k, N_M, N_z)`.
         """
-        h = halo_model.cosmology.H0 / 100 
         B = self.B
-        delta = halo_model.mass_definition.delta
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h / B**(1/3) # (Nm, Nz)
-        d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) / B**(1/3) # (Nm, Nz)
+        d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_delta = d_A[None, :] / r_delta  # (Nm, Nz)
         
-        Mpc_per_h_to_cm = Const._Mpc_over_m_ / h # This is actually Mpc_per_h_to_m, but the math is currently working
-        prefactor = (1 + z)[None, :] * 4 * jnp.pi * r_delta * Mpc_per_h_to_cm / (ell_delta**2)  # (Nm, Nz)
+        mpc_to_m = Const._Mpc_over_m_
+        prefactor = (1 + z)[None, :] * 4 * jnp.pi * r_delta * mpc_to_m / (ell_delta**2)  # (Nm, Nz)
         
         # Target ell grid for interpolation: (Nk, Nz)
         chi = d_A * (1 + z)

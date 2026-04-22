@@ -25,15 +25,14 @@ class DensityProfile(HaloProfile):
         k : float or jnp.ndarray
             Comoving wavenumber(s).
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
         Returns
         -------
-        tuple
-            Tuple :math:`(k, u_k)` where ``k`` has shape :math:`(N_k, N_z)`
-            and the transformed profile has shape :math:`(N_k, N_M, N_z)`.
+            jnp.ndarray
+                Transformed profile with shape :math:`(N_k, N_M, N_z)`.
         """
         
         h = halo_model.cosmology.H0 / 100
@@ -41,7 +40,7 @@ class DensityProfile(HaloProfile):
     
         # Compute r_delta and ell_delta
         delta = halo_model.mass_definition.delta
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m/h, z) * h
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
         ell_delta = d_A_z[None, :] / r_delta
         
@@ -52,7 +51,6 @@ class DensityProfile(HaloProfile):
         # Calculate kSZ Prefactor as (Nm, Nz)
         vrms = jnp.sqrt(halo_model.cosmology.v_rms_squared(z))
         mu_e = 1.14
-       
         prefactor = (4 * jnp.pi * r_delta**3 / mu_e * (1 + z)[None, :]**3 / chi[None, :]**2 * vrms[None, :])
     
         # Get native Hankel transform outputs, which may not align with the k from this function's input
@@ -78,7 +76,7 @@ class DensityProfile(HaloProfile):
         
         u_ell_interp = vmapped_interp(ell_target, ell_native, u_ell_val)
         
-        return ell_target, u_ell_interp
+        return u_ell_interp
 
 
         
@@ -158,15 +156,16 @@ class B16DensityProfile(DensityProfile):
     .. math::
 
         u_k(k, M, z) =
-        4 \\pi \\, r_\\Delta^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
+        4 \\pi \\, r_\\Delta^3 \\, \\frac{1}{\\mu_e}
         \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
         \\int dx \\, x^2 \\, \\rho(x, M, z)
         \\, \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
         {(k r_\\Delta) x}
         \\tag{3}
 
-    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
-    :math:`f_{\\mathrm{free}} = 1`, and
+    where :math:`x = r / r_\\Delta` and :math:`\\mu_e = 1.14`, while
+    :math:`f_{\\mathrm{free}} = 1` is included in the real-space density profile
+    of Eq. (1) rather than as an additional Fourier-space prefactor, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
@@ -304,7 +303,7 @@ class B16DensityProfile(DensityProfile):
         x : float or jnp.ndarray
             Dimensionless radius corresponding to :math:`r / r_{200c}`.
         m : float or jnp.ndarray
-            Halo mass or masses in :math:`M_\\odot / h`.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -316,6 +315,7 @@ class B16DensityProfile(DensityProfile):
         cparams = halo_model.cosmology._cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         h = cparams["h"]
+        f_free = 1.0
 
         gamma = -0.2
         xc = 0.5
@@ -328,7 +328,7 @@ class B16DensityProfile(DensityProfile):
         rho_crit_z = jnp.atleast_1d(halo_model.cosmology.critical_density(z))[None, None, :]
         
         # Mass scaling logic
-        m_200c_msun = m_b / h
+        m_200c_msun = m_b
         mass_ratio = m_200c_msun / 1e14 
        
         # Compute Shape Parameters (Equations A1, A2 from B16)
@@ -340,7 +340,7 @@ class B16DensityProfile(DensityProfile):
         p_x = (x_b / xc)**gamma * (1 + (x_b / xc)**alpha)**(-(beta + gamma) / alpha)
         
         # Final result: M_sun h^2 / Mpc^3 
-        rho_gas = rho0 * rho_crit_z * f_b * p_x 
+        rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x 
         
         return rho_gas
 
@@ -429,7 +429,7 @@ class NFWDensityProfile(DensityProfile):
         x : float or jnp.ndarray
             Dimensionless radius :math:`x = r / r_s`.
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -440,17 +440,18 @@ class NFWDensityProfile(DensityProfile):
         """
         cparams = halo_model.cosmology._cosmo_params()
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m_internal = m * cparams["h"]
        
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Get scale radius r_s
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
-        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * cparams["h"]
+        c_delta = halo_model.concentration.c_delta(halo_model, m_internal, z)
         r_s = r_delta / c_delta # (Nm, Nz)
         
         # Calculate rho_s
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta) # (Nm, Nz)
-        rho_s = m[:, None] / (4 * jnp.pi * r_s**3 * m_nfw)    # (Nm, Nz)
+        rho_s = m_internal[:, None] / (4 * jnp.pi * r_s**3 * m_nfw)    # (Nm, Nz)
         
         # Final broadcast to (Nx, Nm, Nz)
         # x needs to be (Nx, 1, 1) and rho_s (1, Nm, Nz)
@@ -621,7 +622,7 @@ class BCMDensityProfile(DensityProfile):
         x : float or jnp.ndarray
             Dimensionless radius :math:`x = r / r_{\\mathrm{vir}}`.
         m : float or jnp.ndarray
-            Halo mass or masses in :math:`M_\\odot / h`.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -636,7 +637,8 @@ class BCMDensityProfile(DensityProfile):
         
         # Broadcasting shapes: (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        xb, mb, zb = x[:, None, None], m[None, :, None], z[None, None, :]
+        m_internal = m * cparams["h"]
+        xb, mb, zb = x[:, None, None], m_internal[None, :, None], z[None, None, :]
         
         # This model is calibrated for the virial radius 
         r_vir = MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z)

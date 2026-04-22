@@ -250,10 +250,12 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         Compute the satellite and central pieces of the galaxy HOD tracer.
         """
 
-       
-        Ns = self.n_sat(m)
-        Nc = self.n_cen(m)
-        ng = self.ng_bar(halo_model, m, z) * (halo_model.cosmology.H0 / 100)**3
+        h = halo_model.cosmology.H0 / 100.0
+        m_internal = m * h
+
+        Ns = self.n_sat(m_internal)
+        Nc = self.n_cen(m_internal)
+        ng = self.ng_bar(halo_model, m_internal, z) * h**3
 
         _, u_m = self._u_k_matter(halo_model, k, m, z)  
 
@@ -277,7 +279,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         r : float or jnp.ndarray
             Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass grid.
+            Halo mass grid in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift grid.
 
@@ -290,9 +292,12 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        Ns = self.n_sat(m)
-        Nc = self.n_cen(m)
-        ng = self.ng_bar(halo_model, m, z) * (halo_model.cosmology.H0 / 100)**3
+        h = halo_model.cosmology.H0 / 100.0
+        m_internal = m * h
+
+        Ns = self.n_sat(m_internal)
+        Nc = self.n_cen(m_internal)
+        ng = self.ng_bar(halo_model, m_internal, z) * h**3
 
         u_m = self._u_r_matter(halo_model, r, m, z)
 
@@ -314,26 +319,27 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         k : array-like
             Wavenumber grid.
         m : array-like
-            Halo mass grid.
+            Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
 
         Returns
         -------
-        k : array-like
-            Wavenumber grid.
-        u_k : array-like
-            Fourier-space profile.
+            jnp.ndarray
+                Fourier-space profile.
         """
        
-        Ns = self.n_sat(m)
-        Nc = self.n_cen(m)
-        ng = self.ng_bar(halo_model, m, z) * (halo_model.cosmology.H0 / 100)**3
+        h = halo_model.cosmology.H0 / 100.0
+        m_internal = m * h
+
+        Ns = self.n_sat(m_internal)
+        Nc = self.n_cen(m_internal)
+        ng = self.ng_bar(halo_model, m_internal, z) * h**3
 
         _, u_m = self._u_k_matter(halo_model, k, m, z)
     
         u_k = (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
-        return k, u_k
+        return u_k
         
 
 jax.tree_util.register_pytree_node(

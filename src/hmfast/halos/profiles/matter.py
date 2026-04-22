@@ -22,7 +22,7 @@ class NFWMatterProfile(MatterProfile):
 
     .. math::
 
-        u_r(r, M, z) = \\frac{1}{\\bar{\\rho}_{m,0}} \,
+        u_r(r, M, z) = \\frac{1}{\\bar{\\rho}_{m,0}} \\,
         \\frac{\\rho_s}{(r/r_s) \\left(1+r/r_s\\right)^2}
         \\tag{1}
 
@@ -67,7 +67,7 @@ class NFWMatterProfile(MatterProfile):
         r : float or jnp.ndarray
             Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass(es).
+            Halo mass(es) in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -81,12 +81,13 @@ class NFWMatterProfile(MatterProfile):
         r = jnp.atleast_1d(r)
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
+        m_internal = m * cparams["h"]
 
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
         # Normalized real-space profile (unit mass)
         u_r_norm = self._u_r_matter(halo_model, r, m, z)
         # Mass-weighted profile
-        return (m[:, None] / rho_mean_0)[None, :, :] * u_r_norm
+        return (m_internal[:, None] / rho_mean_0)[None, :, :] * u_r_norm
 
 
     def u_k(self, halo_model, k, m, z):
@@ -103,28 +104,29 @@ class NFWMatterProfile(MatterProfile):
         k : float or jnp.ndarray
             Comoving wavenumber(s).
         m : float or jnp.ndarray
-            Halo mass(es).
+            Halo mass(es) in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
             
         Returns
         -------
-        tuple
-            :math:`(k, u)``, where :math:`u` has shape :math:`(N_k, N_M, N_z)`.
+            jnp.ndarray
+                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
 
         
         cparams = halo_model.cosmology._cosmo_params()
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m_internal = m * cparams["h"]
     
         # Compute u_m_k from Tracer
-        k, u_m = self._u_k_matter(halo_model, k, m, z) 
+        _, u_m = self._u_k_matter(halo_model, k, m, z) 
         
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
-        m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
+        m_over_rho_mean = (m_internal / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)
 
         u_m *= m_over_rho_mean
     
-        return k, u_m
+        return u_m

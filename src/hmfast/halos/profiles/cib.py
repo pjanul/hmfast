@@ -69,9 +69,8 @@ class S12CIBProfile(CIBProfile):
         -\\frac{\\left(\\log_{10} M - \\log_{10} M_{\\mathrm{eff}}\\right)^2}
         {2 \\sigma_{LM}^2}
         \\right]
-        \\tag{5}
-
-    .. math::
+            jnp.ndarray
+                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
 
         \\Phi(z) =
         \\begin{cases}
@@ -451,14 +450,11 @@ class S12CIBProfile(CIBProfile):
         
         cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
-        h = cparams["h"]
        
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        # Compute the physical mass for ls and lc and then _u_k_matter from Tracer
-        m_physical = m/h
-        ls = self.l_sat(halo_model, m_physical, z)
-        lc = self.l_cen(halo_model, m_physical, z)
+        ls = self.l_sat(halo_model, m, z)
+        lc = self.l_cen(halo_model, m, z)
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
@@ -484,7 +480,7 @@ class S12CIBProfile(CIBProfile):
         r : float or jnp.ndarray
             Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -497,11 +493,8 @@ class S12CIBProfile(CIBProfile):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        h = halo_model.cosmology.H0 / 100
-        m_physical = m / h
-
-        ls = self.l_sat(halo_model, m_physical, z)
-        lc = self.l_cen(halo_model, m_physical, z)
+        ls = self.l_sat(halo_model, m, z)
+        lc = self.l_cen(halo_model, m, z)
         u_m = self._u_r_matter(halo_model, r, m, z)
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
@@ -521,21 +514,20 @@ class S12CIBProfile(CIBProfile):
         k : float or jnp.ndarray
             Comoving wavenumber(s).
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
         Returns
         -------
-        tuple
-            :math:`(k, u_\\nu)` where the profile array has shape
-            :math:`(N_k, N_M, N_z)`.
+            jnp.ndarray
+                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
         
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        return k, cen_term + sat_term
+        return cen_term + sat_term
 
         
 
@@ -978,14 +970,11 @@ class M21CIBProfile(CIBProfile):
 
         cparams = halo_model.cosmology._cosmo_params()
         nu = self.nu
-        h = halo_model.cosmology.H0 / 100
        
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        # Compute the physical mass for ls and lc and then _u_k_matter from Tracer
-        m_physical = m/h
-        ls = self.l_sat(halo_model, m_physical, z)
-        lc = self.l_cen(halo_model, m_physical, z)
+        ls = self.l_sat(halo_model, m, z)
+        lc = self.l_cen(halo_model, m, z)
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
@@ -1011,7 +1000,7 @@ class M21CIBProfile(CIBProfile):
         r : float or jnp.ndarray
             Physical radius or radii in the same units as :math:`r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -1024,11 +1013,8 @@ class M21CIBProfile(CIBProfile):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        h = halo_model.cosmology.H0 / 100
-        m_physical = m / h
-
-        ls = self.l_sat(halo_model, m_physical, z)
-        lc = self.l_cen(halo_model, m_physical, z)
+        ls = self.l_sat(halo_model, m, z)
+        lc = self.l_cen(halo_model, m, z)
         u_m = self._u_r_matter(halo_model, r, m, z)
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
@@ -1048,19 +1034,18 @@ class M21CIBProfile(CIBProfile):
         k : float or jnp.ndarray
             Comoving wavenumber(s).
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
         Returns
         -------
-        tuple
-            :math:`(k, u_\\nu)` where the profile array has shape
-            :math:`(N_k, N_M, N_z)`.
+            jnp.ndarray
+                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
         """
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        return k, cen_term + sat_term
+        return cen_term + sat_term
 
 
 jax.tree_util.register_pytree_node(

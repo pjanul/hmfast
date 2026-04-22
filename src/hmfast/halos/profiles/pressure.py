@@ -24,15 +24,14 @@ class PressureProfile(HaloProfile):
         k : float or jnp.ndarray
             Comoving wavenumber(s).
         m : float or jnp.ndarray
-            Halo mass or masses.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
         Returns
         -------
-        tuple
-            Tuple :math:`(\\ell, u_\\ell)` where ``ell`` has shape :math:`(N_k, N_z)`
-            and the transformed profile has shape :math:`(N_k, N_M, N_z)`.
+            jnp.ndarray
+                Transformed profile with shape :math:`(N_k, N_M, N_z)`.
         """
         h = halo_model.cosmology.H0 / 100 
         B = self.B
@@ -40,7 +39,7 @@ class PressureProfile(HaloProfile):
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m / h, z) * h / B**(1/3) # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * h / B**(1/3) # (Nm, Nz)
         d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z)) * h
         ell_delta = d_A[None, :] / r_delta  # (Nm, Nz)
         
@@ -74,7 +73,7 @@ class PressureProfile(HaloProfile):
         # Resulting shape: (Nk, Nm, Nz)
         u_ell_interp = vmap_interp(ell_target, ell_native, u_ell_val)
         
-        return ell_target, u_ell_interp
+        return u_ell_interp
 
 
         
@@ -272,7 +271,7 @@ class GNFWPressureProfile(PressureProfile):
         x : float or jnp.ndarray
             Dimensionless radius :math:`x = r / r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass or masses in the halo model's native mass definition.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -284,16 +283,17 @@ class GNFWPressureProfile(PressureProfile):
         H0 = halo_model.cosmology.H0
         P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        h = H0 / 100.0
+        m_internal = m * h
     
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
         mass_def_old = halo_model.mass_definition
         mass_def_500c = MassDefinition(500, "critical")
-        c_old = halo_model.concentration.c_delta(halo_model, m, z)
-        m500c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old)
+        c_old = halo_model.concentration.c_delta(halo_model, m_internal, z)
+        m500c = convert_m_delta(halo_model.cosmology, m_internal, z, mass_def_old, mass_def_500c, c_old=c_old)
     
         # Compute r_delta (input) and r_500c (for GNFW scaling)
-        h = H0 / 100.0
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m / h, z)  # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
         r_500c = mass_def_500c.r_delta(halo_model.cosmology, m500c / h, z)  # (Nm, Nz)
     
         # Convert input x = r/r_delta to x_500c = r/r_500c
@@ -477,7 +477,7 @@ class B12PressureProfile(PressureProfile):
         x : float or jnp.ndarray
             Dimensionless radius :math:`x = r / r_\\Delta`.
         m : float or jnp.ndarray
-            Halo mass or masses in the halo model's native mass definition.
+            Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift(s).
 
@@ -490,16 +490,16 @@ class B12PressureProfile(PressureProfile):
         h = cparams["h"]
         alpha, gamma = 1.0, -0.3
         x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m_internal = m * h
     
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
         mass_def_200c = MassDefinition(200, "critical")
-        c_old = halo_model.concentration.c_delta(halo_model, m, z)
-        m200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old)
+        c_old = halo_model.concentration.c_delta(halo_model, m_internal, z)
+        m200c = convert_m_delta(halo_model.cosmology, m_internal, z, mass_def_old, mass_def_200c, c_old=c_old)
     
         # Compute r_delta (input) and r_200c (for B12 scaling)
-        h = cparams["h"]
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m / h, z)  # (Nm, Nz)
+        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
         r_200c = mass_def_200c.r_delta(halo_model.cosmology, m200c / h, z)  # (Nm, Nz)
     
         # Rescale x: x_200c = x * (r_delta / r_200c)

@@ -69,8 +69,8 @@ class S12CIBProfile(CIBProfile):
         -\\frac{\\left(\\log_{10} M - \\log_{10} M_{\\mathrm{eff}}\\right)^2}
         {2 \\sigma_{LM}^2}
         \\right]
-            jnp.ndarray
-                Fourier-space profile with shape :math:`(N_k, N_M, N_z)`.
+
+    .. math::
 
         \\Phi(z) =
         \\begin{cases}
@@ -114,25 +114,25 @@ class S12CIBProfile(CIBProfile):
     nu : float
         Observed frequency :math:`\\nu` in GHz.
     L0 : float
-        Luminosity normalization :math:`L_0`.
+        Luminosity normalization :math:`L_0` in :math:`\\mathrm{Jy}\\,\\mathrm{Mpc}^2 / M_\\odot`.
     alpha : float
-        Redshift scaling exponent :math:`\\alpha` of the dust temperature.
+        Dimensionless redshift scaling exponent :math:`\\alpha` of the dust temperature.
     beta : float
-        Low-frequency spectral slope :math:`\\beta` of the SED.
+        Dimensionless low-frequency spectral slope :math:`\\beta` of the SED.
     gamma : float
-        High-frequency spectral slope :math:`\\gamma` of the SED.
+        Dimensionless high-frequency spectral slope :math:`\\gamma` of the SED.
     T0 : float
         Dust temperature normalization :math:`T_0` at :math:`z = 0` in Kelvin.
     M_eff : float
-        Characteristic halo mass :math:`M_{\\mathrm{eff}}` of peak emissivity.
+        Characteristic halo mass :math:`M_{\\mathrm{eff}}` of peak emissivity in physical :math:`M_\\odot`.
     sigma2_LM : float
-        Log-normal variance :math:`\\sigma_{LM}^2` entering :math:`\\Sigma(M)`.
+        Dimensionless log-normal variance :math:`\\sigma_{LM}^2` entering :math:`\\Sigma(M)`.
     delta : float
-        Redshift evolution exponent :math:`\\delta` in :math:`\\Phi(z)`.
+        Dimensionless redshift evolution exponent :math:`\\delta` in :math:`\\Phi(z)`.
     z_p : float
-        Pivot redshift :math:`z_p` above which :math:`\\Phi(z)` saturates.
+        Dimensionless pivot redshift :math:`z_p` above which :math:`\\Phi(z)` saturates.
     M_min : float
-        Minimum halo mass :math:`M_{\\min}` entering the central and satellite terms.
+        Minimum halo mass :math:`M_{\\min}` entering the central and satellite terms in physical :math:`M_\\odot`.
     """
     def __init__(self, nu, L0=6.4e-8, alpha=0.36, beta=1.75, gamma=1.7,
                  T0=24.4, M_eff=10**12.6, sigma2_LM=0.5, 
@@ -407,7 +407,7 @@ class S12CIBProfile(CIBProfile):
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
         h = halo_model.cosmology.H0 / 100
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m * h, z)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) 
 
@@ -644,23 +644,25 @@ class M21CIBProfile(CIBProfile):
     nu : float
         Observed frequency :math:`\\nu` in GHz.
     eta_max : float
-        Maximum star-formation efficiency :math:`\\eta_{\\max}`.
+        Dimensionless maximum star-formation efficiency :math:`\\eta_{\\max}`.
     z_c : float
-        Redshift pivot :math:`z_c` controlling the time-dependent width term.
+        Dimensionless redshift pivot :math:`z_c` controlling the time-dependent width term.
     tau : float
-        Width-evolution parameter :math:`\\tau`.
+        Dimensionless width-evolution parameter :math:`\\tau`.
     f_sub : float
-        Subhalo luminosity fraction :math:`f_{\\mathrm{sub}}`.
+        Dimensionless subhalo luminosity fraction :math:`f_{\\mathrm{sub}}`.
     M_min : float
-        Minimum halo mass :math:`M_{\\min}` contributing to the emissivity.
+        Minimum halo mass :math:`M_{\\min}` contributing to the emissivity in physical :math:`M_\\odot`.
     M_eff : float
-        Characteristic mass :math:`M_{\\mathrm{eff}}` of peak star-formation efficiency.
+        Characteristic mass :math:`M_{\\mathrm{eff}}` of peak star-formation efficiency in physical :math:`M_\\odot`.
     sigma2_LM : float
-        Variance parameter :math:`\\sigma_{LM}^2` entering the efficiency model.
+        Dimensionless variance parameter :math:`\\sigma_{LM}^2` entering the efficiency model.
     s_nu : tuple
         Tabulated spectral template :math:`(z, \\nu, S_\\nu)` used to interpolate
-        :math:`S_\\nu(z, \\nu)`. If not provided, it is read from the default
-        auxiliary data files.
+        :math:`S_\\nu(z, \\nu)`, with redshift grid :math:`z` dimensionless,
+        frequency grid :math:`\\nu` in GHz, and template values :math:`S_\\nu`
+        in the luminosity-per-SFR units assumed by the Maniyar model. If not
+        provided, it is read from the default auxiliary data files.
     """
     def __init__(self, nu, eta_max=0.4028, z_c=1.5, tau=1.204, f_sub=0.134, 
                  M_min=10**11.5, M_eff=10**12.6, sigma2_LM=0.5, s_nu=None):
@@ -927,7 +929,7 @@ class M21CIBProfile(CIBProfile):
 
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
         h = halo_model.cosmology.H0 / 100
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m * h, z)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
         return j_bar * h**3 / (4 * jnp.pi) * maniyar_factor
 

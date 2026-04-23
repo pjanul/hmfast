@@ -120,14 +120,14 @@ class Cosmology:
         thetai_scf=None, r=None, T_cmb=None, deg_ncdm=None):
         """
         Return a new Cosmology instance with updated parameters.
-    
+
         Each parameter defaults to None. Only those not None are updated.
-    
+
         Parameters
         ----------
         H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio, m_ncdm, N_ur, w0_fld, fEDE, log10z_c, thetai_scf, r, T_cmb, deg_ncdm : float or None
             Cosmological parameters to update.
-    
+
         Returns
         -------
         Cosmology
@@ -580,7 +580,7 @@ class Cosmology:
         pk_log = emu.predictions(params)
         pk = 10.0 ** pk_log * pk_power_fac
 
-        return k_grid, pk
+        return k_grid , pk
 
     # ------------------------------------------------------------------
     # CMB

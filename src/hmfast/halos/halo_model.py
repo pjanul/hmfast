@@ -148,7 +148,7 @@ class HaloModel:
         Parameters
         ----------
         m : array-like
-            Mass grid.
+            Halo mass grid in physical ``M_sun``.
         z : array-like
             Redshift(s).
 
@@ -163,14 +163,15 @@ class HaloModel:
         """
        
         m = jnp.atleast_1d(m)
-        logm = jnp.log(m)
         cparams = self.cosmology._cosmo_params()
         h = self.cosmology.H0 / 100.0
+        m_internal = m * h
+        logm = jnp.log(m_internal)
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"] / h**2   # internal halo-model normalization
-        m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
+        m_over_rho_mean = (m_internal / rho_mean_0)[:, None]  # (Nm, 1)
 
 
-        # Compute dn/dlnM and bias for each z using physical masses.
+        # Public HMF and bias interfaces use physical masses.
         dn_dlnm = self.halo_mass_function.halo_mass_function(self, m=m, z=z)  # (Nm, Nz)
         b1 = self.halo_bias.halo_bias(self, m=m, z=z, order=1)      # (Nm, Nz)
         b2 = self.halo_bias.halo_bias(self, m=m, z=z, order=2)      # (Nm, Nz)
@@ -181,7 +182,7 @@ class HaloModel:
         I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
     
         # Apply formulas
-        m_min =  m[0]
+        m_min =  m_internal[0]
         n_min =  (1.0 - I0) * rho_mean_0 / m_min
         b1_min = (1.0 - I1) * rho_mean_0 / m_min / n_min
         b2_min = -I2 * rho_mean_0 / m_min / n_min
@@ -215,7 +216,7 @@ class HaloModel:
         z : array-like
             Redshift grid.
         k_damp : float, default 0.01
-            Damping scale for small-scale power.
+            Damping wavenumber in Mpc^-1 for the low-k suppression factor.
 
         Returns
         -------
@@ -300,7 +301,7 @@ class HaloModel:
         z : array-like
             Redshift grid.
         k_damp : float, default 0.01
-            Damping scale for small-scale power.
+            Damping wavenumber in Mpc^-1 passed through to :meth:`pk_1h`.
 
         Returns
         -------

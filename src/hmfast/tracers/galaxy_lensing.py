@@ -185,19 +185,17 @@ class GalaxyLensingTracer(Tracer):
        
         # Cosmological constants
         H0 = cosmology.H0  # Hubble constant in km/s/Mpc
-        h = H0 / 100
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
 
-        # Compute comoving distance and Hubble parameter
-        chi_z = cosmology.angular_diameter_distance(z) * (1 + z) * h # Comoving distance in Mpc/h
-        H_z = cosmology.hubble_parameter(z)   # Hubble parameter in km/s/Mpc
+        # Compute comoving distance in physical Mpc.
+        chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
     
         I_s = self._I_s(cosmology, z) 
     
         # Compute the CMB lensing kernel
         W_kappa_g =  (
             (3.0 / 2.0) * Omega_m * 
-            (H0/c_km_s)**2 / h**2 *
+            (H0/c_km_s)**2 *
             (1 + z) / chi_z  *
             I_s 
         ) 

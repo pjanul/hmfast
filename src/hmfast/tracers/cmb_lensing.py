@@ -93,20 +93,18 @@ class CMBLensingTracer(Tracer):
         # Cosmological constants
         H0 = cosmology.H0    # Hubble constant in km/s/Mpc
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
-        c_km_s = Const._c_ / 1e3  # Speed of light in km/s        
-        h = H0 / 100
+        c_km_s = Const._c_ / 1e3  # Speed of light in km/s
         
-        # Compute comoving distance and Hubble parameter
-        chi_z = cosmology.angular_diameter_distance(z) * (1 + z) * h # Comoving distance in Mpc/h
-        H_z = cosmology.hubble_parameter(z)   # Hubble parameter in km/s/Mpc
+        # Compute comoving distances in physical Mpc.
+        chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
         
-        # Comoving distance to the last scattering surface (z ~ 1090) in Mpc/h
-        chi_z_cmb = cosmology.derived_parameters()["chi_star"] * h  
+        # Comoving distance to the last scattering surface (z ~ 1090) in physical Mpc.
+        chi_z_cmb = cosmology.derived_parameters()["chi_star"]
         
         # Compute the CMB lensing kernel
         W_kappa_cmb =  (
             (3.0 / 2.0) * Omega_m * 
-            (H0/c_km_s)**2 / h**2 *
+            (H0/c_km_s)**2 *
             (1 + z) / chi_z  *
             ((chi_z_cmb - chi_z) / chi_z_cmb)
         )    

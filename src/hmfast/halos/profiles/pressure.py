@@ -104,7 +104,13 @@ class PressureProfile(HaloProfile):
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(m_val, z_val):
-            pressure_profile = jnp.squeeze(self.u_r(halo_model, x, m_val, z_val))  # remove extra axes
+            r_delta = halo_model.mass_definition.r_delta(
+                halo_model.cosmology,
+                jnp.atleast_1d(m_val),
+                jnp.atleast_1d(z_val),
+            )
+            r = x * jnp.squeeze(r_delta) * (1.0 + jnp.squeeze(jnp.atleast_1d(z_val)))
+            pressure_profile = jnp.squeeze(self.u_r(halo_model, r, m_val, z_val))
             return pressure_profile * x**0.5 * W_x  # shape (Nx,)
 
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
@@ -125,18 +131,18 @@ class GNFWPressureProfile(PressureProfile):
     """
     Electron pressure profile from `Nagai, Kravtsov & Vikhlinin (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...668....1N/abstract>`_.
 
-    The profile is evaluated as a function of the dimensionless radius
-    :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
-    the native :math:`500c` calibration mass and radius:
+    The profile is evaluated as a function of the comoving radius
+    :math:`r`, but its normalization and shape are defined using the native
+    :math:`500c` calibration mass and radius:
 
     .. math::
 
-        P_e(x, M, z) = P_{500c} \\, P_0
+        P_e(r, M, z) = P_{500c} \\, P_0
         \\left(c_{500} x_{500c}\\right)^{-\\gamma}
         \\left[1 + \\left(c_{500} x_{500c}\\right)^\\alpha\\right]^{(\\gamma-\\beta)/\\alpha}
         \\tag{1}
 
-    where :math:`x_{500c} = r / r_{500c} = x \\, r_\\Delta / r_{500c}` and
+    where :math:`x_{500c} = r / [(1+z) r_{500c}]` and
 
     .. math::
 
@@ -158,7 +164,7 @@ class GNFWPressureProfile(PressureProfile):
 
         u_\\ell(\\ell, M, z) =
         \\frac{4 \\pi (1+z) r_\\Delta}{\\ell_\\Delta^2}
-        \\int dx \\, x^2 \\, P_e(x, M, z)
+        \\int dx \\, x^2 \\, P_e\\!\\left((1+z) r_\\Delta x, M, z\\right)
         \\, \\frac{\\sin\\!\\left[(\\ell / \\ell_\\Delta) x\\right]}
         {(\\ell / \\ell_\\Delta) x}
         \\tag{3}
@@ -169,7 +175,7 @@ class GNFWPressureProfile(PressureProfile):
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / [(1+z) r_\\Delta]` used to tabulate the profile and define the Hankel transform.
     P0 : float
         Dimensionless gNFW normalization :math:`P_0`.
     c500 : float
@@ -257,7 +263,7 @@ class GNFWPressureProfile(PressureProfile):
 
         return self._tree_unflatten(treedef, new_leaves)
 
-    def u_r(self, halo_model, x, m, z):
+    def u_r(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
 
@@ -266,8 +272,8 @@ class GNFWPressureProfile(PressureProfile):
         halo_model : HaloModel
             Halo model providing the cosmology, mass-definition conversion, and halo
             radius.
-        x : float or jnp.ndarray
-            Dimensionless radius :math:`x = r / r_\\Delta`.
+        r : float or jnp.ndarray
+            Comoving radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -276,11 +282,11 @@ class GNFWPressureProfile(PressureProfile):
         Returns
         -------
         jnp.ndarray
-            Electron pressure profile with shape :math:`(N_x, N_M, N_z)`.
+            Electron pressure profile with shape :math:`(N_r, N_M, N_z)`.
         """
         H0 = halo_model.cosmology.H0
         P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = H0 / 100.0
     
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
@@ -289,12 +295,10 @@ class GNFWPressureProfile(PressureProfile):
         c_old = halo_model.concentration.c_delta(halo_model, m, z)
         m500c = convert_m_delta(halo_model.cosmology, m * h, z, mass_def_old, mass_def_500c, c_old=c_old)
     
-        # Compute r_delta (input) and r_500c (for GNFW scaling)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
         r_500c = mass_def_500c.r_delta(halo_model.cosmology, m500c / h, z)  # (Nm, Nz)
     
-        # Convert input x = r/r_delta to x_500c = r/r_500c
-        x_500c = x[:, None, None] * (r_delta[None, :, :] / r_500c[None, :, :])  # (Nx, Nm, Nz)
+        # Convert the comoving radius to the calibrated physical 500c coordinate.
+        x_500c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_500c[None, :, :])  # (Nr, Nm, Nz)
     
         # Compute normalization P_500c (with hydrostatic bias)
         h = H0 / 100.0
@@ -305,10 +309,10 @@ class GNFWPressureProfile(PressureProfile):
         P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
     
         # GNFW profile
-        scaled_x = c500 * x_500c  # (Nx, Nm, Nz)
+        scaled_x = c500 * x_500c  # (Nr, Nm, Nz)
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
     
-        return Pe  # shape: (Nx, Nm, Nz)
+        return Pe  # shape: (Nr, Nm, Nz)
 
 jax.tree_util.register_pytree_node(
     GNFWPressureProfile,
@@ -321,19 +325,19 @@ class B12PressureProfile(PressureProfile):
     """
     Electron pressure profile from `Battaglia et al. (2012) <https://ui.adsabs.harvard.edu/abs/2012ApJ...758...74B/abstract>`_.
 
-    The profile is evaluated as a function of the dimensionless radius
-    :math:`x = r / r_\\Delta`, but its normalization and shape are defined using
-    the native :math:`200c` calibration mass and radius:
+    The profile is evaluated as a function of the comoving radius
+    :math:`r`, but its normalization and shape are defined using the native
+    :math:`200c` calibration mass and radius:
 
     .. math::
 
-        P_e(x, M, z)
+        P_e(r, M, z)
         = P_{200c} \\, P_0
         \\left(\\frac{x_{200c}}{x_c}\\right)^\\gamma
         \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^\\alpha\\right]^{-\\beta}
         \\tag{1}
 
-    where :math:`x_{200c} = r / r_{200c} = x \\, r_\\Delta / r_{200c}`.
+    where :math:`x_{200c} = r / [(1+z) r_{200c}]`.
     In this implementation, :math:`\\alpha = 1` and :math:`\\gamma = -0.3`,
     and the remaining profile parameters follow the Battaglia scaling
 
@@ -354,7 +358,7 @@ class B12PressureProfile(PressureProfile):
 
         u_\\ell(\\ell, M, z) =
         \\frac{4 \\pi (1+z) r_\\Delta}{\\ell_\\Delta^2}
-        \\int dx \\, x^2 \\, P_e(x, M, z)
+        \\int dx \\, x^2 \\, P_e\\!\\left((1+z) r_\\Delta x, M, z\\right)
         \\, \\frac{\\sin\\!\\left[(\\ell / \\ell_\\Delta) x\\right]}
         {(\\ell / \\ell_\\Delta) x}
         \\tag{3}
@@ -365,7 +369,7 @@ class B12PressureProfile(PressureProfile):
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / [(1+z) r_\\Delta]` used to tabulate the profile and define the Hankel transform.
     A_P0 : float
         Amplitude :math:`A_{P_0}` of the pressure normalization scaling.
     A_xc : float
@@ -462,7 +466,7 @@ class B12PressureProfile(PressureProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
-    def u_r(self, halo_model, x, m, z):
+    def u_r(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
 
@@ -471,8 +475,8 @@ class B12PressureProfile(PressureProfile):
         halo_model : HaloModel
             Halo model providing the cosmology, mass-definition conversion, and halo
             radius.
-        x : float or jnp.ndarray
-            Dimensionless radius :math:`x = r / r_\\Delta`.
+        r : float or jnp.ndarray
+            Comoving radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -481,12 +485,12 @@ class B12PressureProfile(PressureProfile):
         Returns
         -------
         jnp.ndarray
-            Electron pressure profile with shape :math:`(N_x, N_M, N_z)`.
+            Electron pressure profile with shape :math:`(N_r, N_M, N_z)`.
         """
         cparams = halo_model.cosmology._cosmo_params()
         h = cparams["h"]
         alpha, gamma = 1.0, -0.3
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
@@ -494,12 +498,10 @@ class B12PressureProfile(PressureProfile):
         c_old = halo_model.concentration.c_delta(halo_model, m, z)
         m200c = convert_m_delta(halo_model.cosmology, m * h, z, mass_def_old, mass_def_200c, c_old=c_old)
     
-        # Compute r_delta (input) and r_200c (for B12 scaling)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)  # (Nm, Nz)
         r_200c = mass_def_200c.r_delta(halo_model.cosmology, m200c / h, z)  # (Nm, Nz)
     
-        # Rescale x: x_200c = x * (r_delta / r_200c)
-        x_200c = x[:, None, None] * (r_delta[None, :, :] / r_200c[None, :, :])  # (Nx, Nm, Nz)
+        # Convert the comoving radius to the calibrated physical 200c coordinate.
+        x_200c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_200c[None, :, :])  # (Nr, Nm, Nz)
         m200c_b = m200c[None, :, None]
         z_b = z[None, None, :]
         mass_ratio = (m200c_b / h) / 1e14

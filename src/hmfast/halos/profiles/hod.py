@@ -264,16 +264,15 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         Compute the satellite and central pieces of the galaxy HOD tracer.
         """
 
-        h = halo_model.cosmology.H0 / 100.0
-
+        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
         ng = self.ng_bar(halo_model, m, z) * h**3
 
-        _, u_m = self._u_k_matter(halo_model, k, m, z)
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)  
 
         sat_term = (1/ng) * (Ns[None, :, None] * u_m)
-        cen_term = (1/ng) * Nc[None, :, None]**0
+        cen_term = (1/ng) * (Nc[None, :, None]**0)
     
         return sat_term, cen_term
 
@@ -305,18 +304,14 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        h = halo_model.cosmology.H0 / 100.0
-
+        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
         ng = self.ng_bar(halo_model, m, z) * h**3
 
-        u_m = self._u_r_matter(halo_model, r, m, z)
+        u_m = self._u_r_nfw(halo_model, r, m, z)
 
-        sat_term = (1 / ng[None, None, :]) * (Ns[None, :, None] * u_m)
-        cen_term = (1 / ng[None, None, :]) * Nc[None, :, None]
-
-        return cen_term + sat_term
+        return (1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
 
 
     def u_k(self, halo_model, k, m, z):
@@ -343,23 +338,16 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         jnp.ndarray
             Fourier-space profile.
         """
-
-        k = jnp.atleast_1d(k)
-        m = jnp.atleast_1d(m)
-        z = jnp.atleast_1d(z)
-
-        h = halo_model.cosmology.H0 / 100.0
-
+       
+        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
         ng = self.ng_bar(halo_model, m, z) * h**3
 
-        _, u_m = self._u_k_matter(halo_model, k, m, z)
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
     
         u_k = (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
         return u_k
-
-       
         
 
 jax.tree_util.register_pytree_node(

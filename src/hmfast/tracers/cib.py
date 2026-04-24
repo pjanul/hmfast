@@ -57,16 +57,9 @@ class CIBTracer(Tracer):
         return self._tree_unflatten(aux, flat)
     
     def kernel(self, cosmology, z):
-        
-        h = cosmology.H0 
         chi = cosmology.angular_diameter_distance(z) * (1 + z)
 
-        # If Shang, apply the 1/(a * chi^2) factor. If Maniyar, return 1.0.
-        is_shang = isinstance(self.profile, S12CIBProfile)
-        s_nu_factor = jnp.where(is_shang, 1.0 / ((1.0 + z) * chi**2), 1.0)
-        
-        
-        return s_nu_factor
+        return 1.0 / ((1.0 + z) * chi**2)
 
 
 jax.tree_util.register_pytree_node(

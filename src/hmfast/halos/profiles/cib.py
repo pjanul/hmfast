@@ -459,7 +459,7 @@ class S12CIBProfile(CIBProfile):
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
-        _, u_m = self._u_k_matter(halo_model, k, m, z)
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
@@ -494,7 +494,7 @@ class S12CIBProfile(CIBProfile):
 
         ls = self.l_sat(halo_model, m, z)
         lc = self.l_cen(halo_model, m, z)
-        u_m = self._u_r_matter(halo_model, r, m, z)
+        u_m = self._u_r_nfw(halo_model, r, m, z)
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
         cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
@@ -819,10 +819,12 @@ class M21CIBProfile(CIBProfile):
             Galaxy luminosity :math:`L_\\nu^{\\mathrm{gal}}(M, z)` with shape
             :math:`(N_M, N_z)`.
         """
-        # Maniyar model logic: 4pi * s_nu * SFR
+        # Convert the Maniyar flux-per-SFR template into the same
+        # luminosity-like units used by the Shang model.
+        chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z)
         s_nu = self._s_nu_interp(z, self.nu)[None, :]
         sfr = self._sfr(halo_model, m, z)
-        return 4 * jnp.pi * s_nu * sfr
+        return 4 * jnp.pi * s_nu * sfr * ((1 + z)[None, :] * chi[None, :]**2)
 
 
 
@@ -919,10 +921,6 @@ class M21CIBProfile(CIBProfile):
         # Get the halo mass function dn/dlnm 
         dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z) # Shape: (Nm, Nz)
 
-        # Correct for Maniyar if needed
-        chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
-        maniyar_factor = (1+z) * chi**2 #if self.cib_model == 'maniyar' else 1
-        
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
@@ -930,8 +928,8 @@ class M21CIBProfile(CIBProfile):
         # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
         h = halo_model.cosmology.H0 / 100
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
-        
-        return j_bar * h**3 / (4 * jnp.pi) * maniyar_factor
+
+        return j_bar * h**3 / (4 * jnp.pi)
 
 
     def monopole(self, halo_model, m, z):
@@ -969,7 +967,6 @@ class M21CIBProfile(CIBProfile):
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
 
         cparams = halo_model.cosmology._cosmo_params()
-        nu = self.nu
        
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
@@ -980,7 +977,7 @@ class M21CIBProfile(CIBProfile):
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
-        _, u_m = self._u_k_matter(halo_model, k, m, z)
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
@@ -1015,7 +1012,7 @@ class M21CIBProfile(CIBProfile):
 
         ls = self.l_sat(halo_model, m, z)
         lc = self.l_cen(halo_model, m, z)
-        u_m = self._u_r_matter(halo_model, r, m, z)
+        u_m = self._u_r_nfw(halo_model, r, m, z)
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
         cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]

@@ -41,11 +41,11 @@ class HaloProfile:
         return False
 
 
-    def _u_r_matter(self, halo_model, r, m, z):
+    def _u_r_nfw(self, halo_model, r, m, z):
         """
         Calculate the normalized real-space NFW matter profile.
 
-        This is the real-space analogue of ``_u_k_matter`` and returns the
+        This is the real-space analogue of ``_u_k_nfw`` and returns the
         unit-mass NFW profile sampled on a radial grid.
 
         Parameters
@@ -79,7 +79,7 @@ class HaloProfile:
         return prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2)
 
     
-    def _u_k_matter(self, halo_model, k, m, z):
+    def _u_k_nfw(self, halo_model, k, m, z):
         """
         Calculate :math:`u^m(k, M, z)` for wavenumbers in Mpc^-1
         supporting independent dimensions for ``k``, ``m``, and ``z``.

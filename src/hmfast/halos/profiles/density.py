@@ -13,6 +13,12 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 class DensityProfile(HaloProfile):
     pass
+
+    def _r_from_x(self, halo_model, x, m, z):
+        """
+        Convert the profile's internal dimensionless radial grid to comoving Mpc.
+        """
+        raise NotImplementedError
     
     def u_k(self, halo_model, k, m, z):
         """
@@ -88,7 +94,7 @@ class DensityProfile(HaloProfile):
         Parameters
         ----------
         x : arrat like
-            Radius r scaled by the scale radius x = r / r_s
+            Dimensionless radial grid used to tabulate the profile.
         z : float or array_like
             Redshift(s).
         m : float or array_like
@@ -102,15 +108,11 @@ class DensityProfile(HaloProfile):
         Returns ell, u_ell_m
     
         """
-
-       
-        cparams = halo_model.cosmology._cosmo_params()
-        h = cparams['h']
-       
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(m_val, z_val):
-            profile = jnp.squeeze(self.u_r(halo_model, x, m_val, z_val))  # remove extra axes
+            r = self._r_from_x(halo_model, x, m_val, z_val)
+            profile = jnp.squeeze(self.u_r(halo_model, r, m_val, z_val))
             return profile * x**0.5 * W_x  # shape (Nx,)
 
         hankel_integrand = jax.vmap(jax.vmap(single_m_z, in_axes=(None, 0)), in_axes=(0, None) )(m, z)
@@ -128,18 +130,21 @@ class B16DensityProfile(DensityProfile):
     """
     Electron density profile from `Battaglia et al. (2016) <https://ui.adsabs.harvard.edu/abs/2016JCAP...08..058B/abstract>`_.
 
-    The profile is written in generalized NFW form as
+    The profile is evaluated as a function of the comoving radius
+    :math:`r`, while its shape is defined using the physical
+    :math:`200c` radius:
 
     .. math::
 
         \\rho_{\\mathrm{gas,free}}(r)
         = f_b f_{\\mathrm{free}} \\rho_{\\mathrm{crit}}(z) \\, C
-        \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\gamma}
-        \\left[1 + \\left(\\frac{r}{x_c r_{200c}}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}}
+        \\left(\\frac{x_{200c}}{x_c}\\right)^{\\gamma}
+        \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}}
         \\tag{1}
 
-    where :math:`r_{200c}` is the characteristic radius associated with the
-    overdensity mass :math:`M_{200c}`. With :math:`x_c = 0.5` and
+    where :math:`x_{200c} = r / [(1+z) r_{200c}]` and :math:`r_{200c}` is the
+    characteristic radius associated with the overdensity mass
+    :math:`M_{200c}`. With :math:`x_c = 0.5` and
     :math:`\\gamma = -0.2` fixed, the mass- and redshift-dependent parameters
     obey
 
@@ -164,7 +169,7 @@ class B16DensityProfile(DensityProfile):
         {(k r_\\Delta) x}
         \\tag{3}
 
-    where :math:`x = r / r_\\Delta` and :math:`\\mu_e = 1.14`, while
+    where :math:`x = r / [(1+z) r_\\Delta]` and :math:`\\mu_e = 1.14`, while
     :math:`f_{\\mathrm{free}} = 1` is included in the real-space density profile
     of Eq. (1) rather than as an additional Fourier-space prefactor, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
@@ -172,7 +177,7 @@ class B16DensityProfile(DensityProfile):
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / [(1+z) r_\\Delta]` used to tabulate the profile and define the Hankel transform.
     A_rho0 : float
         Amplitude :math:`A_C` of the density normalization scaling.
     A_alpha : float
@@ -291,9 +296,17 @@ class B16DensityProfile(DensityProfile):
         if key not in presets:
             raise ValueError(f"Model {model_key} not recognized. Choose 'agn' or 'shock'.")
         return presets[key]
+
+    def _r_from_x(self, halo_model, x, m, z):
+        r_200c = halo_model.mass_definition.r_delta(
+            halo_model.cosmology,
+            jnp.atleast_1d(m),
+            jnp.atleast_1d(z),
+        )
+        return x * jnp.squeeze(r_200c) * (1.0 + jnp.squeeze(jnp.atleast_1d(z)))
         
 
-    def u_r(self, halo_model, x, m, z):
+    def u_r(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
 
@@ -301,8 +314,8 @@ class B16DensityProfile(DensityProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
-        x : float or jnp.ndarray
-            Dimensionless radius corresponding to :math:`r / r_{200c}`.
+        r : float or jnp.ndarray
+            Comoving radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -322,8 +335,11 @@ class B16DensityProfile(DensityProfile):
         xc = 0.5
         
         # Ensure 1D and setup broadcasting shapes
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m),  jnp.atleast_1d(z)  # (Nx,)
-        x_b, m_b, z_b = x[:, None, None], m[None, :, None], z[None, None, :]      # (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
+        r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m),  jnp.atleast_1d(z)
+        r_b, m_b, z_b = r[:, None, None], m[None, :, None], z[None, None, :]
+
+        r_200c = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        x_200c = r_b / ((1.0 + z_b) * r_200c[None, :, :])
         
         # Critical density broadcast to (1, 1, Nz) in physical units.
         rho_crit_z = jnp.atleast_1d(halo_model.cosmology.critical_density(z))[None, None, :]
@@ -338,7 +354,7 @@ class B16DensityProfile(DensityProfile):
         beta = self.A_beta * mass_ratio**self.alpha_m_beta * (1 + z_b)**self.alpha_z_beta 
         
         # Profile Shape Function (Nx, Nm, Nz)
-        p_x = (x_b / xc)**gamma * (1 + (x_b / xc)**alpha)**(-(beta + gamma) / alpha)
+        p_x = (x_200c / xc)**gamma * (1 + (x_200c / xc)**alpha)**(-(beta + gamma) / alpha)
         
         # Final result: M_sun / Mpc^3.
         rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x 
@@ -357,7 +373,8 @@ class NFWDensityProfile(DensityProfile):
     """
     Electron density profile based on `Navarro, Frenk & White (1997) <https://ui.adsabs.harvard.edu/abs/1997ApJ...490..493N/abstract>`_.
 
-    The profile is obtained by scaling the NFW matter density by the cosmic
+    The profile is evaluated as a function of the comoving radius
+    :math:`r` and is obtained by scaling the NFW matter density by the cosmic
     baryon fraction,
 
     .. math::
@@ -370,7 +387,7 @@ class NFWDensityProfile(DensityProfile):
     .. math::
 
         \\rho_{\\mathrm{NFW}}(r)
-        = \\frac{\\rho_s}{(r/r_s) \\left(1+r/r_s\\right)^2}
+        = \\frac{\\rho_s}{x_s \\left(1+x_s\\right)^2}
         \\tag{2}
 
     .. math::
@@ -379,7 +396,7 @@ class NFWDensityProfile(DensityProfile):
         \\left[\\ln(1+c_\\Delta) - \\frac{c_\\Delta}{1+c_\\Delta}\\right]^{-1}
         \\tag{3}
 
-    with :math:`r_s = r_\\Delta / c_\\Delta`.
+    with :math:`x_s = r / [(1+z) r_s]` and :math:`r_s = r_\\Delta / c_\\Delta`.
 
     The projected Fourier-space profile is evaluated as
 
@@ -393,14 +410,14 @@ class NFWDensityProfile(DensityProfile):
         {(k r_\\Delta) x}
         \\tag{4}
 
-    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
+    where :math:`x = r / [(1+z) r_s]`, :math:`\\mu_e = 1.14`,
     :math:`f_{\\mathrm{free}} = 1`, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_s` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / [(1+z) r_s]` used to tabulate the profile and define the Hankel transform.
     """
     def __init__(self, x=None):
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(1.0), 256)
@@ -419,7 +436,18 @@ class NFWDensityProfile(DensityProfile):
         self._hankel = HankelTransform(self._x, nu=0.5)
         
 
-    def u_r(self, halo_model, x, m, z):
+    def _r_from_x(self, halo_model, x, m, z):
+        cparams = halo_model.cosmology._cosmo_params()
+        r_delta = halo_model.mass_definition.r_delta(
+            halo_model.cosmology,
+            jnp.atleast_1d(m),
+            jnp.atleast_1d(z),
+        ) * cparams["h"]
+        c_delta = halo_model.concentration.c_delta(halo_model, jnp.atleast_1d(m), jnp.atleast_1d(z))
+        r_s = jnp.squeeze(r_delta / c_delta)
+        return x * r_s * (1.0 + jnp.squeeze(jnp.atleast_1d(z))) / cparams["h"]
+
+    def u_r(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
 
@@ -427,8 +455,8 @@ class NFWDensityProfile(DensityProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology, halo radius, and concentration model.
-        x : float or jnp.ndarray
-            Dimensionless radius :math:`x = r / r_s`.
+        r : float or jnp.ndarray
+            Comoving radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -437,10 +465,10 @@ class NFWDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Electron-density profile with shape :math:`(N_x, N_M, N_z)`.
+            Electron-density profile with shape :math:`(N_r, N_M, N_z)`.
         """
         cparams = halo_model.cosmology._cosmo_params()
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         m_internal = m * cparams["h"]
        
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
@@ -449,14 +477,14 @@ class NFWDensityProfile(DensityProfile):
         r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * cparams["h"]
         c_delta = halo_model.concentration.c_delta(halo_model, m, z)
         r_s = r_delta / c_delta # (Nm, Nz)
+        x_s = r[:, None, None] * cparams["h"] / ((1.0 + z[None, None, :]) * r_s[None, :, :])
         
         # Calculate rho_s
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta) # (Nm, Nz)
         rho_s = m_internal[:, None] / (4 * jnp.pi * r_s**3 * m_nfw)    # (Nm, Nz)
         
         # Final broadcast to (Nx, Nm, Nz)
-        # x needs to be (Nx, 1, 1) and rho_s (1, Nm, Nz)
-        rho_gas = f_b * rho_s[None, :, :] / (x[:, None, None] * (1 + x[:, None, None])**2)
+        rho_gas = f_b * rho_s[None, :, :] / (x_s * (1 + x_s)**2)
         
         return rho_gas
 
@@ -468,15 +496,16 @@ class BCMDensityProfile(DensityProfile):
     Electron density profile from `Schneider et al. (2019) <https://ui.adsabs.harvard.edu/abs/2019JCAP...03..020S/abstract>`_, 
     also known as the Baryon Correction Model (BCM).
 
-    The profile is evaluated using the virial radius and dimensionless radius
-    :math:`x = r / r_{\\mathrm{vir}}`:
+    The profile is evaluated as a function of the comoving radius
+    :math:`r`, with shape defined relative to the physical virial radius
+    through :math:`x_{\\mathrm{vir}} = r / [(1+z) r_{\\mathrm{vir}}]`:
 
     .. math::
 
-        \\rho_{\\mathrm{gas}}(x, M, z)
+        \\rho_{\\mathrm{gas}}(r, M, z)
         = \\frac{f_b - f_\\star(M)}
-        {\\left(1 + 10 x\\right)^{\\beta_M(M, z)}
-        \\left[1 + \\left(\\frac{x}{\\theta_{\\mathrm{ej}}}\\right)^\\gamma\\right]^{(\\delta - \\beta_M(M, z))/\\gamma}}
+        {\\left(1 + 10 x_{\\mathrm{vir}}\\right)^{\\beta_M(M, z)}
+        \\left[1 + \\left(\\frac{x_{\\mathrm{vir}}}{\\theta_{\\mathrm{ej}}}\\right)^\\gamma\\right]^{(\\delta - \\beta_M(M, z))/\\gamma}}
         \\tag{1}
 
     where
@@ -513,14 +542,14 @@ class BCMDensityProfile(DensityProfile):
         {(k r_\\Delta) x}
         \\tag{5}
 
-    where :math:`x = r / r_\\Delta`, :math:`\\mu_e = 1.14`,
+    where :math:`x = r / [(1+z) r_\\Delta]`, :math:`\\mu_e = 1.14`,
     :math:`f_{\\mathrm{free}} = 1`, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_{\\mathrm{vir}}` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / [(1+z) r_{\\mathrm{vir}}]` used to tabulate the profile and define the Hankel transform.
     log10Mc : float
         Characteristic mass scale :math:`\\log_{10} M_c` controlling the gas fraction suppression.
     theta_ej : float
@@ -612,7 +641,15 @@ class BCMDensityProfile(DensityProfile):
         return self._tree_unflatten(treedef, new_leaves)
 
 
-    def u_r(self, halo_model, x, m, z):
+    def _r_from_x(self, halo_model, x, m, z):
+        r_vir = MassDefinition("vir", "critical").r_delta(
+            halo_model.cosmology,
+            jnp.atleast_1d(m),
+            jnp.atleast_1d(z),
+        )
+        return x * jnp.squeeze(r_vir) * (1.0 + jnp.squeeze(jnp.atleast_1d(z)))
+
+    def u_r(self, halo_model, r, m, z):
         """
         Compute the gas-density profile.
 
@@ -620,8 +657,8 @@ class BCMDensityProfile(DensityProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology and virial radius.
-        x : float or jnp.ndarray
-            Dimensionless radius :math:`x = r / r_{\\mathrm{vir}}`.
+        r : float or jnp.ndarray
+            Comoving radius or radii in Mpc.
         m : float or jnp.ndarray
             Halo mass or masses in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
@@ -630,20 +667,20 @@ class BCMDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Gas-density profile with shape :math:`(N_x, N_M, N_z)`.
+            Gas-density profile with shape :math:`(N_r, N_M, N_z)`.
         """
        
         cparams = halo_model.cosmology._cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Broadcasting shapes: (Nx, 1, 1), (1, Nm, 1), (1, 1, Nz)
-        x, m, z = jnp.atleast_1d(x), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         m_internal = m * cparams["h"]
-        xb, mb, zb = x[:, None, None], m_internal[None, :, None], z[None, None, :]
+        rb, mb, zb = r[:, None, None], m_internal[None, :, None], z[None, None, :]
         
         # This model is calibrated for the virial radius 
         r_vir = MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z)
-        r_asked = xb * r_vir
+        x_vir = rb / ((1.0 + zb) * r_vir[None, :, :])
         
         # Redshift Dependent Mc (Matching your C logic)
         mc_z_log = self.log10Mc * (1. + zb)**self.nu_log10Mc
@@ -660,10 +697,10 @@ class BCMDensityProfile(DensityProfile):
         beta_m = 3. * m_ratio_mu / (1. + m_ratio_mu)
         
         # Denominator 1: Large scale bound gas
-        denom1 = (1. + 10. * r_asked / r_vir)**beta_m
+        denom1 = (1. + 10. * x_vir)**beta_m
         
         # Denominator 2: Ejected gas / transition,
-        scaled_r = r_asked / (self.theta_ej * r_vir)
+        scaled_r = x_vir / self.theta_ej
         denom2 = (1. + (scaled_r)**self.gamma)**((self.delta - beta_m) / self.gamma)
     
         

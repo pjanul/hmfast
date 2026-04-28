@@ -15,12 +15,12 @@ class GalaxyHODProfile(HaloProfile):
 
 
 
-class StandardGalaxyHODProfile(GalaxyHODProfile):
+class Z07GalaxyHODProfile(GalaxyHODProfile):
     """
-    General halo occupation distribution (HOD) profile following
-    `Zheng et al. (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...667..760Z/abstract>`_
-    and
-    `Zehavi et al. (2011) <https://ui.adsabs.harvard.edu/abs/2011ApJ...736...59Z/abstract>`_.
+    HOD profile from `Zheng et al. (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...667..760Z/abstract>`_,
+    generalized to match implementations such as
+    `Zehavi et al. (2011) <https://ui.adsabs.harvard.edu/abs/2011ApJ...736...59Z/abstract>`_
+    and related extensions.
 
     In this model, the real-space galaxy profile is written as
 
@@ -131,7 +131,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
 
         Returns
         -------
-        StandardGalaxyHODProfile
+        Z07GalaxyHODProfile
             New profile instance with updated parameters.
         """
         leaves, treedef = self._tree_flatten()
@@ -353,7 +353,7 @@ class StandardGalaxyHODProfile(GalaxyHODProfile):
         
 
 jax.tree_util.register_pytree_node(
-    StandardGalaxyHODProfile,
+    Z07GalaxyHODProfile,
     lambda obj: obj._tree_flatten(),
-    lambda aux_data, children: StandardGalaxyHODProfile._tree_unflatten(aux_data, children)
+    lambda aux_data, children: Z07GalaxyHODProfile._tree_unflatten(aux_data, children)
 )

@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from hmfast.tracers.base_tracer import Tracer
-from hmfast.halos.profiles import GalaxyHODProfile, StandardGalaxyHODProfile
+from hmfast.halos.profiles import GalaxyHODProfile, Z07GalaxyHODProfile
 from hmfast.download import get_default_data_path
 
 # Ensure high precision for cosmological integrations
@@ -24,7 +24,7 @@ class GalaxyHODTracer(Tracer):
     _required_profile_type = GalaxyHODProfile
 
     def __init__(self, profile=None, dndz=None):        
-        super().__init__(profile=profile or StandardGalaxyHODProfile())
+        super().__init__(profile=profile or Z07GalaxyHODProfile())
         
         if dndz is None:
             dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "normalised_dndz_cosmos_0.txt")

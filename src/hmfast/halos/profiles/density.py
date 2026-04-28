@@ -32,9 +32,8 @@ class B16DensityProfile(DensityProfile):
         \\left[1 + \\left(\\frac{x_{200c}}{x_c}\\right)^{\\alpha}\\right]^{-\\frac{\\beta+\\gamma}{\\alpha}}
         \\tag{1}
 
-    where :math:`x_{200c} = r / [(1+z) r_{200c}]` and :math:`r_{200c}` is the
-    characteristic radius associated with the overdensity mass
-    :math:`M_{200c}`. With :math:`x_c = 0.5` and
+    where :math:`x_{200c} = r / r_{200c}` and :math:`r_{200c}` has the same
+    units as :math:`r`. With :math:`x_c = 0.5` and
     :math:`\\gamma = -0.2` fixed, the mass- and redshift-dependent parameters
     obey
 
@@ -329,7 +328,8 @@ class NFWDensityProfile(DensityProfile):
         \\left[\\ln(1+c_\\Delta) - \\frac{c_\\Delta}{1+c_\\Delta}\\right]^{-1}
         \\tag{3}
 
-    with :math:`x_s = r / [(1+z) r_s]` and :math:`r_s = r_\\Delta / c_\\Delta`.
+    with :math:`x_s = r / r_s`, where :math:`r_s` has the same units as
+    :math:`r`, and :math:`r_s = r_\\Delta / c_\\Delta`.
 
     The projected Fourier-space profile is evaluated as
 
@@ -343,14 +343,15 @@ class NFWDensityProfile(DensityProfile):
         {(k r_s) x}
         \\tag{4}
 
-    where :math:`x = r / [(1+z) r_s]`, :math:`\\mu_e = 1.14`,
+    where :math:`x = r / r_s`, :math:`r_s` has the same units as
+    :math:`r`, :math:`\\mu_e = 1.14`,
     :math:`f_{\\mathrm{free}} = 1`, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / [(1+z) r_s]` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / r_s` used to tabulate the profile and define the Hankel transform, with :math:`r_s` expressed in the same units as :math:`r`.
     """
     def __init__(self, x=None):
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(1.0), 256)
@@ -476,7 +477,8 @@ class BCMDensityProfile(DensityProfile):
 
     The profile is evaluated as a function of the comoving radius
     :math:`r`, with shape defined relative to the physical virial radius
-    through :math:`x_{\\mathrm{vir}} = r / [(1+z) r_{\\mathrm{vir}}]`:
+    through :math:`x_{\\mathrm{vir}} = r / r_{\\mathrm{vir}}`, where
+    :math:`r_{\\mathrm{vir}}` has the same units as :math:`r`:
 
     .. math::
 
@@ -520,14 +522,15 @@ class BCMDensityProfile(DensityProfile):
         {(k r_{\\mathrm{vir}}) x}
         \\tag{5}
 
-    where :math:`x = r / [(1+z) r_{\\mathrm{vir}}]`, :math:`\\mu_e = 1.14`,
+    where :math:`x = r / r_{\\mathrm{vir}}`, :math:`r_{\\mathrm{vir}}` has the
+    same units as :math:`r`, :math:`\\mu_e = 1.14`,
     :math:`f_{\\mathrm{free}} = 1`, and
     :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
 
     Attributes
     ----------
     x : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / [(1+z) r_{\\mathrm{vir}}]` used to tabulate the profile and define the Hankel transform.
+        Dimensionless radial grid :math:`x = r / r_{\\mathrm{vir}}` used to tabulate the profile and define the Hankel transform, with :math:`r_{\\mathrm{vir}}` expressed in the same units as :math:`r`.
     log10Mc : float
         Characteristic mass scale :math:`\\log_{10} M_c` controlling the gas fraction suppression.
     theta_ej : float

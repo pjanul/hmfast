@@ -26,6 +26,12 @@ class Concentration(ABC):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+
+        Returns
+        -------
+        float or array-like
+            Concentration values with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         pass
 
@@ -56,8 +62,14 @@ class ConstantConcentration(Concentration):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+
+        Returns
+        -------
+        float or array-like
+            Concentration values with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
-        return jnp.broadcast_to(self.c, (len(jnp.atleast_1d(m)), len(jnp.atleast_1d(z))))
+        return jnp.squeeze(jnp.broadcast_to(self.c, (len(jnp.atleast_1d(m)), len(jnp.atleast_1d(z)))))
 
 
 
@@ -95,8 +107,9 @@ class D08Concentration(Concentration):
 
         Returns
         -------
-        array-like
-            Concentration values with shape :math:`(N_m, N_z)`.
+        float or array-like
+            Concentration values with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -116,7 +129,7 @@ class D08Concentration(Concentration):
         
         if key in coeffs:
             A, B, C, M_pivot = coeffs[key]
-            return A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C
+            return jnp.squeeze(A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C)
 
         if not halo_model.convert_masses:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
@@ -125,14 +138,14 @@ class D08Concentration(Concentration):
         A, B, C, M_pivot = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
         c_seed = A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C
-        m_200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_200c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Compute r_s from native 200c mesh
         c_200c = A * ((m_200c * h) / M_pivot)**B * (1 + z[None, :])**C
         r_200c = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), (1, 0))(m_200c, z).T
         
         # Final Target Radius / r_s
-        r_target = mdef.r_delta(halo_model.cosmology, m, z)
+        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         return (r_target * c_200c / r_200c).reshape(len(m), len(z))
 
 
@@ -173,8 +186,9 @@ class B13Concentration(Concentration):
 
         Returns
         -------
-        array-like
-            Concentration values with shape :math:`(N_m, N_z)`.
+        float or array-like
+            Concentration values with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = halo_model.cosmology.H0 / 100.0
@@ -189,7 +203,7 @@ class B13Concentration(Concentration):
         }
 
         key = (mdef.delta, mdef.reference)
-        D = halo_model.cosmology.growth_factor(z) # Shape (Nz,)
+        D = jnp.atleast_1d(halo_model.cosmology.growth_factor(z)) # Shape (Nz,)
 
         # Get concentration for a given mass-redshift pair and a set of parameters
         def compute_c(m_val, z_val, D_val, A, B, C):
@@ -199,7 +213,7 @@ class B13Concentration(Concentration):
         # Direct Match Case
         if key in coeffs:
             A, B, C = coeffs[key]
-            return compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C)
+            return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C))
 
         # Conversion Fallback
         if not halo_model.convert_masses:
@@ -211,7 +225,7 @@ class B13Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C)
         
-        m_native = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_native = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and scale radius at native definition
         c_native = compute_c(m_native * h, z[None, :], D[None, :], A, B, C)
@@ -220,7 +234,7 @@ class B13Concentration(Concentration):
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = mdef.r_delta(halo_model.cosmology, m, z)
+        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         return (r_target / r_s).reshape(len(m), len(z))
 
 
@@ -259,8 +273,9 @@ class SC14Concentration(Concentration):
 
         Returns
         -------
-        array-like
-            Concentration values with shape :math:`(N_m, N_z)`.
+        float or array-like
+            Concentration values with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -285,7 +300,7 @@ class SC14Concentration(Concentration):
 
         # Direct Match Case
         if key in coeffs:
-            return compute_c(m_internal[:, None], z[None, :], coeffs[key])
+            return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], coeffs[key]))
 
         # Conversion Fallback
         if not halo_model.convert_masses:
@@ -297,7 +312,7 @@ class SC14Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], native_coeffs)
         
-        m_native = convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed)
+        m_native = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and radii at native definition
         c_native = compute_c(m_native * h, z[None, :], native_coeffs)
@@ -307,7 +322,7 @@ class SC14Concentration(Concentration):
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = mdef.r_delta(halo_model.cosmology, m, z)
+        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         return (r_target / r_s).reshape(len(m), len(z))
 
 

@@ -150,11 +150,16 @@ class MassDefinition:
         float or array-like
             Radius :math:`r_\\Delta` within which the mean enclosed density is
             :math:`\\Delta \\rho_{\\mathrm{ref}}(z)`, in physical :math:`\\mathrm{Mpc}`.
+            With shape :math:`(N_m, N_z)`, where singleton dimensions get
+            squeezed before return.
         """
         delta, reference = self.delta, self.reference
 
-        m = jnp.atleast_1d(m)[:, None]
-        z = jnp.atleast_1d(z)[None, :]
+        m = jnp.asarray(m)
+        z = jnp.asarray(z)
+
+        if m.ndim <= 1 and z.ndim <= 1:
+            m, z = jnp.atleast_1d(m)[:, None], jnp.atleast_1d(z)[None, :]
 
         rho_ref = cosmology.critical_density(z)
 
@@ -164,7 +169,7 @@ class MassDefinition:
         if reference == "mean":
             rho_ref *= cosmology.omega_m(z)
 
-        return (3.0 * m / (4.0 * jnp.pi * delta * rho_ref)) ** (1.0 / 3.0)
+        return jnp.squeeze((3.0 * m / (4.0 * jnp.pi * delta * rho_ref)) ** (1.0 / 3.0))
 
 
 jax.tree_util.register_pytree_node(
@@ -204,9 +209,10 @@ def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter
 
     Returns
     -------
-    array-like
-        Halo mass in the target definition, :math:`M_{\\Delta'}`, with shape
-        :math:`(N_m, N_z)`, in physical :math:`M_\\odot`.
+    float or array-like
+        Halo mass in the target definition, :math:`M_{\\Delta'}`, in physical
+        :math:`M_\\odot`, with shape :math:`(N_m, N_z)`, where singleton
+        dimensions get squeezed before return.
     """
     m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     c_old = jnp.atleast_2d(c_old)
@@ -240,6 +246,6 @@ def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter
     same_flat = jnp.broadcast_to(is_same_z[None, :], mm.shape).flatten()
 
     results = jax.vmap(solve_single)(mm.flatten(), c_old.flatten(), x0.flatten(), d_o_flat, d_n_flat, same_flat)
-    return results.reshape(mm.shape)
+    return jnp.squeeze(results.reshape(mm.shape))
 
 

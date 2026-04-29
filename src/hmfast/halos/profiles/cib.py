@@ -211,7 +211,7 @@ class S12CIBProfile(CIBProfile):
        
         # Log-normal in mass
         log10_m = jnp.log10(m)
-        Sigma_M = m / jnp.sqrt(2 * jnp.pi * sigma2_LM)  *  jnp.exp( -(log10_m - log10_M_eff)**2 / (2 * sigma2_LM) )
+        Sigma_M = m / jnp.sqrt(2 * jnp.pi * sigma2_LM) * jnp.exp(-(log10_m - jnp.log10(M_eff_cib))**2 / (2 * sigma2_LM))
         return Sigma_M
 
 
@@ -254,6 +254,7 @@ class S12CIBProfile(CIBProfile):
         T0, alpha, beta, gamma = self.T0, self.alpha, self.beta, self.gamma
     
         h = Const._h_P_  # Planck [J s]
+        k_B = Const._k_B_  # Boltzmann [J K^-1]
         c = Const._c_  #2.99792458e8    # speed of light [m/s]
     
         T_d_z = T0 * (1 + z) ** alpha
@@ -296,13 +297,14 @@ class S12CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Galaxy luminosity :math:`L_\\nu^{\\mathrm{gal}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         # Shang model logic: L0 * Phi(z) * Sigma(m) * Theta(nu_eff)
         phi_z = jnp.atleast_1d(self._phi(z))[None, :]
         sigma_m = jnp.atleast_1d(self._sigma(m))[:, None]
         theta_val = jnp.atleast_1d(self._theta(z))[None, :]
-        return self.L0 * phi_z * sigma_m * theta_val
+        return jnp.squeeze(self.L0 * phi_z * sigma_m * theta_val)
 
 
 
@@ -324,7 +326,8 @@ class S12CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Satellite luminosity :math:`L_\\nu^{\\mathrm{sat}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -339,11 +342,11 @@ class S12CIBProfile(CIBProfile):
             # Subhalo mass function
             dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model, m_single, ms_grid)
             # Standard Shang luminosity
-            l_gal_grid = self.l_gal(halo_model, ms_grid, z)
+            l_gal_grid = jnp.reshape(self.l_gal(halo_model, ms_grid, z), (len(ms_grid), len(z)))
             
             return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
 
-        return jax.vmap(integrate_single_halo)(m)
+        return jnp.squeeze(jax.vmap(integrate_single_halo)(m))
 
 
      
@@ -365,14 +368,15 @@ class S12CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Central luminosity :math:`L_\\nu^{\\mathrm{cen}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         # Shang: Central mass is the full halo mass
         n_cen = jnp.where(m > self.M_min, 1.0, 0.0)
-        l_gal = self.l_gal(halo_model, m, z)
-        return n_cen[:, None] * l_gal
+        l_gal = jnp.reshape(self.l_gal(halo_model, m, z), (len(m), len(z)))
+        return jnp.squeeze(n_cen[:, None] * l_gal)
 
 
      
@@ -394,15 +398,16 @@ class S12CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Mean emissivity :math:`\\bar{j}_\\nu(z)` with shape
-            :math:`(N_z,)`.
+            :math:`(N_z,)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        lc = self.l_cen(halo_model, m, z) # Shape: (Nm, Nz)
-        ls = self.l_sat(halo_model, m, z) # Shape: (Nm, Nz)
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z) # Shape: (Nm, Nz)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.halo_mass_function(halo_model, m, z), (len(m), len(z))) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
@@ -415,7 +420,7 @@ class S12CIBProfile(CIBProfile):
         h = halo_model.cosmology.H0 / 100
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
         
-        return j_bar * h**3 / (4 * jnp.pi) 
+        return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -436,7 +441,7 @@ class S12CIBProfile(CIBProfile):
         -------
         float or jnp.ndarray
             Monopole intensity :math:`I_\\nu` as a scalar with shape
-            :math:`()`.
+            :math:`()`, where singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -451,7 +456,7 @@ class S12CIBProfile(CIBProfile):
         integrand = dchi_dz * a * j_bar
         intensity = jnp.trapezoid(integrand, x=z) 
         
-        return intensity
+        return jnp.squeeze(intensity)
 
 
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
@@ -464,20 +469,21 @@ class S12CIBProfile(CIBProfile):
        
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        ls = self.l_sat(halo_model, m, z)
-        lc = self.l_cen(halo_model, m, z)
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
-        cen_term =  1  / (4*jnp.pi)    *   (lc[None, :, :])       
+        cen_term = jnp.broadcast_to(1 / (4 * jnp.pi) * lc[None, :, :], sat_term.shape)
 
-        return sat_term, cen_term
+        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -499,18 +505,19 @@ class S12CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Real-space profile array with shape :math:`(N_r, N_m, N_z)`.
+            Real-space profile array with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        ls = self.l_sat(halo_model, m, z)
-        lc = self.l_cen(halo_model, m, z)
-        u_m = self._u_r_nfw(halo_model, r, m, z)
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
         cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
 
-        return cen_term + sat_term
+        return jnp.squeeze(cen_term + sat_term)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -532,7 +539,8 @@ class S12CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`.
+            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         # Get the individual components (scaled correctly by h_factors and 4pi)
 
@@ -540,7 +548,7 @@ class S12CIBProfile(CIBProfile):
         
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        return cen_term + sat_term
+        return jnp.squeeze(cen_term + sat_term)
 
         
 
@@ -830,7 +838,8 @@ class M21CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Galaxy luminosity :math:`L_\\nu^{\\mathrm{gal}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -839,7 +848,7 @@ class M21CIBProfile(CIBProfile):
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z)
         s_nu = self._s_nu_interp(z, self.nu)[None, :]
         sfr = self._sfr(halo_model, m, z)
-        return 4 * jnp.pi * s_nu * sfr * ((1 + z)[None, :] * chi[None, :]**2)
+        return jnp.squeeze(4 * jnp.pi * s_nu * sfr * ((1 + z)[None, :] * chi[None, :]**2))
 
 
 
@@ -861,7 +870,8 @@ class M21CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Satellite luminosity :math:`L_\\nu^{\\mathrm{sat}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -877,13 +887,13 @@ class M21CIBProfile(CIBProfile):
             dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model, m_single, ms_grid)
             
             # Maniyar Clamping Logic
-            sfr_i = self.l_gal(halo_model, ms_grid, z)
-            sfr_ii = self.l_gal(halo_model, ms_max, z) * ms_grid[:, None] / ms_max
+            sfr_i = jnp.reshape(self.l_gal(halo_model, ms_grid, z), (len(ms_grid), len(z)))
+            sfr_ii = jnp.reshape(self.l_gal(halo_model, ms_max, z), (len(z),)) * ms_grid[:, None] / ms_max
             l_gal_grid = jnp.minimum(sfr_i, sfr_ii)
             
             return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
 
-        return jax.vmap(integrate_single_halo)(m)
+        return jnp.squeeze(jax.vmap(integrate_single_halo)(m))
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -904,15 +914,16 @@ class M21CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Central luminosity :math:`L_\\nu^{\\mathrm{cen}}(M, z)` with shape
-            :math:`(N_m, N_z)`.
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         # Maniyar: Central mass is reduced by the subhalo fraction
         m_eff = m * (1 - self.f_sub)
         n_cen = jnp.where(m_eff > self.M_min, 1.0, 0.0)
-        l_gal = self.l_gal(halo_model, m_eff, z)
-        return n_cen[:, None] * l_gal
+        l_gal = jnp.reshape(self.l_gal(halo_model, m_eff, z), (len(m), len(z)))
+        return jnp.squeeze(n_cen[:, None] * l_gal)
 
     
     
@@ -934,15 +945,16 @@ class M21CIBProfile(CIBProfile):
         -------
         jnp.ndarray
             Mean emissivity :math:`\\bar{j}_\\nu(z)` with shape
-            :math:`(N_z,)`.
+            :math:`(N_z,)`, where singleton dimensions get squeezed before
+            return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        lc = self.l_cen(halo_model, m, z) # Shape: (Nm, Nz)
-        ls = self.l_sat(halo_model, m, z) # Shape: (Nm, Nz)
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z) # Shape: (Nm, Nz)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.halo_mass_function(halo_model, m, z), (len(m), len(z))) # Shape: (Nm, Nz)
 
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
         integrand = dndlnm * (lc + ls)
@@ -952,7 +964,7 @@ class M21CIBProfile(CIBProfile):
         h = halo_model.cosmology.H0 / 100
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
 
-        return j_bar * h**3 / (4 * jnp.pi)
+        return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -973,7 +985,7 @@ class M21CIBProfile(CIBProfile):
         -------
         float or jnp.ndarray
             Monopole intensity :math:`I_\\nu` as a scalar with shape
-            :math:`()`.
+            :math:`()`, where singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
 
@@ -988,7 +1000,7 @@ class M21CIBProfile(CIBProfile):
         integrand = dchi_dz * a * j_bar
         intensity = jnp.trapezoid(integrand, x=z) 
         
-        return intensity
+        return jnp.squeeze(intensity)
 
     
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
@@ -999,20 +1011,21 @@ class M21CIBProfile(CIBProfile):
        
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
 
-        ls = self.l_sat(halo_model, m, z)
-        lc = self.l_cen(halo_model, m, z)
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
 
         # Apply flux cut if flux cut is not None
         #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
         #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
 
         # Compute central and satellite terms
         sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
-        cen_term =  1  / (4*jnp.pi)    *   (lc[None, :, :])       
+        cen_term = jnp.broadcast_to(1 / (4 * jnp.pi) * lc[None, :, :], sat_term.shape)
 
-        return sat_term, cen_term
+        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -1034,18 +1047,19 @@ class M21CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Real-space profile array with shape :math:`(N_r, N_m, N_z)`.
+            Real-space profile array with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        ls = self.l_sat(halo_model, m, z)
-        lc = self.l_cen(halo_model, m, z)
-        u_m = self._u_r_nfw(halo_model, r, m, z)
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
         cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
 
-        return cen_term + sat_term
+        return jnp.squeeze(cen_term + sat_term)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -1067,14 +1081,15 @@ class M21CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`.
+            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
 
-        return cen_term + sat_term
+        return jnp.squeeze(cen_term + sat_term)
 
 
 jax.tree_util.register_pytree_node(

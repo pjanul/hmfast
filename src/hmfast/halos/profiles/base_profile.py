@@ -62,7 +62,8 @@ class HaloProfile:
         -------
         tuple[jnp.ndarray, jnp.ndarray]
             Native Hankel wavenumbers and transformed profile values with shape
-            :math:`(N_k, N_m, N_z)`.
+            :math:`(N_k, N_m, N_z)`, where singleton dimensions get squeezed
+            before return.
         """
         x = jnp.atleast_1d(x)
         r = jnp.asarray(r)
@@ -83,7 +84,7 @@ class HaloProfile:
         u_k_native = jnp.swapaxes(u_k_native, 2, 0)
         u_k_native = jnp.swapaxes(u_k_native, 2, 1)
 
-        return k_native, u_k_native
+        return k_native, jnp.squeeze(u_k_native)
 
 
     def _u_r_nfw(self, halo_model, r, m, z):
@@ -107,21 +108,22 @@ class HaloProfile:
         Returns
         -------
         jnp.ndarray
-            Normalized real-space profile with shape :math:`(N_r, N_m, N_z)`.
+            Normalized real-space profile with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         r = jnp.atleast_1d(r)
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         r_s = r_delta * (1.0 + z[None, :]) / c_delta
 
         f_nfw = 1.0 / (jnp.log1p(c_delta) - c_delta / (1.0 + c_delta))
         x = r[:, None, None] / r_s[None, :, :]
         prefactor = 1.0 / (4.0 * jnp.pi * r_s**3)
 
-        return prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2)
+        return jnp.squeeze(prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2))
 
     
     def _u_k_nfw(self, halo_model, k, m, z):
@@ -132,7 +134,8 @@ class HaloProfile:
         Returns
         -------
         jnp.ndarray
-            Fourier-space matter profile with shape :math:`(N_k, N_m, N_z)`.
+            Fourier-space matter profile with shape :math:`(N_k, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
        
         
@@ -140,8 +143,8 @@ class HaloProfile:
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Get c_delta and r_delta
-        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         lambda_val = 1.0 
         
         # Compute analytical profile q terms with shape: (N_k, N_m, N_z)
@@ -161,5 +164,5 @@ class HaloProfile:
                    + jnp.sin(q) * (Si_q_scaled - Si_q)
                    - jnp.sin(lambda_val * c_delta[None,:,:] * q) / q_scaled) * f_nfw_val 
     
-        return k, u_k_m
+        return k, jnp.squeeze(u_k_m)
     

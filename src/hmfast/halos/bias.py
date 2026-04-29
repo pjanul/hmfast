@@ -33,7 +33,8 @@ class HaloBias(ABC):
         Returns
         -------
         array-like
-            Dimensionless halo bias values with shape :math:`(N_m, N_z)`.
+            Dimensionless halo bias values with shape :math:`(N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         pass
 
@@ -233,9 +234,10 @@ class T10HaloBias(HaloBias):
         
         Returns
         -------
-        array-like
-            Dimensionless halo bias values of the requested order, shape
-            :math:`(N_m, N_z)`.
+        float or array-like
+            Dimensionless halo bias values of the requested order, with shape
+            :math:`(N_m, N_z)`, where singleton dimensions get squeezed
+            before return.
         """
        
        
@@ -266,9 +268,9 @@ class T10HaloBias(HaloBias):
         delta_mean_broad = jnp.broadcast_to(delta_mean_2d, sigma_M.shape)
 
         if order == 1: 
-            return self._b1_nu(sigma_M, zz, delta_mean_broad).T
+            return jnp.squeeze(self._b1_nu(sigma_M, zz, delta_mean_broad).T)
         elif order == 2:
-            return self._b2_nu(sigma_M, zz, delta_mean_broad).T
+            return jnp.squeeze(self._b2_nu(sigma_M, zz, delta_mean_broad).T)
         else:
             raise ValueError("order must be either 1 or 2")
 

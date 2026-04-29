@@ -216,17 +216,18 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         -------
         ng : array-like
             Mean galaxy number density as a function of redshift in comoving
-            :math:`\\mathrm{Mpc}^{-3}`.
+            :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_z,)`, where
+            singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.halo_mass_function(halo_model, m, z), (len(m), len(z)))
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
-        return jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val)
+        return jnp.squeeze(jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val))
 
     @partial(jax.jit, static_argnums=(0,))
     def galaxy_bias(self, halo_model, m, z):
@@ -248,19 +249,20 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         -------
         bias : array-like
             Large-scale galaxy bias as a function of redshift.
-            Dimensionless.
+            Dimensionless, with shape :math:`(N_z,)`, where singleton
+            dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        dndlnm = halo_model.halo_mass_function.halo_mass_function(halo_model, m, z)
-        bh = halo_model.halo_bias.halo_bias(halo_model, m, z, order=1)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.halo_mass_function(halo_model, m, z), (len(m), len(z)))
+        bh = jnp.reshape(halo_model.halo_bias.halo_bias(halo_model, m, z, order=1), (len(m), len(z)))
         ng = self.ng_bar(halo_model, m, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)
         bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
-        return bg_num / ng
+        return jnp.squeeze(bg_num / ng)
 
 
     def _sat_and_cen_contribution(self, halo_model, k, m, z):
@@ -273,14 +275,15 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = self.ng_bar(halo_model, m, z) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
 
-        _, u_m = self._u_k_nfw(halo_model, k, m, z)  
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
 
         sat_term = (1/ng) * (Ns[None, :, None] * u_m)
-        cen_term = (1/ng) * (Nc[None, :, None]**0)
+        cen_term = jnp.broadcast_to((1/ng) * (Nc[None, :, None]**0), sat_term.shape)
     
-        return sat_term, cen_term
+        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -305,18 +308,19 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         Returns
         -------
         jnp.ndarray
-            Real-space profile with shape :math:`(N_r, N_m, N_z)`.
+            Real-space profile with shape :math:`(N_r, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
         h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = self.ng_bar(halo_model, m, z) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
 
-        u_m = self._u_r_nfw(halo_model, r, m, z)
+        u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
-        return (1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
+        return jnp.squeeze((1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m))
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -342,7 +346,8 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         Returns
         -------
         jnp.ndarray
-            Fourier-space profile.
+            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -350,12 +355,13 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = self.ng_bar(halo_model, m, z) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
     
         u_k = (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
-        return u_k
+        return jnp.squeeze(u_k)
         
 
 jax.tree_util.register_pytree_node(

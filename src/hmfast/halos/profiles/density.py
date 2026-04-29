@@ -204,7 +204,8 @@ class B16DensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Electron-density profile with shape :math:`(N_r, N_m, N_z)`.
+            Electron-density profile with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         cparams = halo_model.cosmology._cosmo_params()
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
@@ -218,7 +219,7 @@ class B16DensityProfile(DensityProfile):
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m),  jnp.atleast_1d(z)
         r_b, m_b, z_b = r[:, None, None], m[None, :, None], z[None, None, :]
 
-        r_200c = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        r_200c = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         x_200c = r_b / ((1.0 + z_b) * r_200c[None, :, :])
         
         # Critical density broadcast to (1, 1, Nz) in physical units.
@@ -239,7 +240,7 @@ class B16DensityProfile(DensityProfile):
         # Final result: M_odot / Mpc^3.
         rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x 
         
-        return rho_gas
+        return jnp.squeeze(rho_gas)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -261,17 +262,18 @@ class B16DensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Transformed profile with shape :math:`(N_k, N_m, N_z)`.
+            Transformed profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_delta = d_A_z[None, :] / r_delta
 
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.sqrt(halo_model.cosmology.velocity_dispersion(z))
+        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
         mu_e = 1.14
         prefactor = (
             4 * jnp.pi * r_delta**3 / mu_e
@@ -280,6 +282,7 @@ class B16DensityProfile(DensityProfile):
 
         r = self.x[:, None, None] * r_delta[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
         ell_native = k_native[:, None, None] * ell_delta[None, :, :]
@@ -293,7 +296,7 @@ class B16DensityProfile(DensityProfile):
             in_axes=(1, 2, 2), out_axes=2
         )
 
-        return vmapped_interp(ell_target, ell_native, u_ell_val)
+        return jnp.squeeze(vmapped_interp(ell_target, ell_native, u_ell_val))
 
 jax.tree_util.register_pytree_node(
     B16DensityProfile,
@@ -390,7 +393,8 @@ class NFWDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Electron-density profile with shape :math:`(N_r, N_m, N_z)`.
+            Electron-density profile with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         cparams = halo_model.cosmology._cosmo_params()
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -399,8 +403,8 @@ class NFWDensityProfile(DensityProfile):
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Get scale radius r_s
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z) * cparams["h"]
-        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
+        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z))) * cparams["h"]
+        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
         r_s = r_delta / c_delta # (Nm, Nz)
         x_s = r[:, None, None] * cparams["h"] / ((1.0 + z[None, None, :]) * r_s[None, :, :])
         
@@ -411,7 +415,7 @@ class NFWDensityProfile(DensityProfile):
         # Final broadcast to (Nx, Nm, Nz)
         rho_gas = f_b * rho_s[None, :, :] / (x_s * (1 + x_s)**2)
         
-        return rho_gas
+        return jnp.squeeze(rho_gas)
         
 
     @partial(jax.jit, static_argnums=(0,))
@@ -433,11 +437,12 @@ class NFWDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Transformed profile with shape :math:`(N_k, N_m, N_z)`.
+            Transformed profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        r_delta = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
-        c_delta = halo_model.concentration.c_delta(halo_model, m, z)
+        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
         r_s = r_delta / c_delta
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_s = d_A_z[None, :] / r_s
@@ -445,7 +450,7 @@ class NFWDensityProfile(DensityProfile):
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.sqrt(halo_model.cosmology.velocity_dispersion(z))
+        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
         mu_e = 1.14
         prefactor = (
             4 * jnp.pi * r_s**3 / mu_e
@@ -454,6 +459,7 @@ class NFWDensityProfile(DensityProfile):
 
         r = self.x[:, None, None] * r_s[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
         ell_native = k_native[:, None, None] * ell_s[None, :, :]
@@ -467,7 +473,7 @@ class NFWDensityProfile(DensityProfile):
             in_axes=(1, 2, 2), out_axes=2
         )
 
-        return vmapped_interp(ell_target, ell_native, u_ell_val)
+        return jnp.squeeze(vmapped_interp(ell_target, ell_native, u_ell_val))
 
     
 
@@ -644,7 +650,8 @@ class BCMDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Gas-density profile with shape :math:`(N_r, N_m, N_z)`.
+            Gas-density profile with shape :math:`(N_r, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
        
         cparams = halo_model.cosmology._cosmo_params()
@@ -656,7 +663,7 @@ class BCMDensityProfile(DensityProfile):
         rb, mb, zb = r[:, None, None], m_internal[None, :, None], z[None, None, :]
         
         # This model is calibrated for the virial radius 
-        r_vir = MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z)
+        r_vir = jnp.reshape(MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         x_vir = rb / ((1.0 + zb) * r_vir[None, :, :])
         
         # Redshift Dependent Mc (Matching your C logic)
@@ -681,7 +688,7 @@ class BCMDensityProfile(DensityProfile):
         denom2 = (1. + (scaled_r)**self.gamma)**((self.delta - beta_m) / self.gamma)
     
         
-        return num / (denom1 * denom2) 
+        return jnp.squeeze(num / (denom1 * denom2))
 
 
     
@@ -704,13 +711,17 @@ class BCMDensityProfile(DensityProfile):
         Returns
         -------
         jnp.ndarray
-            Transformed profile with shape :math:`(N_k, N_m, N_z)`.
+            Transformed profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        r_vir = MassDefinition("vir", "critical").r_delta(
-            halo_model.cosmology,
-            m,
-            z,
+        r_vir = jnp.reshape(
+            MassDefinition("vir", "critical").r_delta(
+                halo_model.cosmology,
+                m,
+                z,
+            ),
+            (len(m), len(z)),
         )
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_vir = d_A_z[None, :] / r_vir
@@ -718,7 +729,7 @@ class BCMDensityProfile(DensityProfile):
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.sqrt(halo_model.cosmology.velocity_dispersion(z))
+        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
         mu_e = 1.14
         prefactor = (
             4 * jnp.pi * r_vir**3 / mu_e
@@ -727,6 +738,7 @@ class BCMDensityProfile(DensityProfile):
 
         r = self.x[:, None, None] * r_vir[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
         ell_native = k_native[:, None, None] * ell_vir[None, :, :]
@@ -740,7 +752,7 @@ class BCMDensityProfile(DensityProfile):
             in_axes=(1, 2, 2), out_axes=2
         )
 
-        return vmapped_interp(ell_target, ell_native, u_ell_val)
+        return jnp.squeeze(vmapped_interp(ell_target, ell_native, u_ell_val))
 
 jax.tree_util.register_pytree_node(
     BCMDensityProfile,

@@ -173,9 +173,9 @@ class HaloModel:
 
 
         # Public HMF and bias interfaces use physical masses.
-        dn_dlnm = self.halo_mass_function.halo_mass_function(self, m=m, z=z)  # (Nm, Nz)
-        b1 = self.halo_bias.halo_bias(self, m=m, z=z, order=1)      # (Nm, Nz)
-        b2 = self.halo_bias.halo_bias(self, m=m, z=z, order=2)      # (Nm, Nz)
+        dn_dlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m=m, z=z), (len(m), len(z)))
+        b1 = jnp.reshape(self.halo_bias.halo_bias(self, m=m, z=z, order=1), (len(m), len(z)))
+        b2 = jnp.reshape(self.halo_bias.halo_bias(self, m=m, z=z, order=2), (len(m), len(z)))
     
         # Compute integrals I0, I1, I2
         I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
@@ -224,7 +224,8 @@ class HaloModel:
         -------
         pk_1h : array
             1-halo power spectrum in :math:`\\mathrm{Mpc}^3`, with shape
-            :math:`(N_k, N_z)`.
+            :math:`(N_k, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
     
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -234,7 +235,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = self.halo_mass_function.halo_mass_function(self, m, z)
+        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m, z), (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
@@ -246,17 +247,23 @@ class HaloModel:
             if is_same_tracer:
                 if tracer1.profile.has_central_contribution:
                     s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m, z)
+                    s1 = jnp.reshape(s1, (len(k), len(m), len(z)))
+                    c1 = jnp.reshape(c1, (len(k), len(m), len(z)))
                     uk_sq_row = s1[:, i, :] * s1[:, i, :] + 2.0 * s1[:, i, :] * c1[:, i, :]
                 else:
-                    u1 = tracer1.profile.u_k(self, k, m, z)
+                    u1 = jnp.reshape(tracer1.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
                     uk_sq_row = u1[:, i, :] ** 2
             elif tracer1.profile.has_central_contribution and tracer2.profile.has_central_contribution:
                 s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m, z)
                 s2, c2 = tracer2.profile._sat_and_cen_contribution(self, k, m, z)
+                s1 = jnp.reshape(s1, (len(k), len(m), len(z)))
+                c1 = jnp.reshape(c1, (len(k), len(m), len(z)))
+                s2 = jnp.reshape(s2, (len(k), len(m), len(z)))
+                c2 = jnp.reshape(c2, (len(k), len(m), len(z)))
                 uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
             else:
-                u1 = tracer1.profile.u_k(self, k, m, z)
-                u2 = tracer2.profile.u_k(self, k, m, z)
+                u1 = jnp.reshape(tracer1.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
+                u2 = jnp.reshape(tracer2.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
                 uk_sq_row = u1[:, i, :] * u2[:, i, :]
     
             return uk_sq_row * total_weights[i], uk_sq_row
@@ -276,7 +283,7 @@ class HaloModel:
         mask = k_damp > 0
         damping = jnp.where(mask, 1.0 - jnp.exp(-(k / jnp.where(mask, k_damp, 1.0))**2), 1.0)
     
-        return pk1h * damping[:, None]
+        return jnp.squeeze(pk1h * damping[:, None])
             
        
     @partial(jax.jit, static_argnums=(1, 2))
@@ -311,7 +318,8 @@ class HaloModel:
         -------
         cl_1h : array
             Dimensionless 1-halo angular power spectrum with shape
-            :math:`(N_\\ell,)`.
+            :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
+            return.
         """
 
         tracer2 = tracer1 if tracer2 is None else tracer2
@@ -333,7 +341,7 @@ class HaloModel:
         # Integrate over redshift
         integrand = P_1h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
         
-        return jnp.trapezoid(integrand, x=z, axis=0)
+        return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
     
 
 
@@ -375,7 +383,8 @@ class HaloModel:
         -------
         pk_2h : array
             2-halo power spectrum in :math:`\\mathrm{Mpc}^3`, with shape
-            :math:`(N_k, N_z)`.
+            :math:`(N_k, N_z)`, where singleton dimensions get squeezed before
+            return.
         """
         
         cparams = self.cosmology._cosmo_params()
@@ -388,14 +397,14 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = self.halo_mass_function.halo_mass_function(self, m, z)
-        bias = self.halo_bias.halo_bias(self, m, z)
+        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m, z), (len(m), len(z)))
+        bias = jnp.reshape(self.halo_bias.halo_bias(self, m, z), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
         def get_I(tracer):
             # This function processes a single index 'i' of the mass axis
             def process_bin(i):
-                uk_full = tracer.profile.u_k(self, k, m, z)
+                uk_full = jnp.reshape(tracer.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
                 uk_slice = uk_full[:, i, :] 
                 return uk_slice * total_weights[i], uk_slice
     
@@ -417,7 +426,7 @@ class HaloModel:
         # current halo-model projection chain so outputs remain unchanged.
         P_lin = jax.vmap(lambda zi: jnp.interp(h * k, *self.cosmology.pk(zi, linear=True)))(z).T * h**6
         
-        return P_lin * I1 * I2
+        return jnp.squeeze(P_lin * I1 * I2)
 
 
     @partial(jax.jit, static_argnums=(1, 2))
@@ -450,7 +459,8 @@ class HaloModel:
         -------
         cl_2h : array
             Dimensionless 2-halo angular power spectrum with shape
-            :math:`(N_\\ell,)`.
+            :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
+            return.
         """
         tracer2 = tracer1 if tracer2 is None else tracer2
 
@@ -474,7 +484,7 @@ class HaloModel:
         # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]
         integrand = P_2h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
         
-        return jnp.trapezoid(integrand, x=z, axis=0)
+        return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
 
 
 jax.tree_util.register_pytree_node(

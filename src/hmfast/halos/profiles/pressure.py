@@ -32,12 +32,13 @@ class PressureProfile(HaloProfile):
         Returns
         -------
         jnp.ndarray
-            Transformed profile with shape :math:`(N_k, N_m, N_z)`.
+            Transformed profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         B = getattr(self, "B", 1.0)
 
-        r_delta_native = halo_model.mass_definition.r_delta(halo_model.cosmology, m, z)
+        r_delta_native = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         r_delta = r_delta_native / B**(1 / 3)
         r = self.x[:, None, None] * r_delta_native[None, :, :] * (1.0 + z[None, None, :])
         d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
@@ -52,6 +53,7 @@ class PressureProfile(HaloProfile):
         
         # Get native Hankel transform outputs, which may not align with the k from this function's input
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
         
         # Calculate native u_ell and the native ell grid
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None])) 
@@ -73,7 +75,7 @@ class PressureProfile(HaloProfile):
         # Resulting shape: (Nk, Nm, Nz)
         u_ell_interp = vmap_interp(ell_target, ell_native, u_ell_val)
         
-        return u_ell_interp
+        return jnp.squeeze(u_ell_interp)
 
 
 
@@ -237,7 +239,8 @@ class GNFWPressureProfile(PressureProfile):
         Returns
         -------
         jnp.ndarray
-            Electron pressure profile with shape :math:`(N_r, N_m, N_z)`.
+            Electron pressure profile with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         H0 = halo_model.cosmology.H0
         P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B
@@ -247,10 +250,10 @@ class GNFWPressureProfile(PressureProfile):
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
         mass_def_old = halo_model.mass_definition
         mass_def_500c = MassDefinition(500, "critical")
-        c_old = halo_model.concentration.c_delta(halo_model, m, z)
-        m500c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old)
-    
-        r_500c = mass_def_500c.r_delta(halo_model.cosmology, m500c, z)  # (Nm, Nz)
+        c_old = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        m500c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old), (len(m), len(z)))
+
+        r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), m500c.shape)  # (Nm, Nz)
     
         # Convert the comoving radius to the calibrated physical 500c coordinate.
         x_500c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_500c[None, :, :])  # (Nr, Nm, Nz)
@@ -266,7 +269,7 @@ class GNFWPressureProfile(PressureProfile):
         scaled_x = c500 * x_500c  # (Nr, Nm, Nz)
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
     
-        return Pe  # shape: (Nr, Nm, Nz)
+        return jnp.squeeze(Pe)
 
 jax.tree_util.register_pytree_node(
     GNFWPressureProfile,
@@ -440,7 +443,8 @@ class B12PressureProfile(PressureProfile):
         Returns
         -------
         jnp.ndarray
-            Electron pressure profile with shape :math:`(N_r, N_m, N_z)`.
+            Electron pressure profile with shape :math:`(N_r, N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
         """
         cparams = halo_model.cosmology._cosmo_params()
         h = cparams["h"]
@@ -450,10 +454,10 @@ class B12PressureProfile(PressureProfile):
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
         mass_def_200c = MassDefinition(200, "critical")
-        c_old = halo_model.concentration.c_delta(halo_model, m, z)
-        m200c = convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old)
-    
-        r_200c = mass_def_200c.r_delta(halo_model.cosmology, m200c, z)  # (Nm, Nz)
+        c_old = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        m200c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old), (len(m), len(z)))
+
+        r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m200c, z), m200c.shape)  # (Nm, Nz)
     
         # Convert the comoving radius to the calibrated physical 200c coordinate.
         x_200c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_200c[None, :, :])  # (Nr, Nm, Nz)
@@ -477,7 +481,7 @@ class B12PressureProfile(PressureProfile):
         # Use M200c and r_200c for normalization
         P_200c = ((m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :])**2)
     
-        return P_200c * P0 * p_x
+        return jnp.squeeze(P_200c * P0 * p_x)
 
 jax.tree_util.register_pytree_node(
     B12PressureProfile,

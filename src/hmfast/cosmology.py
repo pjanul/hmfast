@@ -454,7 +454,9 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Dimensionless linear growth factor at :math:`z`
+            Dimensionless linear growth factor at :math:`z`, with shape
+            :math:`(N_z,)`, where singleton dimensions get squeezed before
+            return.
         """
         
         z = jnp.atleast_1d(z)
@@ -465,7 +467,7 @@ class Cosmology:
         pk0_grid = jax.vmap(lambda zp: jnp.interp(h * k0, *self.pk(zp, linear=True)))(z_grid_pk)
         D_grid = jnp.sqrt(pk0_grid / jnp.interp(h * k0, *self.pk(0.0, linear=True)))
     
-        return jnp.interp(z, z_grid_pk, D_grid)
+        return jnp.squeeze(jnp.interp(z, z_grid_pk, D_grid))
 
     @jax.jit
     def growth_rate(self, z):
@@ -484,7 +486,9 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Dimensionless linear growth rate at :math:`z`
+            Dimensionless linear growth rate at :math:`z`, with shape
+            :math:`(N_z,)`, where singleton dimensions get squeezed before
+            return.
         """
         
         z = jnp.atleast_1d(z)
@@ -494,7 +498,7 @@ class Cosmology:
         a_grid = 1.0 / (1.0 + z_grid_pk)
         f_grid = jnp.gradient(jnp.log(D_grid), jnp.log(a_grid))
         
-        return jnp.interp(z, z_grid_pk, f_grid)
+        return jnp.squeeze(jnp.interp(z, z_grid_pk, f_grid))
 
     #@jax.jit
     def velocity_dispersion(self, z):
@@ -516,7 +520,9 @@ class Cosmology:
         -------
         jnp.ndarray
             Dimensionless velocity dispersion at :math:`z`, equal to
-            :math:`\\frac{1}{3} \\frac{v_\\mathrm{rms}^2}{c^2}`.
+            :math:`\\frac{1}{3} \\frac{v_\\mathrm{rms}^2}{c^2}`, with shape
+            :math:`(N_z,)`, where singleton dimensions get squeezed before
+            return.
         """
         
         z = jnp.atleast_1d(z)
@@ -537,7 +543,7 @@ class Cosmology:
         integrand = (W_grid[:, None]**2 / 3) * P_grid * k_grid / (2 * jnp.pi**2)
         velocity_dispersion_grid = jax.scipy.integrate.trapezoid(integrand, x=jnp.log(k_grid), axis=1)
     
-        return jnp.interp(z, z_grid_pk, velocity_dispersion_grid)
+        return jnp.squeeze(jnp.interp(z, z_grid_pk, velocity_dispersion_grid))
 
     @jax.jit
     def comoving_volume_element(self, z):

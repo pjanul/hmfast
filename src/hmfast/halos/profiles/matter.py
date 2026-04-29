@@ -76,7 +76,8 @@ class NFWMatterProfile(MatterProfile):
         Returns
         -------
         jnp.ndarray
-            Real-space profile with shape :math:`(N_r, N_m, N_z)`.
+            Real-space profile with shape :math:`(N_r, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
         cparams = halo_model.cosmology._cosmo_params()
 
@@ -87,9 +88,9 @@ class NFWMatterProfile(MatterProfile):
 
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] #/ cparams["h"]**2
         # Normalized real-space profile (unit mass)
-        u_r_norm = self._u_r_nfw(halo_model, r, m, z)
+        u_r_norm = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
         # Mass-weighted profile
-        return (m[:, None] / rho_mean_0)[None, :, :] * u_r_norm
+        return jnp.squeeze((m[:, None] / rho_mean_0)[None, :, :] * u_r_norm)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -114,7 +115,8 @@ class NFWMatterProfile(MatterProfile):
         Returns
         -------
         jnp.ndarray
-            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`.
+            Fourier-space profile with shape :math:`(N_k, N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
 
         
@@ -123,7 +125,8 @@ class NFWMatterProfile(MatterProfile):
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Compute u_m_k from Tracer
-        _, u_m = self._u_k_nfw(halo_model, k, m, z) 
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
         
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] #/ cparams["h"]**2
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
@@ -131,4 +134,4 @@ class NFWMatterProfile(MatterProfile):
 
         u_m *= m_over_rho_mean
     
-        return u_m
+        return jnp.squeeze(u_m)

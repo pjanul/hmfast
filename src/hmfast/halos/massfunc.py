@@ -202,9 +202,10 @@ class T08HaloMass(HaloMass):
     
         Returns
         -------
-        dndlnM : array-like
+        dndlnM : float or array-like
             Halo mass function values :math:`dn/d\\ln M` in comoving
-            :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`.
+            :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
        
         
@@ -218,7 +219,7 @@ class T08HaloMass(HaloMass):
         mm, zz = jnp.meshgrid(m, z, indexing='ij')
         pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
         
-        return _hmf_interp(pts)
+        return jnp.squeeze(_hmf_interp(pts))
 
 
 
@@ -320,9 +321,10 @@ class T10HaloMass(HaloMass):
     
         Returns
         -------
-        dndlnM : array-like
+        dndlnM : float or array-like
             Halo mass function values :math:`dn/d\\ln M` in comoving
-            :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`.
+            :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`, where
+            singleton dimensions get squeezed before return.
         """
        
         
@@ -336,7 +338,7 @@ class T10HaloMass(HaloMass):
         mm, zz = jnp.meshgrid(m, z, indexing='ij')
         pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
         
-        return _hmf_interp(pts)
+        return jnp.squeeze(_hmf_interp(pts))
 
 
 
@@ -365,7 +367,9 @@ class SubHaloMass(ABC):
         -------
         array-like
             Dimensionless subhalo abundance :math:`dN/d\\ln \\mu`, i.e.
-            number of subhalos per host per logarithmic mass ratio.
+            number of subhalos per host per logarithmic mass ratio, with shape
+            broadcast from ``m_host`` and ``m_sub``, where singleton
+            dimensions get squeezed before return.
         """
         pass
 
@@ -401,12 +405,13 @@ class TW10SubHaloMass(SubHaloMass):
         Returns
         -------
         dN_dlnmu : float or array_like
-                Dimensionless number of subhalos per host per :math:`d\\ln \\mu`.
-                The output is dimensionless.
+            Dimensionless number of subhalos per host per :math:`d\\ln \\mu`,
+            with shape broadcast from ``m_host`` and ``m_sub``, where
+            singleton dimensions get squeezed before return.
         """
         mu = m_sub / m_host
         dN_dlnmu = 0.30 * mu ** (-0.7) * jnp.exp(-9.9 * mu ** 2.5)
-        return dN_dlnmu
+        return jnp.squeeze(dN_dlnmu)
 
 
 
@@ -452,14 +457,15 @@ class JvdB14SubHaloMass(SubHaloMass):
         Returns
         -------
         dN_dlnmu : float or array_like
-                Dimensionless number of subhalos per host per
-                :math:`d\\ln \\mu`.
+            Dimensionless number of subhalos per host per :math:`d\\ln \\mu`,
+            with shape broadcast from ``m_host`` and ``m_sub``, where
+            singleton dimensions get squeezed before return.
         """
         
         mu = m_sub / m_host
         dN_dlnmu = (self.gamma1 * mu**self.alpha1 + self.gamma2 * mu**self.alpha2) * \
-                    jnp.exp(-self.beta * mu**self.zeta)
-        return dN_dlnmu
+                jnp.exp(-self.beta * mu**self.zeta)
+        return jnp.squeeze(dN_dlnmu)
 
 
 

@@ -87,7 +87,9 @@ class Cosmology:
             )
         self.emulator_set = emulator_set
         self._emu = {}  # This will be treated as static
-        self._load_emulator("PKL")
+        # Eagerly load these emulators to keep Python-side loader state out of jitted paths and avoid JAX tracer errors.
+        for key in ("S8Z", "HZ", "DAZ", "PKL", "PKNL"):
+            self._load_emulator(key)
         self._tophat_instance = partial(TophatVar(self._pk_grid()[0], lowring=True, backend='jax'), extrap=True)
 
         # Cosmological params (leaves) to be changed without recompiling jit
@@ -255,11 +257,9 @@ class Cosmology:
 
         return _k_grid, _pk_power_fac
 
-    def _compute_sigma_grid(self):
-        return self._compute_sigma_grid_jit()
-
+    
     @partial(jax.jit, static_argnums=(0,))
-    def _compute_sigma_grid_jit(self):
+    def _compute_sigma_grid(self):
         """
         Compute the interpolation grid for :math:`\\sigma(M, z)`.
 
@@ -315,7 +315,7 @@ class Cosmology:
     # ------------------------------------------------------------------
     # Cosmology
     # ------------------------------------------------------------------
-
+    @jax.jit
     def hubble_parameter(self, z):
         """
         Get Hubble parameter :math:`H(z)` at redshift :math:`z` from the emulator.
@@ -336,6 +336,7 @@ class Cosmology:
         preds = 10.0 ** emu.predictions(params) * (Const._c_ / 1e3)
         return self._interp_z(z, self._z_grid_bg(), preds)
 
+    @jax.jit
     def angular_diameter_distance(self, z):
         """
         Get angular diameter distance :math:`D_A(z)` at redshift :math:`z` from the emulator.
@@ -361,6 +362,7 @@ class Cosmology:
 
         return self._interp_z(z, self._z_grid_bg(), preds)
 
+    @jax.jit
     def sigma8(self, z):
         """
         Get :math:`\\sigma_8(z)` at redshift :math:`z` from the emulator.
@@ -493,7 +495,7 @@ class Cosmology:
         
         return Omega_m_z
 
-    #@jax.jit
+    @jax.jit
     def growth_factor(self, z):
         """
         Linear growth factor :math:`D(z)`, normalized to :math:`D(0)=1`.
@@ -552,7 +554,7 @@ class Cosmology:
         
         return jnp.squeeze(jnp.interp(z, z_grid_pk, f_grid))
 
-    #@jax.jit
+    @jax.jit
     def velocity_dispersion(self, z):
         """
         Compute the dimensionless velocity dispersion
@@ -627,7 +629,7 @@ class Cosmology:
     # Matter power spectra
     # ------------------------------------------------------------------
 
-    #@partial(jax.jit, static_argnums=(2,))
+    @partial(jax.jit, static_argnums=(2,))
     def pk(self, z, linear=True):
         """
         Get the matter power spectrum :math:`P(k, z)` from the emulator.

@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
-from mcfit import TophatVar
+
+from hmfast.halos.mass_definition import MassDefinition
 
 
 class HaloBias(ABC):
@@ -14,19 +15,24 @@ class HaloBias(ABC):
     mass-redshift grid.
     """
     @abstractmethod
-    def halo_bias(self, halo_model, m, z, order=1):
+    def halo_bias(self, cosmology, m, z, mass_definition=None, convert_masses=False, order=1):
         """
         Evaluate the halo bias of the requested order.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo-model instance supplying the cosmology, mass definition, and
-            any mass-conversion settings needed to evaluate the requested bias.
+        cosmology : Cosmology
+            Cosmology used to evaluate the halo bias.
         m : array-like
             Halo masses in physical :math:`M_\\odot` at which to evaluate the bias.
         z : array-like
             Redshifts at which to evaluate the bias.
+        mass_definition : MassDefinition, optional
+            Halo mass definition at which to evaluate the bias. If omitted,
+            subclasses default to their native calibration mass definition.
+        convert_masses : bool, optional
+            Whether to convert from the native calibration mass definition
+            when required.
         order : int, optional
             Bias order to evaluate.
 
@@ -37,57 +43,6 @@ class HaloBias(ABC):
             where singleton dimensions get squeezed before return.
         """
         pass
-
-
-    @partial(jax.jit, static_argnums=(0,))
-    def _compute_sigma_grid(self, halo_model):
-        """
-        Compute the interpolation grid for :math:`\\sigma(M, z)`.
-
-        The interpolation mass grid returned here is in physical
-        :math:`M_\\odot`.
-
-        Returns
-        -------
-        ln_x : array_like
-            :math:`\\ln(1+z)` grid.
-        ln_M : array_like
-            :math:`\\ln M` grid.
-        sigma_grid : array_like
-            :math:`\\sigma(M, z)` values.
-        """
-        
-        z_grid = halo_model.cosmology._z_grid_pk()
-        cparams = halo_model.cosmology._cosmo_params()
-        h = cparams["h"]
-    
-        # Power spectra for all redshifts, shape: (n_k, n_z)
-        pk_grid = jax.vmap(lambda zp: halo_model.cosmology.pk(zp, linear=True)[1].flatten())(z_grid).T * h**3
-    
-        # Compute σ²(R, z) and dσ²/dR using TophatVar
-        R_grid, var = jax.vmap(halo_model._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
-        R_grid = R_grid[0].flatten()  # shape: (n_R,)
-    
-        # Compute dσ²/dR for each z, output shape: (n_z, n_R)
-        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var)
-    
-        # Compute σ(R, z)
-        ln_sigma_grid = 0.5 * jnp.log(var)
-        sigma_grid = jnp.exp(ln_sigma_grid)
-    
-        # # Mass grid, shape: (n_R,)
-        rho_crit_0 = cparams["Rho_crit_0"]
-        Omega0_cb = cparams['Omega0_cb']
-        M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3)
-    
-        # Grids for interpolation
-        ln_x = jnp.log(1. + z_grid)
-        ln_M = jnp.log(M_grid)
-    
-        return ln_x, ln_M, sigma_grid
-        
-
-   
 
 class T10HaloBias(HaloBias):
     """
@@ -198,8 +153,8 @@ class T10HaloBias(HaloBias):
         return b2_nu
 
 
-    @partial(jax.jit, static_argnums=(0,4))
-    def halo_bias(self, halo_model, m, z, order=1):
+    @partial(jax.jit, static_argnums=(0, 5, 6))
+    def halo_bias(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False, order=1):
         """
         Compute the halo bias for a given order.
         
@@ -222,13 +177,18 @@ class T10HaloBias(HaloBias):
         
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo-model instance supplying the cosmology and mass definition
-            used to evaluate the bias.
+        cosmology : Cosmology
+            Cosmology used to evaluate the bias.
         m : array-like
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
+        mass_definition : MassDefinition, optional
+            Halo mass definition at which to evaluate the bias. Defaults to
+            the native :math:`200\\mathrm{m}` calibration definition.
+        convert_masses : bool, optional
+            Mass conversions are applied if ``convert_masses`` is set to
+            ``True``.
         order : int, optional
             Bias order to evaluate. Supported values are ``1`` and ``2``.
         
@@ -242,7 +202,7 @@ class T10HaloBias(HaloBias):
        
        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        ln_x_grid, ln_M_grid, sigma_grid = self._compute_sigma_grid(halo_model)
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
 
         # Create the interpolator, the meshgrid, and then stack the points
         _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid)) 
@@ -251,12 +211,12 @@ class T10HaloBias(HaloBias):
         sigma_M = jnp.exp(_sigma_interp(pts))
 
         # Handle delta values
-        delta_numeric = halo_model.mass_definition._delta_numeric(halo_model.cosmology, z)
-        delta_mean = halo_model.mass_definition._convert_reference(
-            halo_model.cosmology,
+        delta_numeric = mass_definition._delta_numeric(cosmology, z)
+        delta_mean = mass_definition._convert_reference(
+            cosmology,
             z,
             delta_numeric,
-            from_ref=halo_model.mass_definition.reference,
+            from_ref=mass_definition.reference,
             to_ref='mean',
         )
         

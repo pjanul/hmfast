@@ -3,98 +3,43 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
-from mcfit import TophatVar
+
+from hmfast.halos.mass_definition import MassDefinition
 
 
 class HaloMass(ABC):
     """
     Abstract base class for halo mass function models.
 
-    Subclasses provide the dimensionless fitting function :math:`f(\\sigma)`
-    entering :math:`dn / d\\ln M`, together with a public evaluator for the
-    halo mass function on a mass-redshift grid.
+    Subclasses must implement the public halo mass function evaluator.
     """
 
-    @partial(jax.jit, static_argnums=(0,))
-    def _compute_hmf_grid(self, halo_model):
-        """
-        Compute the internal interpolation grid for the halo mass function.
-
-        The interpolation mass grid returned here is in physical
-        :math:`M_\\odot`.
-
-        Returns
-        -------
-        ln_x : array_like
-            :math:`\\ln(1+z)` grid.
-        ln_M : array_like
-            :math:`\\ln M` grid.
-        dn_dlnM_grid : array_like
-            Halo mass function grid :math:`dn/d\\ln M` in comoving
-            :math:`\\mathrm{Mpc}^{-3}`.
-        """
-        
-        z_grid = halo_model.cosmology._z_grid_pk()
-        cparams = halo_model.cosmology._cosmo_params()
-        h = cparams["h"]
-    
-        # Power spectra for all redshifts, shape: (n_k, n_z)
-        pk_grid = jax.vmap(lambda zp: halo_model.cosmology.pk(zp, linear=True)[1].flatten())(z_grid).T * h**3
-    
-        # Compute σ²(R, z) and dσ²/dR using TophatVar
-        R_grid, var = jax.vmap(halo_model._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
-        R_grid = R_grid[0].flatten()  # shape: (n_R,)
-    
-        # Compute dσ²/dR for each z, output shape: (n_z, n_R)
-        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var)
-    
-        # Compute σ(R, z)
-        ln_sigma_grid = 0.5 * jnp.log(var)
-        sigma_grid = jnp.exp(ln_sigma_grid)
-    
-        # Mass grid, shape: (n_R,)
-        rho_crit_0 = cparams["Rho_crit_0"]
-        Omega0_cb = cparams['Omega0_cb']
-        M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3)
-    
-    
-        # Halo mass function grid, shape: (n_z, n_R)
-        hmf_grid = halo_model.halo_mass_function._f_sigma(halo_model, sigma_grid, z_grid)
-    
-        # Compute d n / d ln(M)
-        dlnnu_dlnR_grid = -dvar_grid * R_grid / jnp.exp(2. * ln_sigma_grid)
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
-    
-        # Grids for interpolation
-        ln_x = jnp.log(1. + z_grid)
-        ln_M = jnp.log(M_grid)
-    
-        return ln_x, ln_M, dn_dlnM_grid
-
-
-
     @abstractmethod
-    def _f_sigma(self, halo_model, sigma, z):
+    def halo_mass_function(self, cosmology, m, z, mass_definition=None, convert_masses=False):
         """
-        Evaluate the internal dimensionless fitting function entering the halo
-        mass function.
+        Evaluate the halo mass function on a mass-redshift grid.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model instance supplying the cosmology and mass definition
-            used to evaluate the fitting function.
-        sigma : array-like
-            Root-mean-square linear density fluctuation
-            :math:`\\sigma(R, z)`.
-        z : float or array-like, optional
-            Redshift(s), when required by the specific mass-function model.
+        cosmology : Cosmology
+            Cosmology used to evaluate the halo mass function.
+        m : array-like
+            Halo mass grid in physical :math:`M_\\odot`.
+        z : array-like
+            Redshift grid.
+        mass_definition : MassDefinition, optional
+            Halo mass definition at which to evaluate the halo mass
+            function. If omitted, subclasses default to their native
+            calibration mass definition.
+        convert_masses : bool, optional
+            Whether to convert from the native calibration mass definition
+            when required.
 
         Returns
         -------
         array-like
-            Values of the internal fitting function evaluated at the requested
-            inputs.
+            Halo mass function values :math:`dn/d\\ln M` in comoving
+            :math:`\\mathrm{Mpc}^{-3}`.
         """
         pass
 
@@ -113,20 +58,21 @@ class T08HaloMass(HaloMass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def _f_sigma(self, halo_model, sigma, z):
+    def _f_sigma(self, cosmology, sigma, z, mass_definition=MassDefinition(delta=200, reference="mean")):
         """
         Evaluate the internal Tinker et al. (2008) fitting function.
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model instance supplying the cosmology and mass definition
-            used to evaluate the fitting function.
+        cosmology : Cosmology
+            Cosmology used to evaluate the fitting function.
         sigma : jnp.ndarray
             Root-mean-square linear density fluctuation
             :math:`\\sigma(R, z)`.
         z : float or jnp.ndarray
             Redshift(s) corresponding to ``sigma``.
+        mass_definition : MassDefinition, optional
+            Halo mass definition used when evaluating the fitting function.
         
     
         Returns
@@ -137,12 +83,12 @@ class T08HaloMass(HaloMass):
         """
         
         # Overdensity threshold converted to log scale
-        delta_numeric = halo_model.mass_definition._delta_numeric(halo_model.cosmology, z)
-        delta_mean = halo_model.mass_definition._convert_reference(
-            halo_model.cosmology,
+        delta_numeric = mass_definition._delta_numeric(cosmology, z)
+        delta_mean = mass_definition._convert_reference(
+            cosmology,
             z,
             delta_numeric,
-            from_ref=halo_model.mass_definition.reference,
+            from_ref=mass_definition.reference,
             to_ref='mean',
         )
         delta_mean = jnp.log10(delta_mean)
@@ -166,7 +112,7 @@ class T08HaloMass(HaloMass):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
+    def halo_mass_function(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False) -> jnp.ndarray:
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     
@@ -192,13 +138,19 @@ class T08HaloMass(HaloMass):
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model instance supplying the cosmology and mass definition
-            used to evaluate the fitting function.
+        cosmology : Cosmology
+            Cosmology used to evaluate the halo mass function.
         m : array-like
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
+        mass_definition : MassDefinition, optional
+            Halo mass definition at which to evaluate the halo mass
+            function. Defaults to the native :math:`200\\mathrm{m}`
+            calibration definition.
+        convert_masses : bool, optional
+            Mass conversions are applied if ``convert_masses`` is set to
+            ``True``.
     
         Returns
         -------
@@ -212,7 +164,18 @@ class T08HaloMass(HaloMass):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, dn_dlnM_grid = self._compute_hmf_grid(halo_model)
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        cparams = cosmology._cosmo_params()
+        h = cparams["h"]
+        z_grid = jnp.exp(ln_x_grid) - 1.0
+
+        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid, mass_definition=mass_definition)
+
+        R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
+        var_grid = sigma_grid**2
+        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
+        dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
+        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
 
         # Create the interpolator, the meshgrid, and then stack the points
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
@@ -235,15 +198,14 @@ class T10HaloMass(HaloMass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def _f_sigma(self, halo_model, sigma, z):
+    def _f_sigma(self, cosmology, sigma, z):
         """
         Evaluate the internal Tinker et al. (2010) fitting function.
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model instance supplying the cosmology and mass definition
-            used to evaluate the fitting function. 
+        cosmology : Cosmology
+            Cosmology used to evaluate the fitting function.
         sigma : jnp.ndarray
             Root-mean-square linear density fluctuation
             :math:`\\sigma(R, z)`.
@@ -285,8 +247,8 @@ class T10HaloMass(HaloMass):
         f_nu = 0.5 * alpha * (1 + beta_term) * eta_term * exp_term * jnp.sqrt(nu)
         return f_nu
 
-    @partial(jax.jit, static_argnums=(0,))
-    def halo_mass_function(self, halo_model, m, z) -> jnp.ndarray:
+    @partial(jax.jit, static_argnums=(0, 5))
+    def halo_mass_function(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False) -> jnp.ndarray:
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     
@@ -311,13 +273,19 @@ class T10HaloMass(HaloMass):
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model instance supplying the cosmology and mass definition
-            used to evaluate the fitting function. 
+        cosmology : Cosmology
+            Cosmology used to evaluate the halo mass function.
         m : array-like
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
+        mass_definition : MassDefinition, optional
+            Halo mass definition at which to evaluate the halo mass
+            function. Defaults to the native :math:`200\\mathrm{m}`
+            calibration definition.
+        convert_masses : bool, optional
+            Mass conversions are applied if ``convert_masses`` is set to
+            ``True``.
     
         Returns
         -------
@@ -326,18 +294,34 @@ class T10HaloMass(HaloMass):
             :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-       
-        
+        native_mass_definition = MassDefinition(delta=200, reference="mean")
+        key = (mass_definition.delta, mass_definition.reference)
+        native_key = (native_mass_definition.delta, native_mass_definition.reference)
+        if key != native_key:
+            if not convert_masses:
+                raise ValueError(f"Mass definition {key} incompatible with the selected halo mass function.")
+            raise NotImplementedError("Mass conversion for T10HaloMass is not implemented.")
+
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, dn_dlnM_grid = self._compute_hmf_grid(halo_model)
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        cparams = cosmology._cosmo_params()
+        h = cparams["h"]
+        z_grid = jnp.exp(ln_x_grid) - 1.0
 
-        # Create the interpolator, the meshgrid, and then stack the points
+        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid)
+
+        R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
+        var_grid = sigma_grid**2
+        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
+        dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
+        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
+
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
         mm, zz = jnp.meshgrid(m, z, indexing='ij')
         pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-        
+
         return jnp.squeeze(_hmf_interp(pts))
 
 
@@ -398,8 +382,8 @@ class TW10SubHaloMass(SubHaloMass):
         Parameters
         ----------
         cosmology : Cosmology
-            Cosmology supplied for API consistency. This implementation uses
-            only :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
+            This implementation uses only
+            :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
             mass definition.
         m_host : float or array_like
             Host halo mass in physical :math:`M_\\odot`.
@@ -452,8 +436,8 @@ class JvdB14SubHaloMass(SubHaloMass):
         Parameters
         ----------
         cosmology : Cosmology
-            Cosmology supplied for API consistency. This implementation uses
-            only :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
+            This implementation uses only
+            :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
             mass definition.
         m_host : float or array_like
             Host halo mass in physical :math:`M_\\odot`.

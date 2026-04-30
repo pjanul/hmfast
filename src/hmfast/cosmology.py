@@ -2,6 +2,7 @@ import os
 import jax
 import jax.numpy as jnp
 from typing import Dict, Union
+from mcfit import TophatVar
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
@@ -43,7 +44,7 @@ class Cosmology:
         Physical baryon density :math:`\\Omega_b h^2`.
     ln1e10A_s : float
         Log-amplitude of the primordial scalar power spectrum,
-        :math:`\ln(10^{10} A_s)`.
+        :math:`\\ln(10^{10} A_s)`.
     n_s : float
         Scalar spectral index of primordial perturbations.
     tau_reio : float
@@ -86,6 +87,8 @@ class Cosmology:
             )
         self.emulator_set = emulator_set
         self._emu = {}  # This will be treated as static
+        self._load_emulator("PKL")
+        self._tophat_instance = partial(TophatVar(self._pk_grid()[0], lowring=True, backend='jax'), extrap=True)
 
         # Cosmological params (leaves) to be changed without recompiling jit
         self.H0, self.omega_cdm, self.omega_b, self.ln1e10A_s, self.n_s, self.tau_reio = H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio
@@ -106,19 +109,20 @@ class Cosmology:
             self.fEDE, self.log10z_c, self.thetai_scf, self.r,
             self.T_cmb, self.deg_ncdm
         )
-        # 2. Aux data: Static metadata (Model ID and the Cache dictionary)
-        aux_data = (self.emulator_set, self._emu)
+        # 2. Aux data: Static metadata and cached helper objects.
+        aux_data = (self.emulator_set, self._emu, self._tophat_instance)
         return (children, aux_data)
     
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
         # Reconstruct using the static metadata
-        emulator_set, _emu = aux_data
+        emulator_set, _emu, _tophat_instance = aux_data
         
         # We bypass __init__ to avoid re-triggering the Loader logic
         obj = cls.__new__(cls)
         obj.emulator_set = emulator_set
         obj._emu = _emu 
+        obj._tophat_instance = _tophat_instance
         
         # Assign the 15 parameter children to the object
         (obj.H0, obj.omega_cdm, obj.omega_b, obj.ln1e10A_s, obj.n_s, obj.tau_reio,
@@ -250,6 +254,51 @@ class Cosmology:
             _pk_power_fac = (ls*(ls+1.)/2./jnp.pi)**-1
 
         return _k_grid, _pk_power_fac
+
+    def _compute_sigma_grid(self):
+        return self._compute_sigma_grid_jit()
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _compute_sigma_grid_jit(self):
+        """
+        Compute the interpolation grid for :math:`\\sigma(M, z)`.
+
+        The interpolation mass grid returned here is in physical
+        :math:`M_\\odot`.
+
+        Returns
+        -------
+        ln_x : array_like
+            :math:`\\ln(1+z)` grid.
+        ln_M : array_like
+            :math:`\\ln M` grid.
+        sigma_grid : array_like
+            :math:`\\sigma(M, z)` values.
+        """
+
+        z_grid = self._z_grid_pk()
+        cparams = self._cosmo_params()
+        h = cparams["h"]
+
+        # Power spectra for all redshifts, shape: (n_k, n_z)
+        pk_grid = jax.vmap(lambda zp: self.pk(zp, linear=True)[1].flatten())(z_grid).T * h**3
+
+        # Compute σ²(R, z) using the cached top-hat helper.
+        R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
+        R_grid = R_grid[0].flatten()
+
+        # Compute σ(R, z)
+        sigma_grid = jnp.exp(0.5 * jnp.log(var))
+
+        # Mass grid, shape: (n_R,)
+        rho_crit_0 = cparams["Rho_crit_0"]
+        Omega0_cb = cparams['Omega0_cb']
+        M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3)
+
+        ln_x = jnp.log1p(z_grid)
+        ln_M = jnp.log(M_grid)
+
+        return ln_x, ln_M, sigma_grid
 
 
     # ------------------------------------------------------------------

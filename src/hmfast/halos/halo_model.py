@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import jax.scipy as jscipy
 from typing import Dict, Any, Optional, Callable
 from functools import partial
-from mcfit import TophatVar
 
 from hmfast.halos.massfunc import T08HaloMass, TW10SubHaloMass
 from hmfast.halos.bias import T10HaloBias
@@ -74,18 +73,12 @@ class HaloModel:
         self.convert_masses = convert_masses
 
 
-        # Create TophatVar instance once to instantiate it
-        dummy_k, _ = self.cosmology.pk(1., linear=True)
-        h = self.cosmology.H0 / 100.0
-        self._tophat_instance = partial(TophatVar(dummy_k / h, lowring=True, backend='jax'), extrap=True)
-
-
     def _tree_flatten(self):
         # The cosmology is a Pytree, so it is a child.
         # Everything else is configuration/metadata.
         children = (self.cosmology,)
         aux_data = (self.halo_mass_function, self.halo_bias, self.subhalo_mass_function, self.concentration,
-            self.mass_definition, self.hm_consistency, self.convert_masses, self._tophat_instance
+            self.mass_definition, self.hm_consistency, self.convert_masses
         )
         return (children, aux_data)
 
@@ -96,7 +89,7 @@ class HaloModel:
         obj.cosmology = cosmology
         (obj.halo_mass_function, obj.halo_bias, obj.subhalo_mass_function, 
          obj.concentration, obj.mass_definition, obj.hm_consistency, 
-         obj.convert_masses, obj._tophat_instance) = aux_data
+         obj.convert_masses) = aux_data
         return obj
 
     def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_definition=None, 
@@ -120,7 +113,7 @@ class HaloModel:
         (cosmo_child,) = children
         (
             halo_mass_function0, halo_bias0, subhalo_mass_function0, concentration0,
-            mass_definition0, hm_consistency0, convert_masses0, tophat_instance0
+            mass_definition0, hm_consistency0, convert_masses0
         ) = aux_data
     
         # Update only provided components
@@ -133,10 +126,9 @@ class HaloModel:
         new_hm_consistency = hm_consistency if hm_consistency is not None else hm_consistency0
         new_convert_masses = convert_masses if convert_masses is not None else convert_masses0
     
-        # Reuse the existing tophat instance (or update if needed)
         new_aux_data = (
             new_halo_mass_function, new_halo_bias, new_subhalo_mass_function, new_concentration,
-            new_mass_definition, new_hm_consistency, new_convert_masses, tophat_instance0
+            new_mass_definition, new_hm_consistency, new_convert_masses
         )
         # Use _tree_unflatten to create the new instance efficiently
         return self._tree_unflatten(new_aux_data, (new_cosmo,))
@@ -173,9 +165,9 @@ class HaloModel:
 
 
         # Public HMF and bias interfaces use physical masses.
-        dn_dlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m=m, z=z), (len(m), len(z)))
-        b1 = jnp.reshape(self.halo_bias.halo_bias(self, m=m, z=z, order=1), (len(m), len(z)))
-        b2 = jnp.reshape(self.halo_bias.halo_bias(self, m=m, z=z, order=2), (len(m), len(z)))
+        dn_dlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        b1 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
+        b2 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
     
         # Compute integrals I0, I1, I2
         I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
@@ -235,7 +227,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m, z), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
@@ -397,8 +389,8 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self, m, z), (len(m), len(z)))
-        bias = jnp.reshape(self.halo_bias.halo_bias(self, m, z), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.halo_mass_function(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        bias = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
         def get_I(tracer):

@@ -11,13 +11,13 @@ class HaloMass(ABC):
     """
     Abstract base class for halo mass function models.
 
-    Subclasses must implement the public halo mass function evaluator.
+    Subclasses must implement the public :math:`dn/d\ln M` evaluator.
     """
 
     @abstractmethod
-    def halo_mass_function(self, cosmology, m, z, mass_definition=None, convert_masses=False):
+    def dndlnm(self, cosmology, m, z, mass_definition=None, convert_masses=False):
         """
-        Evaluate the halo mass function on a mass-redshift grid.
+        Evaluate :math:`dn/d\ln M` on a mass-redshift grid.
 
         Parameters
         ----------
@@ -112,7 +112,7 @@ class T08HaloMass(HaloMass):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def halo_mass_function(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False) -> jnp.ndarray:
+    def dndlnm(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False):
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     
@@ -248,7 +248,7 @@ class T10HaloMass(HaloMass):
         return f_nu
 
     @partial(jax.jit, static_argnums=(0, 5))
-    def halo_mass_function(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False) -> jnp.ndarray:
+    def dndlnm(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False):
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     

@@ -11,13 +11,13 @@ class HaloMass(ABC):
     """
     Abstract base class for halo mass function models.
 
-    Subclasses must implement the public :math:`dn/d\ln M` evaluator.
+    Subclasses must implement the public :math:`dn/d\\ln M` evaluator.
     """
 
     @abstractmethod
     def dndlnm(self, cosmology, m, z, mass_definition=None, convert_masses=False):
         """
-        Evaluate :math:`dn/d\ln M` on a mass-redshift grid.
+        Evaluate :math:`dn/d\\ln M` on a mass-redshift grid.
 
         Parameters
         ----------

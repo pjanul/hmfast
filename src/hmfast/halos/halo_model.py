@@ -5,7 +5,7 @@ Core halo model implementation using JAX for differentiability.
 import jax
 import jax.numpy as jnp
 import jax.scipy as jscipy
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Callable
 from functools import partial
 
 from hmfast.halos.massfunc import T08HaloMass, TW10SubHaloMass
@@ -47,12 +47,12 @@ class HaloModel:
 
     def __init__(self, 
                  cosmology=Cosmology(emulator_set="lcdm:v1"), 
-                 mass_definition=MassDefinition(delta=200, reference="critical"), 
-                 halo_mass_function=T08HaloMass(), 
-                 halo_bias=T10HaloBias(), 
+                 mass_definition=MassDefinition(delta=200, reference="critical"),
+                 halo_mass_function=T08HaloMass(),
+                 halo_bias=T10HaloBias(),
                  subhalo_mass_function=TW10SubHaloMass(),
-                 concentration=D08Concentration(), 
-                 hm_consistency=True, 
+                 concentration=D08Concentration(),
+                 hm_consistency=True,
                  convert_masses=False):
         """Initialize the halo model."""
         

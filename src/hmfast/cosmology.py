@@ -88,8 +88,9 @@ class Cosmology:
         self.emulator_set = emulator_set
         self._emu = {}  # This will be treated as static
         # Eagerly load these emulators to keep Python-side loader state out of jitted paths and avoid JAX tracer errors.
-        for key in ("S8Z", "HZ", "DAZ", "PKL", "PKNL"):
-            self._load_emulator(key)
+        if os.environ.get("READTHEDOCS") != "True":
+            for key in ("S8Z", "HZ", "DAZ", "PKL", "PKNL"):
+                self._load_emulator(key)
         self._tophat_instance = partial(TophatVar(self._pk_grid()[0], lowring=True, backend='jax'), extrap=True)
 
         # Cosmological params (leaves) to be changed without recompiling jit

@@ -42,7 +42,8 @@ class Cosmology:
     omega_b : float
         Physical baryon density :math:`\\Omega_b h^2`.
     ln1e10A_s : float
-        Logarithmic primordial scalar amplitude :math:`\\ln(10^{10} A_s)`.
+        Log-amplitude of the primordial scalar power spectrum,
+        :math:`\ln(10^{10} A_s)`.
     n_s : float
         Scalar spectral index of primordial perturbations.
     tau_reio : float
@@ -58,7 +59,9 @@ class Cosmology:
     fEDE : float
         Maximum fractional contribution of early dark energy, used if an early dark energy cosmological model is selected.
     log10z_c : float
-        Base-10 logarithm of the critical redshift for the early dark energy transition, used if an early dark energy cosmological model is selected.
+        Base-10 logarithm of the critical redshift for the early dark energy
+        transition, used if an early dark energy cosmological model is
+        selected.
     thetai_scf : float
         Initial scalar field displacement for the early dark energy model, in radians, used if an early dark energy cosmological model is selected.
     r : float

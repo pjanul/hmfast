@@ -115,7 +115,16 @@ class HaloProfile:
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_delta = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         r_s = r_delta * (1.0 + z[None, :]) / c_delta
 
@@ -143,7 +152,16 @@ class HaloProfile:
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Get c_delta and r_delta
-        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_delta = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         lambda_val = 1.0 
         

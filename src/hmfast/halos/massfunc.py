@@ -350,14 +350,16 @@ class SubHaloMass(ABC):
     """
     @abstractmethod
     @partial(jax.jit, static_argnums=(0,))
-    def dndlnmu(self, halo_model, m_host, m_sub):
+    def dndlnmu(self, cosmology, m_host, m_sub):
         """
         Compute the subhalo abundance per logarithmic mass ratio.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing any cosmology- or mass-definition-dependent context.
+        cosmology : Cosmology
+            Cosmology supplied for cosmology-dependent subhalo mass functions.
+            The built-in implementations currently depend only on the mass
+            ratio and are agnostic of mass definition.
         m_host : float or array_like
             Host halo mass in physical :math:`M_\\odot`.
         m_sub : float or array_like
@@ -383,7 +385,7 @@ class TW10SubHaloMass(SubHaloMass):
         pass
     
     @partial(jax.jit, static_argnums=(0,))
-    def dndlnmu(self, halo_model, m_host, m_sub):
+    def dndlnmu(self, cosmology, m_host, m_sub):
         """
         Compute the Tinker and Wetzel (2010) subhalo mass function.
 
@@ -395,8 +397,10 @@ class TW10SubHaloMass(SubHaloMass):
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing any cosmology- or mass-definition-dependent context.
+        cosmology : Cosmology
+            Cosmology supplied for API consistency. This implementation uses
+            only :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
+            mass definition.
         m_host : float or array_like
             Host halo mass in physical :math:`M_\\odot`.
         m_sub : float or array_like
@@ -431,7 +435,7 @@ class JvdB14SubHaloMass(SubHaloMass):
         self.zeta = 1.19
 
     @partial(jax.jit, static_argnums=(0,))
-    def dndlnmu(self, halo_model, m_host, m_sub):
+    def dndlnmu(self, cosmology, m_host, m_sub):
         """
         Compute the Jiang and van den Bosch (2014) subhalo mass function.
 
@@ -447,8 +451,10 @@ class JvdB14SubHaloMass(SubHaloMass):
     
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing any cosmology- or mass-definition-dependent context.
+        cosmology : Cosmology
+            Cosmology supplied for API consistency. This implementation uses
+            only :math:`\\mu = M_{\\rm sub} / M_{\\rm host}` and is agnostic of
+            mass definition.
         m_host : float or array_like
             Host halo mass in physical :math:`M_\\odot`.
         m_sub : float or array_like

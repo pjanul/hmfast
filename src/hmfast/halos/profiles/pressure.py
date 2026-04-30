@@ -250,7 +250,16 @@ class GNFWPressureProfile(PressureProfile):
         # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
         mass_def_old = halo_model.mass_definition
         mass_def_500c = MassDefinition(500, "critical")
-        c_old = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_old = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         m500c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old), (len(m), len(z)))
 
         r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), m500c.shape)  # (Nm, Nz)
@@ -454,7 +463,16 @@ class B12PressureProfile(PressureProfile):
         # Convert input mass to M200c for normalization
         mass_def_old = halo_model.mass_definition
         mass_def_200c = MassDefinition(200, "critical")
-        c_old = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_old = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         m200c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old), (len(m), len(z)))
 
         r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m200c, z), m200c.shape)  # (Nm, Nz)

@@ -404,7 +404,16 @@ class NFWDensityProfile(DensityProfile):
         
         # Get scale radius r_s
         r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z))) * cparams["h"]
-        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_delta = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         r_s = r_delta / c_delta # (Nm, Nz)
         x_s = r[:, None, None] * cparams["h"] / ((1.0 + z[None, None, :]) * r_s[None, :, :])
         
@@ -442,7 +451,16 @@ class NFWDensityProfile(DensityProfile):
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
-        c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model, m, z), (len(m), len(z)))
+        c_delta = jnp.reshape(
+            halo_model.concentration.c_delta(
+                halo_model.cosmology,
+                m,
+                z,
+                mass_definition=halo_model.mass_definition,
+                convert_masses=halo_model.convert_masses,
+            ),
+            (len(m), len(z)),
+        )
         r_s = r_delta / c_delta
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_s = d_A_z[None, :] / r_s

@@ -13,19 +13,25 @@ class Concentration(ABC):
     All subclasses must implement the c_delta method.
     """
     @abstractmethod
-    @partial(jax.jit, static_argnums=(0,))
-    def c_delta(self, halo_model, m, z):
+    @partial(jax.jit, static_argnums=(0, 5))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
         """
         Compute the concentration parameter :math:`c_\\Delta`.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing the cosmology and target mass definition.
+        cosmology : Cosmology
+            Cosmology used to evaluate the concentration relation.
         m : array-like
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+        mass_definition : MassDefinition, optional
+            Target halo mass definition. Defaults to
+            ``MassDefinition(delta=200, reference="critical")``.
+        convert_masses : bool, optional
+            Whether to convert from the relation's native mass definition when
+            needed.
 
         Returns
         -------
@@ -49,19 +55,23 @@ class ConstantConcentration(Concentration):
         self.c = c
         pass
 
-    @partial(jax.jit, static_argnums=(0,))
-    def c_delta(self, halo_model, m, z):
+    @partial(jax.jit, static_argnums=(0, 5))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
         """
         Returns a constant value for the concentration parameter, broadcast to the shape of the input masses and redshifts.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing the cosmology and target mass definition.
+        cosmology : Cosmology
+            Cosmology used to evaluate the concentration relation.
         m : array-like
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+        mass_definition : MassDefinition, optional
+            Target halo mass definition. Included for API consistency.
+        convert_masses : bool, optional
+            Included for API consistency.
 
         Returns
         -------
@@ -91,19 +101,25 @@ class D08Concentration(Concentration):
         pass
 
 
-    @partial(jax.jit, static_argnums=(0,))
-    def c_delta(self, halo_model, m, z):
+    @partial(jax.jit, static_argnums=(0, 5))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
         """
         Compute the concentration parameter.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing the cosmology and target mass definition.
+        cosmology : Cosmology
+            Cosmology used to evaluate the concentration relation.
         m : array-like
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+        mass_definition : MassDefinition, optional
+            Target halo mass definition. Defaults to
+            ``MassDefinition(delta=200, reference="critical")``.
+        convert_masses : bool, optional
+            Whether to convert from the relation's native mass definition when
+            needed.
 
         Returns
         -------
@@ -113,9 +129,9 @@ class D08Concentration(Concentration):
         """
         
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        h = halo_model.cosmology.H0 / 100.0
+        h = cosmology.H0 / 100.0
         m_internal = m * h
-        mdef = halo_model.mass_definition
+        mdef = mass_definition
 
         # Parameter Lookup Table
         coeffs = {
@@ -131,21 +147,21 @@ class D08Concentration(Concentration):
             A, B, C, M_pivot = coeffs[key]
             return jnp.squeeze(A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C)
 
-        if not halo_model.convert_masses:
+        if not convert_masses:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
         # Conversion Logic (Native 200c)
         A, B, C, M_pivot = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
         c_seed = A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C
-        m_200c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_200c = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Compute r_s from native 200c mesh
         c_200c = A * ((m_200c * h) / M_pivot)**B * (1 + z[None, :])**C
-        r_200c = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), (1, 0))(m_200c, z).T
+        r_200c = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), (1, 0))(m_200c, z).T
         
         # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
         return (r_target * c_200c / r_200c).reshape(len(m), len(z))
 
 
@@ -170,19 +186,25 @@ class B13Concentration(Concentration):
     def __init__(self):
         pass
 
-    @partial(jax.jit, static_argnums=(0,))
-    def c_delta(self, halo_model, m, z):
+    @partial(jax.jit, static_argnums=(0, 5))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
         """
         Compute the concentration parameter.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing the cosmology and target mass definition.
+        cosmology : Cosmology
+            Cosmology used to evaluate the concentration relation.
         m : array-like
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+        mass_definition : MassDefinition, optional
+            Target halo mass definition. Defaults to
+            ``MassDefinition(delta=200, reference="critical")``.
+        convert_masses : bool, optional
+            Whether to convert from the relation's native mass definition when
+            needed.
 
         Returns
         -------
@@ -191,9 +213,9 @@ class B13Concentration(Concentration):
             singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        h = halo_model.cosmology.H0 / 100.0
+        h = cosmology.H0 / 100.0
         m_internal = m * h
-        mdef = halo_model.mass_definition
+        mdef = mass_definition
         
         # Parameter Lookup Table
         coeffs = {
@@ -203,7 +225,7 @@ class B13Concentration(Concentration):
         }
 
         key = (mdef.delta, mdef.reference)
-        D = jnp.atleast_1d(halo_model.cosmology.growth_factor(z)) # Shape (Nz,)
+        D = jnp.atleast_1d(cosmology.growth_factor(z)) # Shape (Nz,)
 
         # Get concentration for a given mass-redshift pair and a set of parameters
         def compute_c(m_val, z_val, D_val, A, B, C):
@@ -216,7 +238,7 @@ class B13Concentration(Concentration):
             return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C))
 
         # Conversion Fallback
-        if not halo_model.convert_masses:
+        if not convert_masses:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
         # Use 200c as native reference for conversion
@@ -225,16 +247,16 @@ class B13Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C)
         
-        m_native = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_native = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and scale radius at native definition
         c_native = compute_c(m_native * h, z[None, :], D[None, :], A, B, C)
 
-        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
+        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
         return (r_target / r_s).reshape(len(m), len(z))
 
 
@@ -257,19 +279,25 @@ class SC14Concentration(Concentration):
     def __init__(self):
         pass
 
-    @partial(jax.jit, static_argnums=(0,))
-    def c_delta(self, halo_model, m, z):
+    @partial(jax.jit, static_argnums=(0, 5))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
         """
         Compute the concentration parameter.
 
         Parameters
         ----------
-        halo_model : HaloModel
-            Halo model providing the cosmology and target mass definition.
+        cosmology : Cosmology
+            Cosmology used to evaluate the concentration relation.
         m : array-like
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
+        mass_definition : MassDefinition, optional
+            Target halo mass definition. Defaults to
+            ``MassDefinition(delta=200, reference="critical")``.
+        convert_masses : bool, optional
+            Whether to convert from the relation's native mass definition when
+            needed.
 
         Returns
         -------
@@ -279,9 +307,9 @@ class SC14Concentration(Concentration):
         """
         
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        h = halo_model.cosmology.H0 / 100.0
+        h = cosmology.H0 / 100.0
         m_internal = m * h
-        mdef = halo_model.mass_definition
+        mdef = mass_definition
 
         # 1. Parameter Table (SC14 is only natively defined for 200c)
         # Coefficients in descending order for jnp.polyval: [p5, p4, p3, p2, p1, p0]
@@ -303,7 +331,7 @@ class SC14Concentration(Concentration):
             return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], coeffs[key]))
 
         # Conversion Fallback
-        if not halo_model.convert_masses:
+        if not convert_masses:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
         # Use 200c as native reference
@@ -312,17 +340,17 @@ class SC14Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], native_coeffs)
         
-        m_native = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_native = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and radii at native definition
         c_native = compute_c(m_native * h, z[None, :], native_coeffs)
 
-        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(halo_model.cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
+        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
         
         r_s = r_native / c_native
 
         # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
         return (r_target / r_s).reshape(len(m), len(z))
 
 

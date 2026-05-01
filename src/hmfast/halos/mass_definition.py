@@ -180,6 +180,40 @@ jax.tree_util.register_pytree_node(
 
 
 @partial(jax.jit, static_argnums=(3, 4, 6))
+def _solve_m_delta_nfw(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter=20):
+    m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+    nm, nz = len(m), len(z)
+    c_old = jnp.broadcast_to(jnp.reshape(jnp.squeeze(jnp.asarray(c_old)), (-1, nz)), (nm, nz))
+
+    d_old = mass_def_old._delta_numeric(cosmology, z)
+    d_new = mass_def_new._delta_numeric(cosmology, z)
+    d_old_z = mass_def_old._convert_reference(cosmology, z, d_old, from_ref=mass_def_old.reference, to_ref="critical")
+    d_new_z = mass_def_new._convert_reference(cosmology, z, d_new, from_ref=mass_def_new.reference, to_ref="critical")
+    is_same_z = jnp.isclose(d_old_z, d_new_z) & (mass_def_old.reference == mass_def_new.reference)
+
+    mm, _ = jnp.meshgrid(m, z, indexing='ij')
+    x0 = m[:, None] * (d_old_z / d_new_z)[None, :] ** 0.2
+
+    def solve_single(m_i, c_i, x0_i, d_o, d_n, same_flag):
+        f_nfw = lambda x: jnp.log1p(x) - x / (1.0 + x)
+        obj = lambda m_new: m_i / m_new - f_nfw(c_i) / f_nfw(c_i * (m_new / m_i * d_o / d_n) ** (1 / 3))
+
+        return jax.lax.cond(
+            same_flag,
+            lambda _: m_i,
+            lambda _: newton_root(obj, x0=x0_i, max_iter=max_iter),
+            None,
+        )
+
+    d_o_flat = jnp.broadcast_to(d_old_z[None, :], mm.shape).flatten()
+    d_n_flat = jnp.broadcast_to(d_new_z[None, :], mm.shape).flatten()
+    same_flat = jnp.broadcast_to(is_same_z[None, :], mm.shape).flatten()
+
+    results = jax.vmap(solve_single)(mm.flatten(), c_old.flatten(), x0.flatten(), d_o_flat, d_n_flat, same_flat)
+    return jnp.squeeze(results.reshape(mm.shape))
+
+
+@partial(jax.jit, static_argnums=(3, 4, 6))
 def _convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter=20):
     """
     Convert halo masses between two spherical-overdensity definitions.
@@ -248,16 +282,46 @@ def _convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_ite
     return jnp.squeeze(results.reshape(mm.shape))
 
 
-def mass_translator(mass_def_new, mass_def_old, concentration, max_iter=20):
+def mass_translator(mass_def_old, mass_def_new, concentration, max_iter=20):
     """
     Build a mass-conversion callable for fixed source and target definitions.
 
+    Conversions between overdensity thresholds :math:`\\Delta` are performed
+    by solving
+
+    .. math::
+
+        \\frac{M_{\\Delta}}{M_{\\Delta'}} =
+        \\frac{f(c_{\\Delta})}
+        {f\\!\\left[c_{\\Delta}
+        \\left(\\frac{M_{\\Delta'}}{M_{\\Delta}}
+        \\frac{\\Delta_{\\mathrm{old,c}}}{\\Delta_{\\mathrm{new,c}}}\\right)^{1/3}\\right]},
+
+    where
+
+    .. math::
+
+        f(x) = \\ln(1+x) - \\frac{x}{1+x}.
+
+    Reference-only conversions use
+
+    .. math::
+
+        \\Delta_{\\mathrm{m}}(z) = \\frac{\\Delta_{\\mathrm{c}}(z)}{\\Omega_m(z)},
+
+    while virial overdensities are computed from
+
+    .. math::
+
+        \\Delta_{\\mathrm{vir,c}}(z) = 18\\pi^2 + 82x - 39x^2,
+        \\qquad x = \\Omega_m(z) - 1.
+
     Parameters
     ----------
-    mass_def_new : MassDefinition
-        Target mass definition.
     mass_def_old : MassDefinition
         Source mass definition.
+    mass_def_new : MassDefinition
+        Target mass definition.
     concentration : Concentration
         Concentration relation calibrated for the source mass definition.
         When the returned callable is evaluated, this object is used to
@@ -272,10 +336,29 @@ def mass_translator(mass_def_new, mass_def_old, concentration, max_iter=20):
         ``mass_def_old`` to ``mass_def_new``.
     """
 
+    if (mass_def_old.delta == mass_def_new.delta) and (mass_def_old.reference == mass_def_new.reference):
+        @jax.jit
+        def f(cosmology, m, z):
+            m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+            return jnp.squeeze(jnp.broadcast_to(m[:, None], (len(m), len(z))))
+
+        return f
+
+    if mass_def_old.delta == mass_def_new.delta:
+        @jax.jit
+        def f(cosmology, m, z):
+            m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+            d_old = mass_def_old._delta_numeric(cosmology, z)
+            d_new = mass_def_old._convert_reference(cosmology, z, d_old, from_ref=mass_def_old.reference, to_ref=mass_def_new.reference)
+            return jnp.squeeze(m[:, None] * (d_new / d_old)[None, :])
+
+        return f
+
+    @jax.jit
     def f(cosmology, m, z):
         c_old = concentration.c_delta(cosmology, m, z, mass_definition=mass_def_old, convert_masses=False,)
-        
-        return _convert_m_delta(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
+
+        return _solve_m_delta_nfw(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
 
     return f
 

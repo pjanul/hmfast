@@ -7,7 +7,7 @@ hmfast.halos
 
    hmfast.halos.HaloModel
    hmfast.halos.MassDefinition
-   hmfast.halos.convert_m_delta
+   hmfast.halos.mass_translator
 
 .. toctree::
    :maxdepth: 2

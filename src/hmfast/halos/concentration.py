@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from functools import partial
 from abc import ABC, abstractmethod
 
-from hmfast.halos.mass_definition import MassDefinition, convert_m_delta
+from hmfast.halos.mass_definition import MassDefinition, _convert_m_delta
 
 
 
@@ -154,7 +154,7 @@ class D08Concentration(Concentration):
         A, B, C, M_pivot = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
         c_seed = A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C
-        m_200c = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_200c = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Compute r_s from native 200c mesh
         c_200c = A * ((m_200c * h) / M_pivot)**B * (1 + z[None, :])**C
@@ -247,7 +247,7 @@ class B13Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C)
         
-        m_native = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_native = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and scale radius at native definition
         c_native = compute_c(m_native * h, z[None, :], D[None, :], A, B, C)
@@ -340,7 +340,7 @@ class SC14Concentration(Concentration):
         # c_seed for the solver
         c_seed = compute_c(m_internal[:, None], z[None, :], native_coeffs)
         
-        m_native = jnp.reshape(convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
+        m_native = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and radii at native definition
         c_native = compute_c(m_native * h, z[None, :], native_coeffs)

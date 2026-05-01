@@ -180,7 +180,7 @@ jax.tree_util.register_pytree_node(
 
 
 @partial(jax.jit, static_argnums=(3, 4, 6))
-def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter=20):
+def _convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter=20):
     """
     Convert halo masses between two spherical-overdensity definitions.
 
@@ -215,8 +215,8 @@ def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter
         dimensions get squeezed before return.
     """
     m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-    c_old = jnp.atleast_2d(c_old)
     nm, nz = len(m), len(z)
+    c_old = jnp.broadcast_to(jnp.reshape(jnp.squeeze(jnp.asarray(c_old)), (-1, nz)), (nm, nz))
 
     def get_delta_crit(mdef, z_val):
         delta = mdef._delta_numeric(cosmology, z_val)
@@ -227,7 +227,6 @@ def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter
     is_same_z = jnp.isclose(d_old_z, d_new_z) & (mass_def_old.reference == mass_def_new.reference)
 
     mm, zz = jnp.meshgrid(m, z, indexing='ij')
-    c_old = c_old[:nm, :nz].reshape(mm.shape)
     x0 = m[:, None] * (d_old_z / d_new_z)[None, :] ** 0.2
 
     def solve_single(m_i, c_i, x0_i, d_o, d_n, same_flag):
@@ -247,5 +246,37 @@ def convert_m_delta(cosmology, m, z, mass_def_old, mass_def_new, c_old, max_iter
 
     results = jax.vmap(solve_single)(mm.flatten(), c_old.flatten(), x0.flatten(), d_o_flat, d_n_flat, same_flat)
     return jnp.squeeze(results.reshape(mm.shape))
+
+
+def mass_translator(mass_def_new, mass_def_old, concentration, max_iter=20):
+    """
+    Build a mass-conversion callable for fixed source and target definitions.
+
+    Parameters
+    ----------
+    mass_def_new : MassDefinition
+        Target mass definition.
+    mass_def_old : MassDefinition
+        Source mass definition.
+    concentration : Concentration
+        Concentration relation calibrated for the source mass definition.
+        When the returned callable is evaluated, this object is used to
+        compute :math:`c_{\\Delta}` internally for ``mass_def_old``.
+    max_iter : int, optional
+        Maximum number of root-finder iterations.
+
+    Returns
+    -------
+    callable
+        Function ``f(cosmology, m, z)`` that converts masses from
+        ``mass_def_old`` to ``mass_def_new``.
+    """
+
+    def f(cosmology, m, z):
+        c_old = concentration.c_delta(cosmology, m, z, mass_definition=mass_def_old, convert_masses=False,)
+        
+        return _convert_m_delta(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
+
+    return f
 
 

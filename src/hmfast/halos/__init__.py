@@ -2,12 +2,12 @@ from .halo_model import HaloModel
 from . import concentration
 from . import massfunc
 from . import bias
-from .mass_definition import MassDefinition, convert_m_delta
+from .mass_definition import MassDefinition, mass_translator
 from . import profiles
 
 __all__ = [
     "HaloModel",
-    "convert_m_delta",
+    "mass_translator",
     "concentration",
     "massfunc",
     "bias",

@@ -7,7 +7,7 @@ from functools import partial
 
 from hmfast.download import get_default_data_path
 from hmfast.utils import Const
-from hmfast.halos.mass_definition import MassDefinition, convert_m_delta
+from hmfast.halos.mass_definition import MassDefinition, _convert_m_delta
 from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
@@ -260,7 +260,7 @@ class GNFWPressureProfile(PressureProfile):
             ),
             (len(m), len(z)),
         )
-        m500c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old), (len(m), len(z)))
+        m500c = jnp.reshape(_convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_500c, c_old=c_old), (len(m), len(z)))
 
         r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), m500c.shape)  # (Nm, Nz)
     
@@ -473,7 +473,7 @@ class B12PressureProfile(PressureProfile):
             ),
             (len(m), len(z)),
         )
-        m200c = jnp.reshape(convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old), (len(m), len(z)))
+        m200c = jnp.reshape(_convert_m_delta(halo_model.cosmology, m, z, mass_def_old, mass_def_200c, c_old=c_old), (len(m), len(z)))
 
         r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m200c, z), m200c.shape)  # (Nm, Nz)
     

@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
 
@@ -178,8 +179,10 @@ class B13Concentration(Concentration):
 
         c_\\Delta(M, z) = A D(z)^B \\nu^C
 
-    where :math:`D(z)` is the linear growth factor and :math:`\\nu` is a function
-    of mass and redshift.
+    where :math:`D(z)` is the linear growth factor and
+    :math:`\\nu(M, z) = \\frac{\\delta_c}{\\sigma(M, z)}`, with
+    :math:`\\delta_c \\approx 1.686` and :math:`\\sigma(M, z)` the linear-theory
+    variance of the density field smoothed on the mass scale :math:`M`.
 
     Calibrated for 200c, 200m, and virial mass definitions.
     """
@@ -213,8 +216,6 @@ class B13Concentration(Concentration):
             singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        h = cosmology.H0 / 100.0
-        m_internal = m * h
         mdef = mass_definition
         
         # Parameter Lookup Table
@@ -225,17 +226,26 @@ class B13Concentration(Concentration):
         }
 
         key = (mdef.delta, mdef.reference)
-        D = jnp.atleast_1d(cosmology.growth_factor(z)) # Shape (Nz,)
+        D = jnp.atleast_1d(cosmology.growth_factor(z))
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        sigma_interp = jscipy.interpolate.RegularGridInterpolator(
+            (ln_x_grid, ln_M_grid),
+            jnp.log(sigma_grid),
+        )
 
-        # Get concentration for a given mass-redshift pair and a set of parameters
-        def compute_c(m_val, z_val, D_val, A, B, C):
-            nu = (1.12 * (m_val / 5e13)**0.3 + 0.53) / D_val
-            return A * D_val**B * nu**C
+        def compute_c(masses, redshifts, A, B, C):
+            zz, mm = jnp.meshgrid(redshifts, masses, indexing='ij')
+            pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
+            sigma_m = jnp.exp(sigma_interp(pts))
+            # TODO: generalize delta_c handling for alternate collapse-threshold prescriptions.
+            delta_c = 1.686
+            nu = delta_c / sigma_m
+            return (A * D[:, None]**B * nu**C).T
 
         # Direct Match Case
         if key in coeffs:
             A, B, C = coeffs[key]
-            return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C))
+            return jnp.squeeze(compute_c(m, z, A, B, C))
 
         # Conversion Fallback
         if not convert_masses:
@@ -245,12 +255,12 @@ class B13Concentration(Concentration):
         A, B, C = coeffs[(200, "critical")]
         native_def = MassDefinition(200, "critical")
         # c_seed for the solver
-        c_seed = compute_c(m_internal[:, None], z[None, :], D[None, :], A, B, C)
+        c_seed = compute_c(m, z, A, B, C)
         
         m_native = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
         
         # Re-compute concentration and scale radius at native definition
-        c_native = compute_c(m_native * h, z[None, :], D[None, :], A, B, C)
+        c_native = compute_c(m_native, z, A, B, C)
 
         r_native = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
         r_s = r_native / c_native

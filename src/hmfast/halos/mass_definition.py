@@ -294,8 +294,7 @@ def mass_translator(mass_def_old, mass_def_new, concentration, max_iter=20):
         \\frac{M_{\\Delta}}{M_{\\Delta'}} =
         \\frac{f(c_{\\Delta})}
         {f\\!\\left[c_{\\Delta}
-        \\left(\\frac{M_{\\Delta'}}{M_{\\Delta}}
-        \\frac{\\Delta_{\\mathrm{old,c}}}{\\Delta_{\\mathrm{new,c}}}\\right)^{1/3}\\right]},
+        \\frac{r_{\\Delta'}}{r_{\\Delta}}\\right]},
 
     where
 
@@ -358,6 +357,32 @@ def mass_translator(mass_def_old, mass_def_new, concentration, max_iter=20):
     def f(cosmology, m, z):
         c_old = concentration.c_delta(cosmology, m, z, mass_definition=mass_def_old, convert_masses=False,)
 
+        return _solve_m_delta_nfw(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
+
+    return f
+
+
+def _mass_translator_from_c_old(mass_def_old, mass_def_new, max_iter=20):
+    if (mass_def_old.delta == mass_def_new.delta) and (mass_def_old.reference == mass_def_new.reference):
+        @jax.jit
+        def f(cosmology, m, z, c_old):
+            m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+            return jnp.squeeze(jnp.broadcast_to(m[:, None], (len(m), len(z))))
+
+        return f
+
+    if mass_def_old.delta == mass_def_new.delta:
+        @jax.jit
+        def f(cosmology, m, z, c_old):
+            m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+            d_old = mass_def_old._delta_numeric(cosmology, z)
+            d_new = mass_def_old._convert_reference(cosmology, z, d_old, from_ref=mass_def_old.reference, to_ref=mass_def_new.reference)
+            return jnp.squeeze(m[:, None] * (d_new / d_old)[None, :])
+
+        return f
+
+    @jax.jit
+    def f(cosmology, m, z, c_old):
         return _solve_m_delta_nfw(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
 
     return f

@@ -162,10 +162,10 @@ class HaloModel:
         logm = jnp.log(m_internal)
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"] / h**2   # internal halo-model normalization
         m_over_rho_mean = (m_internal / rho_mean_0)[:, None]  # (Nm, 1)
-
-
+    
+    
         # Public HMF and bias interfaces use physical masses.
-        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
         b1 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
         b2 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
     
@@ -220,6 +220,8 @@ class HaloModel:
             return.
         """
     
+        cparams = self.cosmology._cosmo_params()
+        h = cparams["h"]
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Weights and Setup
@@ -227,7 +229,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
@@ -389,7 +391,7 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
         bias = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
@@ -413,10 +415,8 @@ class HaloModel:
         # Final Power Spectrum
         I1 = get_I(tracer1)
         I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
-        
-        # Reconstruct the legacy linear spectrum normalization used by the
-        # current halo-model projection chain so outputs remain unchanged.
-        P_lin = jax.vmap(lambda zi: jnp.interp(h * k, *self.cosmology.pk(zi, linear=True)))(z).T * h**6
+
+        P_lin = jax.vmap(lambda zi: jnp.interp(k, *self.cosmology.pk(zi, linear=True)))(z).T
         
         return jnp.squeeze(P_lin * I1 * I2)
 
@@ -471,6 +471,9 @@ class HaloModel:
         kernel2 = tracer2.kernel(self.cosmology, z)
         
         h = self.cosmology.H0 / 100.0
+        # The current tracer kernels still absorb a legacy (Mpc/h)^3
+        # normalization in the Limber projection.
+        P_2h_grid = P_2h_grid * h**3
         comov_vol = self.cosmology.comoving_volume_element(z) * h**3
     
         # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]

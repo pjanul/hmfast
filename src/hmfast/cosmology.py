@@ -279,10 +279,9 @@ class Cosmology:
 
         z_grid = self._z_grid_pk()
         cparams = self._cosmo_params()
-        h = cparams["h"]
 
         # Power spectra for all redshifts, shape: (n_k, n_z)
-        pk_grid = jax.vmap(lambda zp: self.pk(zp, linear=True)[1].flatten())(z_grid).T * h**3
+        pk_grid = jax.vmap(lambda zp: self.pk(zp, linear=True)[1].flatten())(z_grid).T
 
         # Compute σ²(R, z) using the cached top-hat helper.
         R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
@@ -290,7 +289,6 @@ class Cosmology:
 
         # Compute σ(R, z)
         sigma_grid = jnp.exp(0.5 * jnp.log(var))
-
         # Mass grid, shape: (n_R,)
         rho_crit_0 = cparams["Rho_crit_0"]
         Omega0_cb = cparams['Omega0_cb']
@@ -298,7 +296,6 @@ class Cosmology:
 
         ln_x = jnp.log1p(z_grid)
         ln_M = jnp.log(M_grid)
-
         return ln_x, ln_M, sigma_grid
 
 
@@ -515,12 +512,11 @@ class Cosmology:
         """
         
         z = jnp.atleast_1d(z)
-    
-        h = self.H0 / 100.0
-        k0 = 1e-2  # legacy reference wavenumber in h Mpc^-1
+
+        k0 = 1e-2
         z_grid_pk = self._z_grid_pk()
-        pk0_grid = jax.vmap(lambda zp: jnp.interp(h * k0, *self.pk(zp, linear=True)))(z_grid_pk)
-        D_grid = jnp.sqrt(pk0_grid / jnp.interp(h * k0, *self.pk(0.0, linear=True)))
+        pk0_grid = jax.vmap(lambda zp: jnp.interp(k0, *self.pk(zp, linear=True)))(z_grid_pk)
+        D_grid = jnp.sqrt(pk0_grid / jnp.interp(k0, *self.pk(0.0, linear=True)))
     
         return jnp.squeeze(jnp.interp(z, z_grid_pk, D_grid))
 
@@ -581,14 +577,11 @@ class Cosmology:
         """
         
         z = jnp.atleast_1d(z)
-        h = self.H0 / 100.0
         c_km_s = Const._c_ / 1e3
         k_grid = jnp.geomspace(1e-5, 1e1, 1000)
         z_grid_pk = self._z_grid_pk()
-    
-        # Reconstruct the legacy linear spectrum values so this derived
-        # quantity remains numerically unchanged.
-        P_grid = jax.vmap(lambda zp: jnp.interp(h * k_grid, *self.pk(zp, linear=True)))(z_grid_pk) * h**3
+
+        P_grid = jax.vmap(lambda zp: jnp.interp(k_grid, *self.pk(zp, linear=True)))(z_grid_pk)
     
         a_grid = 1.0 / (1.0 + z_grid_pk)
         H_grid = self.hubble_parameter(z_grid_pk)
@@ -647,19 +640,18 @@ class Cosmology:
         tuple
             :math:`(k, P(k))`, with :math:`k` in physical
             :math:`\\mathrm{Mpc}^{-1}` and :math:`P(k)` in physical
-            :math:`\\mathrm{Mpc}^3`.
+            :math:`\mathrm{Mpc}^3`.
         """
         params = self._to_dict()
         params["z_pk_save_nonclass"] = jnp.atleast_1d(z)[0]
-        h = self.H0 / 100.0
 
         key = "PKL" if linear else "PKNL"
         emu = self._load_emulator(key)
         k_grid, pk_power_fac = self._pk_grid()
         pk_log = emu.predictions(params)
-        pk = 10.0 ** pk_log * pk_power_fac / h**3
+        pk = 10.0 ** pk_log * pk_power_fac
 
-        return h * k_grid, pk
+        return k_grid, pk
 
     # ------------------------------------------------------------------
     # CMB

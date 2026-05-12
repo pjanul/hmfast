@@ -166,7 +166,6 @@ class T08HaloMass(HaloMass):
 
         ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
         cparams = cosmology._cosmo_params()
-        h = cparams["h"]
         z_grid = jnp.exp(ln_x_grid) - 1.0
 
         hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid, mass_definition=mass_definition)
@@ -175,7 +174,7 @@ class T08HaloMass(HaloMass):
         var_grid = sigma_grid**2
         dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
+        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3)
 
         # Create the interpolator, the meshgrid, and then stack the points
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
@@ -307,7 +306,6 @@ class T10HaloMass(HaloMass):
 
         ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
         cparams = cosmology._cosmo_params()
-        h = cparams["h"]
         z_grid = jnp.exp(ln_x_grid) - 1.0
 
         hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid)
@@ -316,7 +314,7 @@ class T10HaloMass(HaloMass):
         var_grid = sigma_grid**2
         dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3 * h**3)
+        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3)
 
         _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
         mm, zz = jnp.meshgrid(m, z, indexing='ij')

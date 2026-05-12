@@ -234,13 +234,16 @@ class B13Concentration(Concentration):
         )
 
         def compute_c(masses, redshifts, A, B, C):
-            zz, mm = jnp.meshgrid(redshifts, masses, indexing='ij')
-            pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
+            masses = jnp.asarray(masses)
+            redshifts = jnp.atleast_1d(redshifts)
+            mass_grid = masses[:, None] if masses.ndim == 1 else masses
+            redshift_grid = jnp.broadcast_to(redshifts[None, :], mass_grid.shape)
+            pts = jnp.stack([jnp.log1p(redshift_grid), jnp.log(mass_grid)], axis=-1)
             sigma_m = jnp.exp(sigma_interp(pts))
             # TODO: generalize delta_c handling for alternate collapse-threshold prescriptions.
             delta_c = 1.686
             nu = delta_c / sigma_m
-            return (A * D[:, None]**B * nu**C).T
+            return A * D[None, :]**B * nu**C
 
         # Direct Match Case
         if key in coeffs:

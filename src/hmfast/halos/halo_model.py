@@ -141,7 +141,7 @@ class HaloModel:
         Parameters
         ----------
         m : array-like
-            Halo mass grid in physical :math:`M_\\odot`.
+            Halo mass grid in :math:`M_\odot`.
         z : array-like
             Redshift(s).
 
@@ -157,15 +157,13 @@ class HaloModel:
        
         m = jnp.atleast_1d(m)
         cparams = self.cosmology._cosmo_params()
-        h = self.cosmology.H0 / 100.0
-        m_internal = m * h
-        logm = jnp.log(m_internal)
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"] / h**2   # internal halo-model normalization
-        m_over_rho_mean = (m_internal / rho_mean_0)[:, None]  # (Nm, 1)
+        logm = jnp.log(m)
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]
+        m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
     
         # Public HMF and bias interfaces use physical masses.
-        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
+        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         b1 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
         b2 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
     
@@ -175,7 +173,7 @@ class HaloModel:
         I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
     
         # Apply formulas
-        m_min =  m_internal[0]
+        m_min =  m[0]
         n_min =  (1.0 - I0) * rho_mean_0 / m_min
         b1_min = (1.0 - I1) * rho_mean_0 / m_min / n_min
         b2_min = -I2 * rho_mean_0 / m_min / n_min
@@ -186,8 +184,7 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_1h(self, tracer1, tracer2, k, m, z,  k_damp=0.01):
         """
-        Compute the 1-halo contribution to the 3D power spectrum in
-        physical units.
+        Compute the 1-halo contribution to the 3D power spectrum.
 
         .. math::
 
@@ -205,7 +202,7 @@ class HaloModel:
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
-            Mass array in physical :math:`M_\\odot`. This must be an array because it
+            Mass array in :math:`M_\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array-like
             Redshift grid.
@@ -220,8 +217,6 @@ class HaloModel:
             return.
         """
     
-        cparams = self.cosmology._cosmo_params()
-        h = cparams["h"]
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         
         # Weights and Setup
@@ -229,7 +224,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
@@ -288,8 +283,7 @@ class HaloModel:
 
         The Limber-projected spectrum is obtained by integrating the 1-halo
         3D power spectrum against the tracer kernels and the comoving volume
-        element written in the legacy :math:`(\\mathrm{Mpc}/h)^3` convention used by the
-        current tracer kernels.
+        element.
 
         Parameters
         ----------
@@ -300,7 +294,7 @@ class HaloModel:
         l : array-like
             Multipole grid.
         m : array
-            Mass array in physical :math:`M_\\odot`. This must be an array because it
+            Mass array in :math:`M_\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array
             Redshift array. This must be an array because it defines the
@@ -329,8 +323,7 @@ class HaloModel:
         P_1h_grid = jax.vmap(get_pk_slice)(z)
         kernel1 = tracer1.kernel(self.cosmology, z)  
         kernel2 = tracer2.kernel(self.cosmology, z)  
-        h = self.cosmology.H0 / 100.0
-        comov_vol = self.cosmology.comoving_volume_element(z) * h**3
+        comov_vol = self.cosmology.comoving_volume_element(z)
 
         # Integrate over redshift
         integrand = P_1h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
@@ -342,8 +335,7 @@ class HaloModel:
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_2h(self, tracer1, tracer2, k, m, z):
         """
-        Compute the 2-halo contribution to the 3D power spectrum in
-        physical units.
+        Compute the 2-halo contribution to the 3D power spectrum.
 
         .. math::
         
@@ -368,7 +360,7 @@ class HaloModel:
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
-            Mass array in physical :math:`M_\\odot`. This must be an array because it
+            Mass array in :math:`M_\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array-like
             Redshift grid.
@@ -381,8 +373,7 @@ class HaloModel:
             return.
         """
         
-        cparams = self.cosmology._cosmo_params()
-        h, k, m, z = cparams["h"], jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         tracer2 = tracer1 if tracer2 is None else tracer2
     
         # Weights and Ingredients
@@ -391,7 +382,7 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         bias = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
@@ -429,8 +420,7 @@ class HaloModel:
 
         The Limber-projected spectrum is obtained by integrating the 2-halo
         3D power spectrum against the tracer kernels and the comoving volume
-        element written in the legacy :math:`(\\mathrm{Mpc}/h)^3` convention used by the
-        current tracer kernels.
+        element.
 
         Parameters
         ----------
@@ -441,7 +431,7 @@ class HaloModel:
         l : array-like
             Multipole grid.
         m : array
-            Mass array in physical :math:`M_\\odot`. This must be an array because it
+            Mass array in :math:`M_\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array
             Redshift array. This must be an array because it defines the
@@ -470,11 +460,7 @@ class HaloModel:
         kernel1 = tracer1.kernel(self.cosmology, z)
         kernel2 = tracer2.kernel(self.cosmology, z)
         
-        h = self.cosmology.H0 / 100.0
-        # The current tracer kernels still absorb a legacy (Mpc/h)^3
-        # normalization in the Limber projection.
-        P_2h_grid = P_2h_grid * h**3
-        comov_vol = self.cosmology.comoving_volume_element(z) * h**3
+        comov_vol = self.cosmology.comoving_volume_element(z)
     
         # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]
         integrand = P_2h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])

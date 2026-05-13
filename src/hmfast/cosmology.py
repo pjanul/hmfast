@@ -303,32 +303,32 @@ class Cosmology:
     @partial(jax.jit, static_argnums=(0,))
     def sigma_m(self, m, z):
         """
-        Evaluate :math:`\sigma(M, z)` on a physical mass-redshift grid.
+        Evaluate :math:`\\sigma(M, z)` on a physical mass-redshift grid.
 
         The variance is defined by
 
         .. math::
 
-            \sigma^2(M, z) = \frac{1}{2\pi^2} \int_0^\infty dk\, k^2\,
-            P_{\mathrm{L}}(k, z)\, \hat{W}^2(kR),
+            \\sigma^2(M, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
+            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
 
         with Fourier-space top-hat window
 
         .. math::
 
-            \hat{W}(x) = \frac{3}{x^3}\left[\sin x - x \cos x\right].
+            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
         m : float or jnp.ndarray
-            Halo mass or mass grid in physical :math:`M_\odot`.
+            Halo mass or mass grid in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift or redshift grid.
 
         Returns
         -------
         float or jnp.ndarray
-            Values of :math:`\sigma(M, z)` with shape :math:`(N_m, N_z)`,
+            Values of :math:`\\sigma(M, z)` with shape :math:`(N_m, N_z)`,
             where singleton dimensions get squeezed before return.
         """
 
@@ -350,33 +350,33 @@ class Cosmology:
     @partial(jax.jit, static_argnums=(0,))
     def sigma_r(self, r, z):
         """
-        Evaluate :math:`\sigma(R, z)` on a physical radius-redshift grid.
+        Evaluate :math:`\\sigma(R, z)` on a physical radius-redshift grid.
 
         The variance is defined by
 
         .. math::
 
-            \sigma^2(R, z) = \frac{1}{2\pi^2} \int_0^\infty dk\, k^2\,
-            P_{\mathrm{L}}(k, z)\, \hat{W}^2(kR),
+            \\sigma^2(R, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
+            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
 
         with Fourier-space top-hat window
 
         .. math::
 
-            \hat{W}(x) = \frac{3}{x^3}\left[\sin x - x \cos x\right].
+            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
         r : float or jnp.ndarray
             Comoving top-hat radius or radius grid in physical
-            :math:`\mathrm{Mpc}`.
+            :math:`\\mathrm{Mpc}`.
         z : float or jnp.ndarray
             Redshift or redshift grid.
 
         Returns
         -------
         float or jnp.ndarray
-            Values of :math:`\sigma(R, z)` with shape :math:`(N_r, N_z)`,
+            Values of :math:`\\sigma(R, z)` with shape :math:`(N_r, N_z)`,
             where singleton dimensions get squeezed before return.
         """
 

@@ -164,13 +164,14 @@ class T08HaloMass(HaloMass):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        ln_x_grid, ln_M_grid, _ = cosmology._compute_sigma_grid()
         cparams = cosmology._cosmo_params()
         z_grid = jnp.exp(ln_x_grid) - 1.0
 
-        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid, mass_definition=mass_definition)
-
         R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
+        sigma_grid = jnp.reshape(cosmology.sigma_r(R_grid, z_grid), (len(R_grid), len(z_grid))).T
+
+        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid, mass_definition=mass_definition)
         var_grid = sigma_grid**2
         dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
@@ -304,13 +305,14 @@ class T10HaloMass(HaloMass):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        ln_x_grid, ln_M_grid, _ = cosmology._compute_sigma_grid()
         cparams = cosmology._cosmo_params()
         z_grid = jnp.exp(ln_x_grid) - 1.0
 
-        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid)
-
         R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
+        sigma_grid = jnp.reshape(cosmology.sigma_r(R_grid, z_grid), (len(R_grid), len(z_grid))).T
+
+        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid)
         var_grid = sigma_grid**2
         dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
         dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid

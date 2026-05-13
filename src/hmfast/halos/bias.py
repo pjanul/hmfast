@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
 
@@ -202,13 +201,8 @@ class T10HaloBias(HaloBias):
        
        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
-
-        # Create the interpolator, the meshgrid, and then stack the points
-        _sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid)) 
-        zz, mm = jnp.meshgrid(z, m, indexing='ij')
-        pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-        sigma_M = jnp.exp(_sigma_interp(pts))
+        sigma_M = jnp.transpose(jnp.reshape(cosmology.sigma_m(m, z), (len(m), len(z))))
+        zz = jnp.broadcast_to(z[:, None], sigma_M.shape)
 
         # Handle delta values
         delta_numeric = mass_definition._delta_numeric(cosmology, z)

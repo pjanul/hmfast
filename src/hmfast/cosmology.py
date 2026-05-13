@@ -1,6 +1,7 @@
 import os
 import jax
 import jax.numpy as jnp
+import jax.scipy as jscipy
 from typing import Dict, Union
 from mcfit import TophatVar
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
@@ -297,6 +298,94 @@ class Cosmology:
         ln_x = jnp.log1p(z_grid)
         ln_M = jnp.log(M_grid)
         return ln_x, ln_M, sigma_grid
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def sigma_m(self, m, z):
+        """
+        Evaluate :math:`\sigma(M, z)` on a physical mass-redshift grid.
+
+        The variance is defined by
+
+        .. math::
+
+            \sigma^2(M, z) = \frac{1}{2\pi^2} \int_0^\infty dk\, k^2\,
+            P_{\mathrm{L}}(k, z)\, \hat{W}^2(kR),
+
+        with Fourier-space top-hat window
+
+        .. math::
+
+            \hat{W}(x) = \frac{3}{x^3}\left[\sin x - x \cos x\right].
+
+        Parameters
+        ----------
+        m : float or jnp.ndarray
+            Halo mass or mass grid in physical :math:`M_\odot`.
+        z : float or jnp.ndarray
+            Redshift or redshift grid.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Values of :math:`\sigma(M, z)` with shape :math:`(N_m, N_z)`,
+            where singleton dimensions get squeezed before return.
+        """
+
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        ln_x_grid, ln_M_grid, sigma_grid = self._compute_sigma_grid()
+        sigma_interp = jscipy.interpolate.RegularGridInterpolator(
+            (ln_x_grid, ln_M_grid),
+            jnp.log(sigma_grid),
+        )
+
+        mm, zz = jnp.meshgrid(m, z, indexing='ij')
+        pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
+
+        return jnp.squeeze(jnp.exp(sigma_interp(pts)))
+
+
+    @partial(jax.jit, static_argnums=(0,))
+    def sigma_r(self, r, z):
+        """
+        Evaluate :math:`\sigma(R, z)` on a physical radius-redshift grid.
+
+        The variance is defined by
+
+        .. math::
+
+            \sigma^2(R, z) = \frac{1}{2\pi^2} \int_0^\infty dk\, k^2\,
+            P_{\mathrm{L}}(k, z)\, \hat{W}^2(kR),
+
+        with Fourier-space top-hat window
+
+        .. math::
+
+            \hat{W}(x) = \frac{3}{x^3}\left[\sin x - x \cos x\right].
+
+        Parameters
+        ----------
+        r : float or jnp.ndarray
+            Comoving top-hat radius or radius grid in physical
+            :math:`\mathrm{Mpc}`.
+        z : float or jnp.ndarray
+            Redshift or redshift grid.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Values of :math:`\sigma(R, z)` with shape :math:`(N_r, N_z)`,
+            where singleton dimensions get squeezed before return.
+        """
+
+        r = jnp.atleast_1d(r)
+        cparams = self._cosmo_params()
+        rho_mean_0 = cparams["Omega0_cb"] * cparams["Rho_crit_0"]
+        m = 4.0 * jnp.pi / 3.0 * rho_mean_0 * r**3
+
+        return self.sigma_m(m, z)
 
 
     # ------------------------------------------------------------------

@@ -117,10 +117,6 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         """
         Return a new profile instance with updated HOD parameters.
 
-        The default mass parameters are the legacy Zheng et al.-style values
-        converted from :math:`M_{\\odot}/h` to physical :math:`M_{\\odot}`
-        assuming :math:`h = 0.68`.
-
         Parameters
         ----------
         sigma_log10M, alpha_s, M1_prime, M_min, M0 : float, optional
@@ -223,8 +219,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        h = halo_model.cosmology.H0 / 100
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses), (len(m), len(z)))
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
@@ -257,8 +252,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        h = halo_model.cosmology.H0 / 100
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses), (len(m), len(z)))
         bh = jnp.reshape(halo_model.halo_bias.halo_bias(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses, 1), (len(m), len(z)))
         ng = self.ng_bar(halo_model, m, z)
 
@@ -274,10 +268,9 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
@@ -315,10 +308,9 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         """
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
 
         u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
@@ -354,10 +346,9 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
        
-        h = halo_model.cosmology.H0 / 100 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z)) * h**3
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))

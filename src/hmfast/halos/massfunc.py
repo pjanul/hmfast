@@ -198,7 +198,7 @@ class T10HaloMass(HaloMass):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def _f_sigma(self, cosmology, sigma, z):
+    def _f_sigma(self, cosmology, sigma, z, mass_definition=MassDefinition(delta=200, reference="mean")):
         """
         Evaluate the internal Tinker et al. (2010) fitting function.
     
@@ -216,21 +216,35 @@ class T10HaloMass(HaloMass):
             Values of the dimensionless fitting function with shape matching
             ``sigma``.
         """
+        delta_numeric = mass_definition._delta_numeric(cosmology, z)
+        delta_mean = mass_definition._convert_reference(
+            cosmology,
+            z,
+            delta_numeric,
+            from_ref=mass_definition.reference,
+            to_ref="mean",
+        )
+        ldelta_mean = jnp.log10(delta_mean)
+
+        delta_mean_tab = jnp.log10(jnp.array([200., 300., 400., 600., 800., 1200., 1600., 2400., 3200.]))
+        alpha_tab = jnp.array([0.368, 0.363, 0.385, 0.389, 0.393, 0.365, 0.379, 0.355, 0.327])
+        beta_tab = jnp.array([0.589, 0.585, 0.544, 0.543, 0.564, 0.623, 0.637, 0.673, 0.702])
+        gamma_tab = jnp.array([0.864, 0.922, 0.987, 1.09, 1.20, 1.34, 1.50, 1.68, 1.81])
+        eta_tab = jnp.array([-0.243, -0.261, -0.261, -0.273, -0.278, -0.301, -0.301, -0.319, -0.336])
+        phi_tab = jnp.array([-0.729, -0.789, -0.910, -1.05, -1.20, -1.26, -1.45, -1.50, -1.49])
+
         delta_c = 1.686
         log_nu = 2.0 * jnp.log(delta_c) - 2.0 * jnp.log(sigma)
         nu = jnp.exp(log_nu)
-        
-        # Base parameters
-        alpha0, beta0, gamma0, eta0, phi0 = 0.368, 0.589, 0.864, -0.243, -0.729
-        # Redshift exponents
-        alpha_z, beta_z, gamma_z, eta_z, phi_z = 0.0, 0.2, -0.01, 0.27, -0.08
 
-        # Compute z-dependent parameters
-        alpha = alpha0 * (1 + z)**alpha_z
-        beta  = beta0  * (1 + z)**beta_z
-        gamma = gamma0 * (1 + z)**gamma_z
-        eta   = eta0   * (1 + z)**eta_z
-        phi   = phi0   * (1 + z)**phi_z
+        # Tinker10 calibrates redshift evolution up to z=3.
+        a_scale = jnp.clip(1.0 / (1.0 + z), 0.25, 1.0)
+
+        alpha = jnp.interp(ldelta_mean, delta_mean_tab, alpha_tab)
+        beta = jnp.interp(ldelta_mean, delta_mean_tab, beta_tab) * a_scale**(-0.20)
+        gamma = jnp.interp(ldelta_mean, delta_mean_tab, gamma_tab) * a_scale**(0.01)
+        eta = jnp.interp(ldelta_mean, delta_mean_tab, eta_tab) * a_scale**(-0.27)
+        phi = jnp.interp(ldelta_mean, delta_mean_tab, phi_tab) * a_scale**(0.08)
 
         # Reshape for broadcasting
         alpha = alpha[:, None]
@@ -294,35 +308,21 @@ class T10HaloMass(HaloMass):
             :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-        native_mass_definition = MassDefinition(delta=200, reference="mean")
-        key = (mass_definition.delta, mass_definition.reference)
-        native_key = (native_mass_definition.delta, native_mass_definition.reference)
-        if key != native_key:
-            if not convert_masses:
-                raise ValueError(f"Mass definition {key} incompatible with the selected halo mass function.")
-            raise NotImplementedError("Mass conversion for T10HaloMass is not implemented.")
-
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, _ = cosmology._compute_sigma_grid()
+        sigma_m = jnp.reshape(cosmology.sigma_m(m, z), (len(m), len(z)))
+        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+
+        logm = jnp.log(m)
+        logvar = jnp.log(sigma_m**2)
+        dlnnu_dlnm = -jax.vmap(lambda row: jnp.gradient(row, logm), in_axes=1, out_axes=1)(logvar)
+
         cparams = cosmology._cosmo_params()
-        z_grid = jnp.exp(ln_x_grid) - 1.0
+        rho_mean_0 = cparams['Omega0_cb'] * cparams['Rho_crit_0']
+        dn_dlnm = hmf * rho_mean_0 * jnp.abs(dlnnu_dlnm) / m[:, None]
 
-        R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
-        sigma_grid = jnp.reshape(cosmology.sigma_r(R_grid, z_grid), (len(R_grid), len(z_grid))).T
-
-        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid)
-        var_grid = sigma_grid**2
-        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
-        dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3)
-
-        _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
-        mm, zz = jnp.meshgrid(m, z, indexing='ij')
-        pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-
-        return jnp.squeeze(_hmf_interp(pts))
+        return jnp.squeeze(dn_dlnm)
 
 
 

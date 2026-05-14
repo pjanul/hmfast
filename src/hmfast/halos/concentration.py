@@ -30,6 +30,7 @@ class Concentration(ABC):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
+
         Returns
         -------
         float or array-like
@@ -67,6 +68,7 @@ class ConstantConcentration(Concentration):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Included for API consistency.
+
         Returns
         -------
         float or array-like
@@ -111,6 +113,7 @@ class D08Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
+
         Returns
         -------
         float or array-like
@@ -178,6 +181,7 @@ class B13Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
+
         Returns
         -------
         float or array-like
@@ -256,6 +260,7 @@ class SC14Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
+
         Returns
         -------
         float or array-like

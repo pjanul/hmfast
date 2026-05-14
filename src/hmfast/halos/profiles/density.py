@@ -410,7 +410,6 @@ class NFWDensityProfile(DensityProfile):
                 m,
                 z,
                 mass_definition=halo_model.mass_definition,
-                convert_masses=halo_model.convert_masses,
             ),
             (len(m), len(z)),
         )
@@ -457,7 +456,6 @@ class NFWDensityProfile(DensityProfile):
                 m,
                 z,
                 mass_definition=halo_model.mass_definition,
-                convert_masses=halo_model.convert_masses,
             ),
             (len(m), len(z)),
         )

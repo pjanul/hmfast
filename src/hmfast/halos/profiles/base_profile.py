@@ -121,7 +121,6 @@ class HaloProfile:
                 m,
                 z,
                 mass_definition=halo_model.mass_definition,
-                convert_masses=halo_model.convert_masses,
             ),
             (len(m), len(z)),
         )
@@ -158,7 +157,6 @@ class HaloProfile:
                 m,
                 z,
                 mass_definition=halo_model.mass_definition,
-                convert_masses=halo_model.convert_masses,
             ),
             (len(m), len(z)),
         )

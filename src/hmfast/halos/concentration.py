@@ -4,7 +4,7 @@ import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
 
-from hmfast.halos.mass_definition import MassDefinition, _convert_m_delta
+from hmfast.halos.mass_definition import MassDefinition
 
 
 
@@ -14,8 +14,8 @@ class Concentration(ABC):
     All subclasses must implement the c_delta method.
     """
     @abstractmethod
-    @partial(jax.jit, static_argnums=(0, 5))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
+    @partial(jax.jit, static_argnums=(0, 4))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter :math:`c_\\Delta`.
 
@@ -30,10 +30,6 @@ class Concentration(ABC):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
-        convert_masses : bool, optional
-            Whether to convert from the relation's native mass definition when
-            needed.
-
         Returns
         -------
         float or array-like
@@ -56,8 +52,8 @@ class ConstantConcentration(Concentration):
         self.c = c
         pass
 
-    @partial(jax.jit, static_argnums=(0, 5))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
+    @partial(jax.jit, static_argnums=(0, 4))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
         """
         Returns a constant value for the concentration parameter, broadcast to the shape of the input masses and redshifts.
 
@@ -71,9 +67,6 @@ class ConstantConcentration(Concentration):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Included for API consistency.
-        convert_masses : bool, optional
-            Included for API consistency.
-
         Returns
         -------
         float or array-like
@@ -102,8 +95,8 @@ class D08Concentration(Concentration):
         pass
 
 
-    @partial(jax.jit, static_argnums=(0, 5))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
+    @partial(jax.jit, static_argnums=(0, 4))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -118,10 +111,6 @@ class D08Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
-        convert_masses : bool, optional
-            Whether to convert from the relation's native mass definition when
-            needed.
-
         Returns
         -------
         float or array-like
@@ -141,29 +130,13 @@ class D08Concentration(Concentration):
             ("vir", "critical"):     (7.85, -0.081, -0.71, 2e12),
         }
         
-        # Determine if we have a direct match or need conversion
         key = (mdef.delta, mdef.reference) 
-        
-        if key in coeffs:
-            A, B, C, M_pivot = coeffs[key]
-            return jnp.squeeze(A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C)
 
-        if not convert_masses:
+        if key not in coeffs:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
-        # Conversion Logic (Native 200c)
-        A, B, C, M_pivot = coeffs[(200, "critical")]
-        native_def = MassDefinition(200, "critical")
-        c_seed = A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C
-        m_200c = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
-        
-        # Compute r_s from native 200c mesh
-        c_200c = A * ((m_200c * h) / M_pivot)**B * (1 + z[None, :])**C
-        r_200c = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), (1, 0))(m_200c, z).T
-        
-        # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
-        return (r_target * c_200c / r_200c).reshape(len(m), len(z))
+        A, B, C, M_pivot = coeffs[key]
+        return jnp.squeeze(A * (m_internal[:, None] / M_pivot)**B * (1 + z[None, :])**C)
 
 
 
@@ -189,8 +162,8 @@ class B13Concentration(Concentration):
     def __init__(self):
         pass
 
-    @partial(jax.jit, static_argnums=(0, 5))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
+    @partial(jax.jit, static_argnums=(0, 4))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -205,10 +178,6 @@ class B13Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
-        convert_masses : bool, optional
-            Whether to convert from the relation's native mass definition when
-            needed.
-
         Returns
         -------
         float or array-like
@@ -245,32 +214,11 @@ class B13Concentration(Concentration):
             nu = delta_c / sigma_m
             return A * D[None, :]**B * nu**C
 
-        # Direct Match Case
-        if key in coeffs:
-            A, B, C = coeffs[key]
-            return jnp.squeeze(compute_c(m, z, A, B, C))
-
-        # Conversion Fallback
-        if not convert_masses:
+        if key not in coeffs:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
-        # Use 200c as native reference for conversion
-        A, B, C = coeffs[(200, "critical")]
-        native_def = MassDefinition(200, "critical")
-        # c_seed for the solver
-        c_seed = compute_c(m, z, A, B, C)
-        
-        m_native = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
-        
-        # Re-compute concentration and scale radius at native definition
-        c_native = compute_c(m_native, z, A, B, C)
-
-        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
-        r_s = r_native / c_native
-
-        # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
-        return (r_target / r_s).reshape(len(m), len(z))
+        A, B, C = coeffs[key]
+        return jnp.squeeze(compute_c(m, z, A, B, C))
 
 
 
@@ -292,8 +240,8 @@ class SC14Concentration(Concentration):
     def __init__(self):
         pass
 
-    @partial(jax.jit, static_argnums=(0, 5))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical"), convert_masses=False):
+    @partial(jax.jit, static_argnums=(0, 4))
+    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -308,10 +256,6 @@ class SC14Concentration(Concentration):
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta=200, reference="critical")``.
-        convert_masses : bool, optional
-            Whether to convert from the relation's native mass definition when
-            needed.
-
         Returns
         -------
         float or array-like
@@ -339,32 +283,10 @@ class SC14Concentration(Concentration):
             c_z0 = jnp.polyval(p_coeffs, logM)
             return c_z0 * (1 + z_val)**-1
 
-        # Direct Match Case
-        if key in coeffs:
-            return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], coeffs[key]))
-
-        # Conversion Fallback
-        if not convert_masses:
+        if key not in coeffs:
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
-        # Use 200c as native reference
-        native_coeffs = coeffs[(200, "critical")]
-        native_def = MassDefinition(200, "critical")
-        # c_seed for the solver
-        c_seed = compute_c(m_internal[:, None], z[None, :], native_coeffs)
-        
-        m_native = jnp.reshape(_convert_m_delta(cosmology, m, z, mass_def_old=mdef, mass_def_new=native_def, c_old=c_seed), (len(m), len(z)))
-        
-        # Re-compute concentration and radii at native definition
-        c_native = compute_c(m_native * h, z[None, :], native_coeffs)
-
-        r_native = jax.vmap(lambda mc, zi: native_def.r_delta(cosmology, mc, zi), in_axes=(1, 0))(m_native, z).T
-        
-        r_s = r_native / c_native
-
-        # Final Target Radius / r_s
-        r_target = jnp.reshape(mdef.r_delta(cosmology, m, z), (len(m), len(z)))
-        return (r_target / r_s).reshape(len(m), len(z))
+        return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], coeffs[key]))
 
 
 

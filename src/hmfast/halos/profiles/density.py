@@ -186,7 +186,7 @@ class B16DensityProfile(DensityProfile):
         return presets[key]
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
 
@@ -244,7 +244,7 @@ class B16DensityProfile(DensityProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
 
@@ -375,7 +375,7 @@ class NFWDensityProfile(DensityProfile):
         self._hankel = HankelTransform(self._x, nu=0.5)
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
 
@@ -427,7 +427,7 @@ class NFWDensityProfile(DensityProfile):
         
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
 
@@ -648,7 +648,7 @@ class BCMDensityProfile(DensityProfile):
         return self._tree_unflatten(treedef, new_leaves)
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the gas-density profile.
 
@@ -709,7 +709,7 @@ class BCMDensityProfile(DensityProfile):
 
     
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space gas-density profile for halo-model calculations.
 

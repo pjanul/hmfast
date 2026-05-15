@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 import mcfit
 import functools
+from abc import ABC, abstractmethod
 from jax.scipy.special import sici
 from jax.tree_util import register_pytree_node_class
 
@@ -26,7 +27,7 @@ class HankelTransform:
         return k, y_k
 
 
-class HaloProfile:
+class HaloProfile(ABC):
 
     @property
     def has_central_contribution(self):
@@ -41,6 +42,16 @@ class HaloProfile:
         return False
 
 
+    @abstractmethod
+    def real(self, halo_model, r, m, z):
+        pass
+
+
+    @abstractmethod
+    def fourier(self, halo_model, k, m, z):
+        pass
+
+
     def _u_k_hankel(self, halo_model, x, r, m, z):
         """
         Hankel-transform a real-space profile sampled on a dimensionless grid.
@@ -48,7 +59,7 @@ class HaloProfile:
         Parameters
         ----------
         halo_model : HaloModel
-            Halo model passed through to ``u_r``.
+            Halo model passed through to ``real``.
         x : array_like
             Dimensionless transform grid.
         r : jnp.ndarray
@@ -72,7 +83,7 @@ class HaloProfile:
         W_x = jnp.where((x >= x[0]) & (x <= x[-1]), 1.0, 0.0)
 
         def single_m_z(r_vals, m_val, z_val):
-            profile = jnp.squeeze(self.u_r(halo_model, r_vals, m_val, z_val))
+            profile = jnp.squeeze(self.real(halo_model, r_vals, m_val, z_val))
             return profile * x**0.5 * W_x
 
         hankel_integrand = jax.vmap(

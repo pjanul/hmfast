@@ -14,7 +14,7 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 class PressureProfile(HaloProfile):
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space pressure profile for halo-model calculations.
 
@@ -220,7 +220,7 @@ class GNFWPressureProfile(PressureProfile):
         return self._tree_unflatten(treedef, new_leaves)
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
 
@@ -424,7 +424,7 @@ class B12PressureProfile(PressureProfile):
         return self._tree_unflatten(treedef, new_leaves)
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
 

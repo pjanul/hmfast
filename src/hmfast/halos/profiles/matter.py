@@ -55,7 +55,7 @@ class NFWMatterProfile(MatterProfile):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the real-space mass-weighted NFW matter profile.
 
@@ -94,7 +94,7 @@ class NFWMatterProfile(MatterProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the mass-weighted NFW matter profile in Fourier space.
 

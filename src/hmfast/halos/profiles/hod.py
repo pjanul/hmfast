@@ -282,7 +282,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Real-space galaxy HOD profile.
 
@@ -318,7 +318,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Fourier-space galaxy HOD profile.
 

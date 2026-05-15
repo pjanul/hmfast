@@ -487,7 +487,7 @@ class S12CIBProfile(CIBProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the CIB profile in real space.
 
@@ -521,7 +521,7 @@ class S12CIBProfile(CIBProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the CIB profile in Fourier space.
 
@@ -1029,7 +1029,7 @@ class M21CIBProfile(CIBProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_r(self, halo_model, r, m, z):
+    def real(self, halo_model, r, m, z):
         """
         Compute the CIB profile in real space.
 
@@ -1063,7 +1063,7 @@ class M21CIBProfile(CIBProfile):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def u_k(self, halo_model, k, m, z):
+    def fourier(self, halo_model, k, m, z):
         """
         Compute the CIB profile in Fourier space.
 

@@ -28,7 +28,7 @@ class Concentration(ABC):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
-            ``MassDefinition(delta=200, reference="critical")``.
+            ``MassDefinition(delta="vir", reference="critical")``.
 
         Returns
         -------
@@ -111,7 +111,7 @@ class D08Concentration(Concentration):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
-            ``MassDefinition(delta=200, reference="critical")``.
+            ``MassDefinition(delta="vir", reference="critical")``.
 
         Returns
         -------
@@ -179,7 +179,7 @@ class B13Concentration(Concentration):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
-            ``MassDefinition(delta=200, reference="critical")``.
+            ``MassDefinition(delta="vir", reference="critical")``.
 
         Returns
         -------
@@ -252,7 +252,7 @@ class K11Concentration(Concentration):
             Redshifts.
         mass_definition : MassDefinition, optional
             Target halo mass definition. Defaults to
-            ``MassDefinition(delta=200, reference="critical")``.
+            ``MassDefinition(delta="vir", reference="critical")``.
 
         Returns
         -------

@@ -240,7 +240,7 @@ class HaloModel:
                     c1 = jnp.reshape(c1, (len(k), len(m), len(z)))
                     uk_sq_row = s1[:, i, :] * s1[:, i, :] + 2.0 * s1[:, i, :] * c1[:, i, :]
                 else:
-                    u1 = jnp.reshape(tracer1.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
+                    u1 = jnp.reshape(tracer1.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
                     uk_sq_row = u1[:, i, :] ** 2
             elif tracer1.profile.has_central_contribution and tracer2.profile.has_central_contribution:
                 s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m, z)
@@ -251,8 +251,8 @@ class HaloModel:
                 c2 = jnp.reshape(c2, (len(k), len(m), len(z)))
                 uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
             else:
-                u1 = jnp.reshape(tracer1.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
-                u2 = jnp.reshape(tracer2.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
+                u1 = jnp.reshape(tracer1.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
+                u2 = jnp.reshape(tracer2.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
                 uk_sq_row = u1[:, i, :] * u2[:, i, :]
     
             return uk_sq_row * total_weights[i], uk_sq_row
@@ -389,7 +389,7 @@ class HaloModel:
         def get_I(tracer):
             # This function processes a single index 'i' of the mass axis
             def process_bin(i):
-                uk_full = jnp.reshape(tracer.profile.u_k(self, k, m, z), (len(k), len(m), len(z)))
+                uk_full = jnp.reshape(tracer.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
                 uk_slice = uk_full[:, i, :] 
                 return uk_slice * total_weights[i], uk_slice
     

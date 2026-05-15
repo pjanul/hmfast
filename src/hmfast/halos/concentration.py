@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
 
@@ -200,21 +199,12 @@ class B13Concentration(Concentration):
 
         key = (mdef.delta, mdef.reference)
         D = jnp.atleast_1d(cosmology.growth_factor(z))
-        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
-        sigma_interp = jscipy.interpolate.RegularGridInterpolator(
-            (ln_x_grid, ln_M_grid),
-            jnp.log(sigma_grid),
-        )
 
         def compute_c(masses, redshifts, A, B, C):
             masses = jnp.asarray(masses)
             redshifts = jnp.atleast_1d(redshifts)
-            mass_grid = masses[:, None] if masses.ndim == 1 else masses
-            redshift_grid = jnp.broadcast_to(redshifts[None, :], mass_grid.shape)
-            pts = jnp.stack([jnp.log1p(redshift_grid), jnp.log(mass_grid)], axis=-1)
-            sigma_m = jnp.exp(sigma_interp(pts))
-            # TODO: generalize delta_c handling for alternate collapse-threshold prescriptions.
-            delta_c = 1.686
+            sigma_m = jnp.reshape(cosmology.sigma_m(masses, redshifts), (len(masses), len(redshifts)))
+            delta_c = jnp.atleast_1d(cosmology.delta_c(redshifts, prescription="EdS"))[None, :]
             nu = delta_c / sigma_m
             return A * D[None, :]**B * nu**C
 

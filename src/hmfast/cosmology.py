@@ -582,6 +582,53 @@ class Cosmology:
         
         return Omega_m_z
 
+    @partial(jax.jit, static_argnames=("prescription",))
+    def delta_c(self, z, prescription="EdS"):
+        """
+        Spherical-collapse threshold :math:`\\delta_c(z)`.
+
+        Supported prescriptions are:
+
+        - ``"EdS"`` for the Einstein-de Sitter exact value,
+          :math:`\\delta_c = \\frac{3}{20}(12\\pi)^{2/3}`.
+        - ``"EdS_approx"`` for the standard Einstein-de Sitter approximation,
+          :math:`\\delta_c = 1.686`.
+        - ``"NS97"`` for the Nakamura and Suto (1997) fit,
+
+          .. math::
+
+              \\delta_c(z) = \\frac{3}{20}(12\\pi)^{2/3}
+              \\left[1 + 0.012299 \\, \\log_{10}(\\Omega_m(z))\\right].
+
+        Parameters
+        ----------
+        z : float or jnp.ndarray
+            Redshift(s).
+        prescription : str, optional
+            Collapse-threshold prescription. Supported values are ``"EdS"``,
+            ``"EdS_approx"``, and ``"NS97"``. Input is case-insensitive.
+
+        Returns
+        -------
+        float or jnp.ndarray
+            Collapse threshold evaluated at :math:`z`.
+        """
+
+        prescription_key = prescription.lower()
+        delta_eds = (3.0 / 20.0) * jnp.power(12.0 * jnp.pi, 2.0 / 3.0)
+
+        if prescription_key == "eds":
+            return delta_eds
+        if prescription_key == "eds_approx":
+            return 1.686
+        if prescription_key == "ns97":
+            return delta_eds * (1.0 + 0.012299 * jnp.log10(self.omega_m(z)))
+
+        raise ValueError(
+            "Unknown delta_c prescription "
+            f"{prescription!r}. Allowed values are: 'EdS', 'EdS_approx', 'NS97'."
+        )
+
     @jax.jit
     def growth_factor(self, z):
         """

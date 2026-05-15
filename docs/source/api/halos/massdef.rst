@@ -1,8 +1,8 @@
 hmfast.halos.massdef
 =====================
 
-Mass definitions and mass conversion utilities
-----------------------------------------------
+Mass definitions and conversions
+--------------------------------
 
 .. autosummary::
    :toctree: generated

@@ -217,19 +217,22 @@ class B13Concentration(Concentration):
 
 
 
-class SC14Concentration(Concentration):
+class K11Concentration(Concentration):
     """
-    Concentration-mass relation from `Sanchez-Conde & Prada (2014) <https://ui.adsabs.harvard.edu/abs/2014MNRAS.442.2271S/abstract>`_.
+    Concentration-mass relation from `Klypin et al. (2011) <https://ui.adsabs.harvard.edu/abs/2011ApJ...740..102K/abstract>`_.
 
     The fitted relation is
 
     .. math::
 
-        c_{200c}(M, z) = \\sum_{i=0}^5 a_i [\\log_{10}(M)]^i \\times (1+z)^{-1}
+        c_\\mathrm{vir}(M, z) = c_0(z)
+        \\left(\\frac{M}{10^{12} \\; M_\\odot / h}\\right)^{-0.075}
+        \\left[1 + \\left(\\frac{M}{M_0(z)}\\right)^{0.26}\\right]
 
-    where the coefficients :math:`a_i` are from Eq. 1 of the paper.
+    where :math:`c_0(z)` and :math:`M_0(z)` are interpolated from the values in
+    Table 3 of the reference.
 
-    Calibrated for 200c mass definition.
+    Calibrated for the virial mass definition only.
     """
     def __init__(self):
         pass
@@ -257,31 +260,26 @@ class SC14Concentration(Concentration):
             Concentration values with shape :math:`(N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-        
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = cosmology.H0 / 100.0
         m_internal = m * h
         mdef = mass_definition
 
-        # 1. Parameter Table (SC14 is only natively defined for 200c)
-        # Coefficients in descending order for jnp.polyval: [p5, p4, p3, p2, p1, p0]
-        coeffs = {
-            (200, "critical"): jnp.array([5.32e-7, -2.89237e-5, 3.66e-4, 1.636e-2, -1.5093, 37.5153])
-        }
-
         key = (mdef.delta, mdef.reference)
-
-        def compute_c(m_val, z_val, p_coeffs):
-            # Eq 1: c(M, z=0) = sum(a_i * (log10 M)^i)
-            # Then scaled by (1+z)^-1
-            logM = jnp.log10(m_val)
-            c_z0 = jnp.polyval(p_coeffs, logM)
-            return c_z0 * (1 + z_val)**-1
-
-        if key not in coeffs:
+        if key != ("vir", "critical"):
             raise ValueError(f"Mass definition {key} incompatible with the selected concentration-mass relation.")
 
-        return jnp.squeeze(compute_c(m_internal[:, None], z[None, :], coeffs[key]))
+        z_tab = jnp.array([0.0, 0.31578947, 0.63157895, 0.94736842, 1.26315789, 1.57894737, 1.89473684, 2.21052632, 2.52631579, 2.84210526, 3.15789474, 3.47368421, 3.78947368, 4.10526316, 4.42105263, 4.73684211, 5.05263158, 5.36842105, 5.68421053, 6.0])
+        c0_tab = jnp.array([9.6, 7.89848895, 6.57388797, 5.59198421, 4.82413741, 4.2543651, 3.80201899, 3.4341066, 3.15047911, 2.92643281, 2.74396076, 2.60306296, 2.50373941, 2.44412709, 2.40000661, 2.36392585, 2.33588481, 2.31588348, 2.30392188, 2.3])
+        lnM0_tab = jnp.array([45.46291469, 41.51644832, 38.29554435, 35.80033605, 34.03132449, 32.96668373, 32.12518764, 31.309971, 30.52126833, 29.79801323, 29.16858499, 28.6329836, 28.19120908, 27.84158345, 27.56229323, 27.34662656, 27.19458346, 27.10616391, 27.08136792, 27.12019549])
+
+        c0 = jnp.interp(z, z_tab, c0_tab)
+        m0 = jnp.exp(jnp.interp(z, z_tab, lnM0_tab))
+        return jnp.squeeze(
+            c0[None, :]
+            * (m_internal[:, None] / 1e12) ** (-0.075)
+            * (1.0 + (m_internal[:, None] / m0[None, :]) ** 0.26)
+        )
 
 
 

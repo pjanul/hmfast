@@ -11,4 +11,4 @@ Concentration-mass relations
    hmfast.halos.concentration.ConstantConcentration
    hmfast.halos.concentration.D08Concentration
    hmfast.halos.concentration.B13Concentration
-   hmfast.halos.concentration.SC14Concentration
+   hmfast.halos.concentration.K11Concentration

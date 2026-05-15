@@ -6,8 +6,6 @@ hmfast.halos
    :nosignatures:
 
    hmfast.halos.HaloModel
-   hmfast.halos.MassDefinition
-   hmfast.halos.mass_translator
 
 .. toctree::
    :maxdepth: 2
@@ -15,4 +13,5 @@ hmfast.halos
    massfunc
    bias
    concentration
+   massdef
    profiles

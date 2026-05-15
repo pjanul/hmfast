@@ -8,7 +8,7 @@ import jax.scipy as jscipy
 from typing import Dict, Any, Callable
 from functools import partial
 
-from hmfast.halos.massfunc import T08HaloMass, TW10SubHaloMass
+from hmfast.halos.massfunc import T08HaloMassFunction, TW10SubHaloMassFunction
 from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
 from hmfast.halos.massdef import MassDefinition
@@ -31,11 +31,11 @@ class HaloModel:
         Cosmology object supplying background, growth, and matter power spectra quantities.
     mass_definition : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
-    halo_mass_function : HaloMass
+    halo_mass_function : HaloMassFunction
         Halo mass function model used to compute :math:`dn / d\\ln M`.
     halo_bias : HaloBias
         Halo bias model used for large-scale halo bias predictions.
-    subhalo_mass_function : SubHaloMass
+    subhalo_mass_function : SubHaloMassFunction
         Subhalo mass function model used in observables with satellite or subhalo contributions.
     concentration : Concentration
         Halo concentration relation used to map halo mass and redshift to concentration.
@@ -48,9 +48,9 @@ class HaloModel:
     def __init__(self, 
                  cosmology=Cosmology(emulator_set="lcdm:v1"), 
                  mass_definition=MassDefinition(delta=200, reference="critical"),
-                 halo_mass_function=T08HaloMass(),
+                 halo_mass_function=T08HaloMassFunction(),
                  halo_bias=T10HaloBias(),
-                 subhalo_mass_function=TW10SubHaloMass(),
+                 subhalo_mass_function=TW10SubHaloMassFunction(),
                  concentration=D08Concentration(),
                  hm_consistency=True,
                  convert_masses=False):
@@ -141,7 +141,7 @@ class HaloModel:
         Parameters
         ----------
         m : array-like
-            Halo mass grid in :math:`M_\odot`.
+            Halo mass grid in :math:`M_\\odot`.
         z : array-like
             Redshift(s).
 
@@ -202,7 +202,7 @@ class HaloModel:
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
-            Mass array in :math:`M_\odot`. This must be an array because it
+            Mass array in :math:`M_\\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array-like
             Redshift grid.
@@ -294,7 +294,7 @@ class HaloModel:
         l : array-like
             Multipole grid.
         m : array
-            Mass array in :math:`M_\odot`. This must be an array because it
+            Mass array in :math:`M_\\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array
             Redshift array. This must be an array because it defines the
@@ -360,7 +360,7 @@ class HaloModel:
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
-            Mass array in :math:`M_\odot`. This must be an array because it
+            Mass array in :math:`M_\\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array-like
             Redshift grid.
@@ -431,7 +431,7 @@ class HaloModel:
         l : array-like
             Multipole grid.
         m : array
-            Mass array in :math:`M_\odot`. This must be an array because it
+            Mass array in :math:`M_\\odot`. This must be an array because it
             defines the integration grid over halo mass.
         z : array
             Redshift array. This must be an array because it defines the

@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from hmfast.halos.massdef import MassDefinition
 
 
-class HaloMass(ABC):
+class HaloMassFunction(ABC):
     """
     Abstract base class for halo mass function models.
 
@@ -44,7 +44,7 @@ class HaloMass(ABC):
         pass
 
 
-class T08HaloMass(HaloMass):
+class T08HaloMassFunction(HaloMassFunction):
     """
     Halo mass function from `Tinker et al. (2008) <https://ui.adsabs.harvard.edu/abs/2008ApJ...688..709T/abstract>`_.
 
@@ -187,7 +187,7 @@ class T08HaloMass(HaloMass):
 
 
 
-class T10HaloMass(HaloMass):
+class T10HaloMassFunction(HaloMassFunction):
     """
     Halo mass function from `Tinker et al. (2010) <https://ui.adsabs.harvard.edu/abs/2010ApJ...724..878T/abstract>`_.
 
@@ -328,7 +328,7 @@ class T10HaloMass(HaloMass):
 
 
 
-class SubHaloMass(ABC):
+class SubHaloMassFunction(ABC):
     """
     Abstract base class for subhalo mass function models.
     """
@@ -359,7 +359,7 @@ class SubHaloMass(ABC):
         """
         pass
 
-class TW10SubHaloMass(SubHaloMass):
+class TW10SubHaloMassFunction(SubHaloMassFunction):
     """
     Subhalo mass function from `Tinker & Wetzel (2010) <https://ui.adsabs.harvard.edu/abs/2010ApJ...719...88T/abstract>`_.
 
@@ -403,7 +403,7 @@ class TW10SubHaloMass(SubHaloMass):
 
 
 
-class JvdB14SubHaloMass(SubHaloMass):
+class JvdB14SubHaloMassFunction(SubHaloMassFunction):
     """
     Subhalo mass function from `Jiang & van den Bosch (2014) <https://ui.adsabs.harvard.edu/abs/2014MNRAS.440..193J/abstract>`_.
 

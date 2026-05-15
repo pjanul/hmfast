@@ -11,7 +11,7 @@ from functools import partial
 from hmfast.halos.massfunc import T08HaloMass, TW10SubHaloMass
 from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.massdef import MassDefinition
 from hmfast.cosmology import Cosmology
 
 jax.config.update("jax_enable_x64", True)

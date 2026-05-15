@@ -6,7 +6,7 @@ from functools import partial
 from jax.tree_util import register_pytree_node_class
 
 from hmfast.download import get_default_data_path
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.massdef import MassDefinition
 from hmfast.halos.profiles import HaloProfile
 
 

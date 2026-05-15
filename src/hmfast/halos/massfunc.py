@@ -4,7 +4,7 @@ import jax.scipy as jscipy
 from functools import partial
 from abc import ABC, abstractmethod
 
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.massdef import MassDefinition
 
 
 class HaloMass(ABC):

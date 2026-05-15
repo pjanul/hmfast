@@ -40,32 +40,38 @@ class Cosmology:
         Hubble constant at :math:`z = 0` in units of
         :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
     omega_cdm : float
-        Physical cold dark matter density :math:`\\Omega_{\\mathrm{cdm}} h^2`.
+        Physical cold dark matter density,
+        :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2`.
     omega_b : float
-        Physical baryon density :math:`\\Omega_b h^2`.
-    ln1e10A_s : float
-        Log-amplitude of the primordial scalar power spectrum,
-        :math:`\\ln(10^{10} A_s)`.
+        Physical baryon density, :math:`\\omega_b = \\Omega_b h^2`.
+    A_s : float
+        Amplitude of the primordial scalar power spectrum, :math:`A_s`.
     n_s : float
-        Scalar spectral index of primordial perturbations.
-    tau_reio : float
-        Optical depth to reionization.
+        Scalar spectral index of primordial perturbations, :math:`n_s`.
+    tau : float
+        Optical depth to reionization, :math:`\\tau`.
     m_ncdm : float
         Total non-cold dark matter mass, used if a massive-neutrino cosmological model is selected.
     N_ur : float
-        Effective number of ultra-relativistic species, used if a model with additional radiation degrees of freedom is selected.
-    w0_fld : float
+        Effective number of ultra-relativistic species, :math:`N_{\\mathrm{ur}}`,
+        used if a model with additional radiation degrees of freedom is
+        selected.
+    w0 : float
         Present-day dark energy equation-of-state parameter :math:`w_0`,
         used if a cosmological model with dark energy equation-of-state
         parameter :math:`w_0` is selected.
-    fEDE : float
-        Maximum fractional contribution of early dark energy, used if an early dark energy cosmological model is selected.
-    log10z_c : float
-        Base-10 logarithm of the critical redshift for the early dark energy
-        transition, used if an early dark energy cosmological model is
+    f_ede : float
+        Maximum fractional contribution of early dark energy,
+        :math:`f_{\\mathrm{ede}}`, used if an early dark energy cosmological
+        model is selected.
+    z_c : float
+        Critical redshift for the early dark energy transition,
+        :math:`z_c`, used if an early dark energy cosmological model is
         selected.
-    thetai_scf : float
-        Initial scalar field displacement for the early dark energy model, in radians, used if an early dark energy cosmological model is selected.
+    theta_i : float
+        Initial scalar field displacement for the early dark energy model,
+        :math:`\\theta_i`, in radians, used if an early dark energy
+        cosmological model is selected.
     r : float
         Tensor-to-scalar ratio, used if a cosmological model including primordial tensors is selected.
     T_cmb : float
@@ -74,9 +80,9 @@ class Cosmology:
         Degeneracy factor for the non-cold dark matter species, used if a massive-neutrino cosmological model is selected.
     """
     def __init__(self, emulator_set="lcdm:v1", 
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, ln1e10A_s=3.035173309489548, n_s=0.965, tau_reio=0.0544,      # LCDM
-                 m_ncdm=0.06, N_ur=3.046, w0_fld=-0.95,                                                                     # wCDM, Neff, MNU
-                 fEDE=0.1, log10z_c=3.5, thetai_scf=jnp.pi/2, r=0.01,                                                       # EDE
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,                       # LCDM
+                 m_ncdm=0.06, N_ur=3.046, w0=-0.95,                                                                         # wCDM, Neff, MNU
+                 f_ede=0.1, z_c=3162.278, theta_i=1.57, r=0.01,                                                             # EDE
                  T_cmb=2.7255, deg_ncdm=1.0,                                                                                # Non-emulator 
         ):
         
@@ -95,9 +101,9 @@ class Cosmology:
         self._tophat_instance = partial(TophatVar(self._pk_grid()[0], lowring=True, backend='jax'), extrap=True)
 
         # Cosmological params (leaves) to be changed without recompiling jit
-        self.H0, self.omega_cdm, self.omega_b, self.ln1e10A_s, self.n_s, self.tau_reio = H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio
-        self.m_ncdm, self.N_ur, self.w0_fld = m_ncdm, N_ur, w0_fld
-        self.fEDE, self.log10z_c, self.thetai_scf, self.r = fEDE, log10z_c, thetai_scf, r
+        self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau = H0, omega_cdm, omega_b, A_s, n_s, tau
+        self.m_ncdm, self.N_ur, self.w0 = m_ncdm, N_ur, w0
+        self.f_ede, self.z_c, self.theta_i, self.r = f_ede, z_c, theta_i, r
         self.T_cmb, self.deg_ncdm = T_cmb, deg_ncdm
 
 
@@ -108,9 +114,9 @@ class Cosmology:
     def _tree_flatten(self):
         # 1. Children: Only the 15 numerical parameters JAX should "see"
         children = (
-            self.H0, self.omega_cdm, self.omega_b, self.ln1e10A_s, self.n_s, self.tau_reio,
-            self.m_ncdm, self.N_ur, self.w0_fld, 
-            self.fEDE, self.log10z_c, self.thetai_scf, self.r,
+            self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau,
+            self.m_ncdm, self.N_ur, self.w0, 
+            self.f_ede, self.z_c, self.theta_i, self.r,
             self.T_cmb, self.deg_ncdm
         )
         # 2. Aux data: Static metadata and cached helper objects.
@@ -129,16 +135,16 @@ class Cosmology:
         obj._tophat_instance = _tophat_instance
         
         # Assign the 15 parameter children to the object
-        (obj.H0, obj.omega_cdm, obj.omega_b, obj.ln1e10A_s, obj.n_s, obj.tau_reio,
-         obj.m_ncdm, obj.N_ur, obj.w0_fld, 
-         obj.fEDE, obj.log10z_c, obj.thetai_scf, obj.r,
+        (obj.H0, obj.omega_cdm, obj.omega_b, obj.A_s, obj.n_s, obj.tau,
+         obj.m_ncdm, obj.N_ur, obj.w0, 
+         obj.f_ede, obj.z_c, obj.theta_i, obj.r,
          obj.T_cmb, obj.deg_ncdm) = children
         
         return obj
     
-    def update(self, H0=None, omega_cdm=None, omega_b=None, ln1e10A_s=None, n_s=None,
-        tau_reio=None, m_ncdm=None, N_ur=None, w0_fld=None, fEDE=None, log10z_c=None,
-        thetai_scf=None, r=None, T_cmb=None, deg_ncdm=None):
+    def update(self, H0=None, omega_cdm=None, omega_b=None, A_s=None, n_s=None,
+        tau=None, m_ncdm=None, N_ur=None, w0=None, f_ede=None, z_c=None,
+        theta_i=None, r=None, T_cmb=None, deg_ncdm=None):
         """
         Return a new Cosmology instance with updated parameters.
 
@@ -146,8 +152,11 @@ class Cosmology:
 
         Parameters
         ----------
-        H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio, m_ncdm, N_ur, w0_fld, fEDE, log10z_c, thetai_scf, r, T_cmb, deg_ncdm : float or None
-            Cosmological parameters to update.
+        H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb, deg_ncdm : float or None
+            Cosmological parameters to update. In particular,
+            :math:`\\tau` is the optical depth to reionization and
+            :math:`\\theta_i` is the initial early-dark-energy scalar
+            field displacement.
 
         Returns
         -------
@@ -157,15 +166,15 @@ class Cosmology:
         # Flatten the current instance to get aux_data (static metadata)
         leaves, aux_data = self._tree_flatten()
         names = [
-            'H0', 'omega_cdm', 'omega_b', 'ln1e10A_s', 'n_s', 'tau_reio',
-            'm_ncdm', 'N_ur', 'w0_fld',
-            'fEDE', 'log10z_c', 'thetai_scf', 'r',
+            'H0', 'omega_cdm', 'omega_b', 'A_s', 'n_s', 'tau',
+            'm_ncdm', 'N_ur', 'w0',
+            'f_ede', 'z_c', 'theta_i', 'r',
             'T_cmb', 'deg_ncdm'
         ]
         values = [
-            H0, omega_cdm, omega_b, ln1e10A_s, n_s, tau_reio,
-            m_ncdm, N_ur, w0_fld,
-            fEDE, log10z_c, thetai_scf, r,
+            H0, omega_cdm, omega_b, A_s, n_s, tau,
+            m_ncdm, N_ur, w0,
+            f_ede, z_c, theta_i, r,
             T_cmb, deg_ncdm
         ]
         # Only update values that are not None
@@ -216,15 +225,15 @@ class Cosmology:
             'H0': self.H0,
             'omega_cdm': self.omega_cdm,
             'omega_b': self.omega_b,
-            'ln10^{10}A_s': self.ln1e10A_s,  # Mapping attribute to what the emulator expects (ln10^{10}A_s is not a valid variable name)
+            'ln10^{10}A_s': jnp.log(1.0e10 * self.A_s),
             'n_s': self.n_s,
-            'tau_reio': self.tau_reio,
+            'tau_reio': self.tau,
             'm_ncdm': self.m_ncdm,
             'N_ur': self.N_ur,
-            'w0_fld': self.w0_fld,
-            'fEDE': self.fEDE,
-            'log10z_c': self.log10z_c,
-            'thetai_scf': self.thetai_scf,
+            'w0_fld': self.w0,
+            'fEDE': self.f_ede,
+            'log10z_c': jnp.log10(self.z_c),
+            'thetai_scf': self.theta_i,
             'r': self.r,
             'T_cmb': self.T_cmb,
             'deg_ncdm': self.deg_ncdm

@@ -7,7 +7,7 @@ from functools import partial
 
 from hmfast.download import get_default_data_path
 from hmfast.utils import lambertw, Const
-from hmfast.halos.mass_definition import MassDefinition
+from hmfast.halos.massdef import MassDefinition
 from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 

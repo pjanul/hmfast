@@ -233,7 +233,7 @@ class T10HaloMass(HaloMass):
         eta_tab = jnp.array([-0.243, -0.261, -0.261, -0.273, -0.278, -0.301, -0.301, -0.319, -0.336])
         phi_tab = jnp.array([-0.729, -0.789, -0.910, -1.05, -1.20, -1.26, -1.45, -1.50, -1.49])
 
-        delta_c = 1.686
+        delta_c = jnp.atleast_1d(cosmology.delta_c(z, prescription="EdS"))[:, None]
         log_nu = 2.0 * jnp.log(delta_c) - 2.0 * jnp.log(sigma)
         nu = jnp.exp(log_nu)
 

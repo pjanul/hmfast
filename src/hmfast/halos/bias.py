@@ -57,17 +57,17 @@ class T10HaloBias(HaloBias):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def _b1_nu(self, sigmas, z, delta_mean):
+    def _b1_nu(self, nu, delta_c, delta_mean):
         """
         Compute the first-order halo bias :math:`b_1(\\nu)` following
         Tinker et al. (2010).
     
         Parameters
         ----------
-        sigmas : array-like
-            Variance of the linear density field :math:`\\sigma(R, z)`.
-        z : float or array-like
-            Redshift(s).
+        nu : array-like
+            Peak height :math:`\nu = \delta_c / \sigma(M, z)`.
+        delta_c : float or array-like
+            Spherical-collapse threshold.
         delta_mean : float or array-like
             Halo overdensity :math:`\\Delta`.
     
@@ -77,7 +77,6 @@ class T10HaloBias(HaloBias):
             First-order halo bias values.
         """
         y = jnp.log10(delta_mean)
-        delta_c = 1.686  # the critical overdensity (slightly redshift-dependent in LCDM), so this is approximate
         
         # Tinker (2010) parameters
         A  = jnp.array(1.0 + 0.24 * y * jnp.exp(-(4.0 / y) ** 4))
@@ -86,8 +85,7 @@ class T10HaloBias(HaloBias):
         b_ = jnp.array(1.5)
         C  = jnp.array((0.019 + 0.107 * y + 0.19 * jnp.exp(-(4.0 / y) ** 4)))
         c  = jnp.array(2.4)
-    
-        nu = delta_c / sigmas
+
         nu_a = jnp.power(nu, a)
         first = A * (nu_a / (nu_a + delta_c ** a))
         b_nu = 1.0 - first + B * jnp.power(nu, b_) + C * jnp.power(nu, c)
@@ -96,28 +94,25 @@ class T10HaloBias(HaloBias):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def _b2_nu(self, sigmas, z, delta_mean):
+    def _b2_nu(self, nu, delta_c, z):
         """
         Compute the second-order halo bias :math:`b_2(\\nu)` following
         Tinker et al. (2010).
     
         Parameters
         ----------
-        sigmas : array-like
-            Variance of the linear density field :math:`\\sigma(R, z)`.
+        nu : array-like
+            Squared peak height :math:`\nu = (\delta_c / \sigma(M, z))^2`.
+        delta_c : float or array-like
+            Spherical-collapse threshold.
         z : float or array-like
             Redshift(s).
-        delta_mean : float or array-like
-            Halo overdensity :math:`\\Delta`.
     
         Returns
         -------
         b2 : array-like
             Second-order halo bias values.
         """
-
-        delta_c =  1.686
-        nu = (delta_c / sigmas)**2
 
         z = jnp.atleast_1d(z)
         
@@ -220,11 +215,14 @@ class T10HaloBias(HaloBias):
         
         # Broadcast to (nz, nm)
         delta_mean_broad = jnp.broadcast_to(delta_mean_2d, sigma_M.shape)
+        delta_c = jnp.atleast_1d(cosmology.delta_c(z, prescription="EdS"))[:, None]
 
         if order == 1: 
-            return jnp.squeeze(self._b1_nu(sigma_M, zz, delta_mean_broad).T)
+            nu = delta_c / sigma_M
+            return jnp.squeeze(self._b1_nu(nu, delta_c, delta_mean_broad).T)
         elif order == 2:
-            return jnp.squeeze(self._b2_nu(sigma_M, zz, delta_mean_broad).T)
+            nu = (delta_c / sigma_M)**2
+            return jnp.squeeze(self._b2_nu(nu, delta_c, zz).T)
         else:
             raise ValueError("order must be either 1 or 2")
 

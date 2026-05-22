@@ -8,7 +8,7 @@ hmfast.tracers
 
    hmfast.tracers.tSZTracer
    hmfast.tracers.kSZTracer
-   hmfast.tracers.GalaxyHODTracer
+   hmfast.tracers.GalaxyTracer
    hmfast.tracers.GalaxyLensingTracer
    hmfast.tracers.CMBLensingTracer
    hmfast.tracers.CIBTracer

@@ -10,7 +10,7 @@ from hmfast.utils import Const
 # Ensure high precision for cosmological integrations
 jax.config.update("jax_enable_x64", True)
 
-class GalaxyHODTracer(Tracer):
+class GalaxyTracer(Tracer):
     """
     Galaxy counts tracer.
 
@@ -60,7 +60,7 @@ class GalaxyHODTracer(Tracer):
 
     def update(self, profile=None, dndz=None):
         """
-        Return a new GalaxyHODTracer instance with updated attributes using PyTree logic.
+        Return a new GalaxyTracer instance with updated attributes using PyTree logic.
 
         Parameters
         ----------
@@ -71,7 +71,7 @@ class GalaxyHODTracer(Tracer):
 
         Returns
         -------
-        GalaxyHODTracer
+        GalaxyTracer
             New tracer instance with updated attributes.
         """
         flat, aux = self._tree_flatten()
@@ -116,9 +116,8 @@ class GalaxyHODTracer(Tracer):
 
 
 
-
 jax.tree_util.register_pytree_node(
-    GalaxyHODTracer,
+    GalaxyTracer,
     lambda obj: obj._tree_flatten(),
-    lambda aux_data, children: GalaxyHODTracer._tree_unflatten(aux_data, children)
+    lambda aux_data, children: GalaxyTracer._tree_unflatten(aux_data, children)
 )

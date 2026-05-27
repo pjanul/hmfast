@@ -159,30 +159,26 @@ class T08HaloMassFunction(HaloMassFunction):
             :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-       
-        
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, _ = cosmology._compute_sigma_grid()
-        cparams = cosmology._cosmo_params()
-        z_grid = jnp.exp(ln_x_grid) - 1.0
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid))
+        dlnnu_dlnm_grid = -2.0 * jax.vmap(lambda row: jnp.gradient(row, ln_M_grid))(jnp.log(sigma_grid))
+        dlnnu_dlnm_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dlnnu_dlnm_grid)
 
-        R_grid = jnp.exp(ln_M_grid / 3.0) / ((4.0 * jnp.pi / 3.0) * cparams['Omega0_cb'] * cparams["Rho_crit_0"])**(1.0 / 3.0)
-        sigma_grid = jnp.reshape(cosmology.sigma_r(R_grid, z_grid), (len(R_grid), len(z_grid))).T
-
-        hmf_grid = self._f_sigma(cosmology, sigma_grid, z_grid, mass_definition=mass_definition)
-        var_grid = sigma_grid**2
-        dvar_grid = jax.vmap(lambda v: jnp.gradient(v, R_grid), in_axes=0)(var_grid)
-        dlnnu_dlnR_grid = -dvar_grid * R_grid / var_grid
-        dn_dlnM_grid = dlnnu_dlnR_grid * hmf_grid / (4.0 * jnp.pi * R_grid**3)
-
-        # Create the interpolator, the meshgrid, and then stack the points
-        _hmf_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dn_dlnM_grid)
         mm, zz = jnp.meshgrid(m, z, indexing='ij')
-        pts = jnp.stack([jnp.log(1. + zz), jnp.log(mm)], axis=-1)
-        
-        return jnp.squeeze(_hmf_interp(pts))
+        pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
+
+        sigma_m = jnp.exp(sigma_interp(pts))
+        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+        dlnnu_dlnm = dlnnu_dlnm_interp(pts)
+
+        cparams = cosmology._cosmo_params()
+        rho_mean_0 = cparams['Omega0_cb'] * cparams['Rho_crit_0']
+        dn_dlnm = hmf * rho_mean_0 * jnp.abs(dlnnu_dlnm) / m[:, None]
+
+        return jnp.squeeze(dn_dlnm)
 
 
 
@@ -311,12 +307,17 @@ class T10HaloMassFunction(HaloMassFunction):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        sigma_m = jnp.reshape(cosmology.sigma_m(m, z), (len(m), len(z)))
-        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+        ln_x_grid, ln_M_grid, sigma_grid = cosmology._compute_sigma_grid()
+        sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid))
+        dlnnu_dlnm_grid = -2.0 * jax.vmap(lambda row: jnp.gradient(row, ln_M_grid))(jnp.log(sigma_grid))
+        dlnnu_dlnm_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), dlnnu_dlnm_grid)
 
-        logm = jnp.log(m)
-        logvar = jnp.log(sigma_m**2)
-        dlnnu_dlnm = -jax.vmap(lambda row: jnp.gradient(row, logm), in_axes=1, out_axes=1)(logvar)
+        mm, zz = jnp.meshgrid(m, z, indexing='ij')
+        pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
+
+        sigma_m = jnp.exp(sigma_interp(pts))
+        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+        dlnnu_dlnm = dlnnu_dlnm_interp(pts)
 
         cparams = cosmology._cosmo_params()
         rho_mean_0 = cparams['Omega0_cb'] * cparams['Rho_crit_0']

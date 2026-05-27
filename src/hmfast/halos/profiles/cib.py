@@ -515,7 +515,9 @@ class S12CIBProfile(CIBProfile):
         u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
-        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
+        # The central galaxy is a Dirac delta at r=0, not a constant radial offset.
+        cen_mask = jnp.isclose(r[:, None, None], 0.0)
+        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :] * cen_mask
 
         return jnp.squeeze(cen_term + sat_term)
 
@@ -1057,7 +1059,9 @@ class M21CIBProfile(CIBProfile):
         u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
         sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
-        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :]
+        # The central galaxy is a Dirac delta at r=0, not a constant radial offset.
+        cen_mask = jnp.isclose(r[:, None, None], 0.0)
+        cen_term = (1 / (4 * jnp.pi)) * lc[None, :, :] * cen_mask
 
         return jnp.squeeze(cen_term + sat_term)
 

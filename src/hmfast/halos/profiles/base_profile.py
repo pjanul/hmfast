@@ -103,7 +103,9 @@ class HaloProfile(ABC):
         Calculate the normalized real-space NFW matter profile.
 
         This is the real-space analogue of ``_u_k_nfw`` and returns the
-        unit-mass NFW profile sampled on a radial grid.
+        unit-mass NFW profile sampled on a radial grid. The profile is
+        truncated at :math:`r_\Delta`, matching the standard finite-mass NFW
+        convention assumed by the Fourier-space helper.
 
         Parameters
         ----------
@@ -141,8 +143,10 @@ class HaloProfile(ABC):
         f_nfw = 1.0 / (jnp.log1p(c_delta) - c_delta / (1.0 + c_delta))
         x = r[:, None, None] / r_s[None, :, :]
         prefactor = 1.0 / (4.0 * jnp.pi * r_s**3)
+        inside_halo = x <= c_delta[None, :, :]
 
-        return jnp.squeeze(prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2))
+        profile = prefactor[None, :, :] * f_nfw[None, :, :] / (x * (1.0 + x) ** 2)
+        return jnp.squeeze(jnp.where(inside_halo, profile, 0.0))
 
     
     def _u_k_nfw(self, halo_model, k, m, z):

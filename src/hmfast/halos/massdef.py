@@ -343,15 +343,6 @@ def mass_translator(mass_def_old, mass_def_new, concentration, max_iter=20):
 
 		return f
 
-	if mass_def_old.delta == mass_def_new.delta:
-		@jax.jit
-		def f(cosmology, m, z):
-			m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-			d_old = mass_def_old._delta_numeric(cosmology, z)
-			d_new = mass_def_old._convert_reference(cosmology, z, d_old, from_ref=mass_def_old.reference, to_ref=mass_def_new.reference)
-			return jnp.squeeze(m[:, None] * (d_new / d_old)[None, :])
-
-		return f
 
 	@jax.jit
 	def f(cosmology, m, z):

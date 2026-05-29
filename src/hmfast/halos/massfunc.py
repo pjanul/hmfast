@@ -9,9 +9,9 @@ from hmfast.halos.massdef import MassDefinition
 
 class HaloMassFunction(ABC):
     """
-    Abstract base class for halo mass function models.
+    Parent halo mass function class from which halo mass function models inherit.
 
-    Subclasses must implement the public :math:`dn/d\\ln M` evaluator.
+    Child classes must implement :meth:`dndlnm`.
     """
 
     @abstractmethod
@@ -331,7 +331,9 @@ class T10HaloMassFunction(HaloMassFunction):
 
 class SubHaloMassFunction(ABC):
     """
-    Abstract base class for subhalo mass function models.
+    Parent subhalo mass function class from which subhalo mass function models inherit.
+
+    Child classes must implement :meth:`dndlnmu`.
     """
     @abstractmethod
     @partial(jax.jit, static_argnums=(0,))

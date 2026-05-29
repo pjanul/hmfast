@@ -8,6 +8,7 @@ Halo mass functions
    :toctree: generated
    :nosignatures:
 
+   hmfast.halos.massfunc.HaloMassFunction
    hmfast.halos.massfunc.T08HaloMassFunction
    hmfast.halos.massfunc.T10HaloMassFunction
 
@@ -19,5 +20,6 @@ Subhalo mass functions
    :toctree: generated
    :nosignatures:
 
+   hmfast.halos.massfunc.SubHaloMassFunction
    hmfast.halos.massfunc.TW10SubHaloMassFunction
    hmfast.halos.massfunc.JvdB14SubHaloMassFunction

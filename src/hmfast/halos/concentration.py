@@ -9,8 +9,9 @@ from hmfast.halos.massdef import MassDefinition
 
 class Concentration(ABC):
     """
-    Abstract base class for all concentration-mass relations.
-    All subclasses must implement the c_delta method.
+    Parent concentration class from which concentration-mass relations inherit.
+
+    Child classes must implement :meth:`c_delta`.
     """
     @abstractmethod
     @partial(jax.jit, static_argnums=(0, 4))

@@ -8,4 +8,5 @@ Halo bias models
    :toctree: generated
    :nosignatures:
 
+   hmfast.halos.bias.HaloBias
    hmfast.halos.bias.T10HaloBias

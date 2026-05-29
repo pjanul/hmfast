@@ -11,8 +11,9 @@ class Tracer(ABC):
     """
     Parent tracer class from which other tracer classes inherit.
 
-    Child tracers must implement :meth:`kernel` and provide a compatible
-    profile type through ``_required_profile_type``.
+    Child tracers must implement :meth:`kernel`. When used in the halo model,
+    they must also define a ``profile`` attribute with an appropriate profile
+    object.
     """
     
     _required_profile_type = HaloProfile 

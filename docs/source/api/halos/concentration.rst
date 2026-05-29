@@ -8,6 +8,7 @@ Concentration-mass relations
    :toctree: generated
    :nosignatures:
 
+   hmfast.halos.concentration.Concentration
    hmfast.halos.concentration.ConstantConcentration
    hmfast.halos.concentration.D08Concentration
    hmfast.halos.concentration.B13Concentration

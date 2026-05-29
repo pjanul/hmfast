@@ -46,20 +46,18 @@ class B16DensityProfile(DensityProfile):
 
     where :math:`X \\in \\{C, \\alpha, \\beta\\}`.
 
-    The projected Fourier-space profile is evaluated as
+    The Fourier-space density profile used by the halo model is evaluated as
 
     .. math::
 
         u_k(k, M, z) =
-        4 \\pi \\, r_\\Delta^3 \\, \\frac{1}{\\mu_e}
-        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        4 \\pi \\, r_\\Delta^3 \\, (1+z)^3
         \\int dx \\, x^2 \\, \\rho(x, M, z)
         \\, \\frac{\\sin\\!\\left[(k r_\\Delta) x\\right]}
         {(k r_\\Delta) x}
         \\tag{3}
 
-    where :math:`x = r / [(1+z) r_\\Delta]`, :math:`\\mu_e = 1.14`, and
-    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
+    where :math:`x = r / [(1+z) r_\\Delta]`. 
 
     Attributes
     ----------
@@ -333,22 +331,20 @@ class _NFWDensityProfile(DensityProfile):
     with :math:`x_s = r / r_s`, where :math:`r_s` has the same units as
     :math:`r`, and :math:`r_s = r_\\Delta / c_\\Delta`.
 
-    The projected Fourier-space profile is evaluated as
+    The Fourier-space density profile used by the halo model is evaluated as
 
     .. math::
 
         u_k(k, M, z) =
-        4 \\pi \\, r_s^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
-        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        4 \\pi \\, r_s^3 \\, (1+z)^3
         \\int dx \\, x^2 \\, \\rho(x, M, z)
         \\, \\frac{\\sin\\!\\left[(k r_s) x\\right]}
         {(k r_s) x}
         \\tag{4}
 
     where :math:`x = r / r_s`, :math:`r_s` has the same units as
-    :math:`r`, :math:`\\mu_e = 1.14`,
-    :math:`f_{\\mathrm{free}} = 1`, and
-    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
+    :math:`r`, and :math:`f_{\\mathrm{free}} = 1`. Any kSZ-specific weighting
+    is applied by the tracer kernel rather than by this profile.
 
     Attributes
     ----------
@@ -530,22 +526,21 @@ class _BCMDensityProfile(DensityProfile):
     In the implementation, :math:`M_s = 2.5 \\times 10^{11} \\, M_\\odot / h`
     and :math:`f_{\\star, M_s} = 0.055` are fixed constants.
 
-    The projected Fourier-space profile is evaluated as
+    The Fourier-space density profile used by the halo model is evaluated as
 
     .. math::
 
         u_k(k, M, z) =
-        4 \\pi \\, r_{\\mathrm{vir}}^3 \\, \\frac{f_{\\mathrm{free}}}{\\mu_e}
-        \\, \\frac{(1+z)^3}{\\chi^2(z)} \\, v_{\\mathrm{rms}}(z)
+        4 \\pi \\, r_{\\mathrm{vir}}^3 \\, (1+z)^3
         \\int dx \\, x^2 \\, \\rho(x, M, z)
         \\, \\frac{\\sin\\!\\left[(k r_{\\mathrm{vir}}) x\\right]}
         {(k r_{\\mathrm{vir}}) x}
         \\tag{5}
 
     where :math:`x = r / r_{\\mathrm{vir}}`, :math:`r_{\\mathrm{vir}}` has the
-    same units as :math:`r`, :math:`\\mu_e = 1.14`,
-    :math:`f_{\\mathrm{free}} = 1`, and
-    :math:`\\chi(z) = (1+z) d_A(z)` is the comoving distance.
+    same units as :math:`r`, and :math:`f_{\\mathrm{free}} = 1`. Any
+    kSZ-specific weighting is applied by the tracer kernel rather than by this
+    profile.
 
     Attributes
     ----------

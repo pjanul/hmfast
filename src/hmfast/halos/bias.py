@@ -8,10 +8,9 @@ from hmfast.halos.massdef import MassDefinition
 
 class HaloBias(ABC):
     """
-    Abstract base class for halo bias models.
+    Parent halo bias class from which halo bias models inherit.
 
-    Subclasses implement large-scale halo bias relations evaluated on a
-    mass-redshift grid.
+    Child classes must implement :meth:`halo_bias`.
     """
     @abstractmethod
     def halo_bias(self, cosmology, m, z, mass_definition=None, convert_masses=False, order=1):

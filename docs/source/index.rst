@@ -22,11 +22,18 @@ Key features include:
 
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents:
+    :maxdepth: 2
+    :caption: Getting Started
 
-   installation
-   api/index
+    installation
+    quickstart
+
+
+.. toctree::
+    :maxdepth: 2
+    :caption: Reference
+
+    api/index
 
 
 Questions & Feedback

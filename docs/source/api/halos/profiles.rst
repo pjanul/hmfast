@@ -7,7 +7,7 @@ hmfast.halos.profiles
 
    hmfast.halos.profiles.HaloProfile
 
-Electron density profiles
+ICM density profiles
 ----------------
 
 .. autosummary::
@@ -17,7 +17,7 @@ Electron density profiles
    hmfast.halos.profiles.DensityProfile
    hmfast.halos.profiles.B16DensityProfile
 
-Electron pressure profiles
+ICM pressure profiles
 -----------------
 
 .. autosummary::

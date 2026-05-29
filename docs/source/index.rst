@@ -31,7 +31,7 @@ Key features include:
 
 .. toctree::
     :maxdepth: 2
-    :caption: Reference
+    :caption: Resources & References 
 
     api/index
 

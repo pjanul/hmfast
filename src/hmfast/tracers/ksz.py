@@ -4,7 +4,7 @@ import jax.scipy as jscipy
 
 from hmfast.tracers.base_tracer import Tracer
 from hmfast.utils import Const
-from hmfast.halos.profiles import DensityProfile, NFWDensityProfile, B16DensityProfile
+from hmfast.halos.profiles import DensityProfile, B16DensityProfile
 
 jax.config.update("jax_enable_x64", True)
 
@@ -68,10 +68,12 @@ class kSZTracer(Tracer):
 
         .. math::
 
-            W_{\\mathrm{kSZ}}(z) = \\frac{\\sigma_T}{m_p} \\frac{1}{1+z}
+            W_{\\mathrm{kSZ}}(z) = \\frac{\\sigma_T}{m_p}
+            \\frac{v_{\\mathrm{rms}}(z)}{\\mu_e \\, \\chi^2(z) \\, (1+z)}
 
         where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_p` is
-        the proton mass, and :math:`z` is the redshift. In the implementation,
+        the proton mass, :math:`\\mu_e = 1.14`, :math:`\\chi(z)` is the comoving
+        distance, and :math:`z` is the redshift. In the implementation,
         :math:`\\sigma_T` is stored in m\\ :sup:`2`, :math:`m_p` is stored in kg,
         and the kernel prefactor is converted to physical
         :math:`\\mathrm{Mpc}^2 \\, M_\\odot^{-1}`.
@@ -90,7 +92,11 @@ class kSZTracer(Tracer):
         """
         # sigmaT / m_prot in physical Mpc^2 / Msun.
         sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_
-        return sigma_T_over_m_p / (1.0 + z)
+        z = jnp.atleast_1d(z)
+        chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
+        velocity_dispersion = jnp.sqrt(cosmology.velocity_dispersion(z))
+        mu_e = 1.14
+        return sigma_T_over_m_p * velocity_dispersion / (mu_e * chi**2 * (1.0 + z))
 
 
 

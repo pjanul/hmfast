@@ -9,7 +9,6 @@ Electron density profiles
    :toctree: generated
    :nosignatures:
 
-   hmfast.halos.profiles.NFWDensityProfile
    hmfast.halos.profiles.B16DensityProfile
 
 Electron pressure profiles

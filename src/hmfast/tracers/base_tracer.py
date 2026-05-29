@@ -9,8 +9,10 @@ from hmfast.halos.profiles import HaloProfile
  
 class Tracer(ABC):
     """
-    Abstract base class for cosmological tracers.
-    All tracers to inherit from this class, which forces them to have certain callable functions )
+    Parent tracer class from which other tracer classes inherit.
+
+    Child tracers must implement :meth:`kernel` and provide a compatible
+    profile type through ``_required_profile_type``.
     """
     
     _required_profile_type = HaloProfile 

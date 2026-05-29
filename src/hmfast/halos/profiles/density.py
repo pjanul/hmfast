@@ -237,8 +237,10 @@ class B16DensityProfile(DensityProfile):
         # Profile Shape Function (Nx, Nm, Nz)
         p_x = (x_200c / xc)**gamma * (1 + (x_200c / xc)**alpha)**(-(beta + gamma) / alpha)
         
-        # Final result: M_odot / Mpc^3.
-        rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x 
+        # Truncate at r_200c so the real-space and Fourier-space profiles
+        # describe the same finite halo.
+        rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x
+        rho_gas = jnp.where(x_200c <= 1.0, rho_gas, 0.0)
         
         return jnp.squeeze(rho_gas)
 
@@ -273,12 +275,7 @@ class B16DensityProfile(DensityProfile):
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
-        mu_e = 1.14
-        prefactor = (
-            4 * jnp.pi * r_delta**3 / mu_e
-            * (1 + z)[None, :]**3 / chi[None, :]**2 * velocity_dispersion[None, :]
-        )
+        prefactor = 4 * jnp.pi * r_delta**3 * (1 + z)[None, :]**3
 
         r = self.x[:, None, None] * r_delta[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
@@ -306,7 +303,7 @@ jax.tree_util.register_pytree_node(
 
         
 
-class NFWDensityProfile(DensityProfile):
+class _NFWDensityProfile(DensityProfile):
     """
     Electron density profile based on `Navarro, Frenk & White (1997) <https://ui.adsabs.harvard.edu/abs/1997ApJ...490..493N/abstract>`_.
 
@@ -420,8 +417,10 @@ class NFWDensityProfile(DensityProfile):
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta) # (Nm, Nz)
         rho_s = m_internal[:, None] / (4 * jnp.pi * r_s**3 * m_nfw)    # (Nm, Nz)
         
-        # Final broadcast to (Nx, Nm, Nz)
+        # Truncate at r_delta so the real-space and Fourier-space profiles
+        # use the same finite-mass NFW definition.
         rho_gas = f_b * rho_s[None, :, :] / (x_s * (1 + x_s)**2)
+        rho_gas = jnp.where(x_s <= c_delta[None, :, :], rho_gas, 0.0)
         
         return jnp.squeeze(rho_gas)
         
@@ -466,12 +465,7 @@ class NFWDensityProfile(DensityProfile):
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
-        mu_e = 1.14
-        prefactor = (
-            4 * jnp.pi * r_s**3 / mu_e
-            * (1 + z)[None, :]**3 / chi[None, :]**2 * velocity_dispersion[None, :]
-        )
+        prefactor = 4 * jnp.pi * r_s**3 * (1 + z)[None, :]**3
 
         r = self.x[:, None, None] * r_s[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
@@ -496,7 +490,7 @@ class NFWDensityProfile(DensityProfile):
 
 
 
-class BCMDensityProfile(DensityProfile):
+class _BCMDensityProfile(DensityProfile):
     """
     Electron density profile from `Schneider et al. (2019) <https://ui.adsabs.harvard.edu/abs/2019JCAP...03..020S/abstract>`_, 
     also known as the Baryon Correction Model (BCM).
@@ -745,12 +739,7 @@ class BCMDensityProfile(DensityProfile):
         chi = d_A_z * (1 + z)
         ell_target = k[:, None] * chi[None, :] - 0.5
 
-        velocity_dispersion = jnp.atleast_1d(jnp.sqrt(halo_model.cosmology.velocity_dispersion(z)))
-        mu_e = 1.14
-        prefactor = (
-            4 * jnp.pi * r_vir**3 / mu_e
-            * (1 + z)[None, :]**3 / chi[None, :]**2 * velocity_dispersion[None, :]
-        )
+        prefactor = 4 * jnp.pi * r_vir**3 * (1 + z)[None, :]**3
 
         r = self.x[:, None, None] * r_vir[None, :, :] * (1.0 + z[None, None, :])
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
@@ -771,9 +760,9 @@ class BCMDensityProfile(DensityProfile):
         return jnp.squeeze(vmapped_interp(ell_target, ell_native, u_ell_val))
 
 jax.tree_util.register_pytree_node(
-    BCMDensityProfile,
+    _BCMDensityProfile,
     lambda obj: obj._tree_flatten(),
-    lambda aux_data, children: BCMDensityProfile._tree_unflatten(aux_data, children)
+    lambda aux_data, children: _BCMDensityProfile._tree_unflatten(aux_data, children)
 )
 
     

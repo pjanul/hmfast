@@ -14,32 +14,7 @@ class HaloBias(ABC):
     """
     @abstractmethod
     def halo_bias(self, cosmology, m, z, mass_definition=None, convert_masses=False, order=1):
-        """
-        Evaluate the halo bias of the requested order.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology used to evaluate the halo bias.
-        m : array-like
-            Halo masses in physical :math:`M_\\odot` at which to evaluate the bias.
-        z : array-like
-            Redshifts at which to evaluate the bias.
-        mass_definition : MassDefinition, optional
-            Halo mass definition at which to evaluate the bias. If omitted,
-            subclasses default to their native calibration mass definition.
-        convert_masses : bool, optional
-            Whether to convert from the native calibration mass definition
-            when required.
-        order : int, optional
-            Bias order to evaluate.
-
-        Returns
-        -------
-        array-like
-            Dimensionless halo bias values with shape :math:`(N_m, N_z)`,
-            where singleton dimensions get squeezed before return.
-        """
+        """Required halo bias evaluator."""
         pass
 
 class T10HaloBias(HaloBias):

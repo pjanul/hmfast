@@ -12,6 +12,11 @@ from hmfast.halos.profiles import HaloProfile
 
 
 class CIBProfile(HaloProfile):
+    """
+    Parent CIB profile class from which CIB profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
     pass
 
 

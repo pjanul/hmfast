@@ -12,6 +12,11 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
 class DensityProfile(HaloProfile):
+    """
+    Parent density profile class from which density profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
     pass
 
 

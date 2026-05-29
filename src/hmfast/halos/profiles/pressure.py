@@ -13,6 +13,11 @@ from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
 class PressureProfile(HaloProfile):
+    """
+    Parent pressure profile class from which pressure profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
     @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """

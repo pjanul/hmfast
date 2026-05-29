@@ -11,6 +11,11 @@ from hmfast.halos.profiles import HaloProfile
 
 
 class GalaxyHODProfile(HaloProfile):
+    """
+    Parent HOD profile class from which galaxy HOD profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
     pass
 
 

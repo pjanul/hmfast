@@ -15,28 +15,8 @@ class Concentration(ABC):
     """
     @abstractmethod
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
-        """
-        Compute the concentration parameter :math:`c_\\Delta`.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology used to evaluate the concentration relation.
-        m : array-like
-            Halo masses in physical :math:`M_\\odot`.
-        z : array-like
-            Redshifts.
-        mass_definition : MassDefinition, optional
-            Target halo mass definition. Defaults to
-            ``MassDefinition(delta="vir", reference="critical")``.
-
-        Returns
-        -------
-        float or array-like
-            Concentration values with shape :math:`(N_m, N_z)`, where
-            singleton dimensions get squeezed before return.
-        """
+    def c_delta(self, cosmology, m, z, mass_definition=None):
+        """Required concentration evaluator."""
         pass
 
 

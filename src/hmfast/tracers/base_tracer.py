@@ -67,9 +67,7 @@ class Tracer(ABC):
 
     @abstractmethod
     def kernel(self, cosmology, z):
-        """
-        Compute the tracer's radial kernel W(z). All child classes must have a version of this function implemented.
-        """
+        """Required tracer kernel."""
         pass 
    
   

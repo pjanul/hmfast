@@ -11,6 +11,11 @@ from hmfast.halos.profiles import HaloProfile
 
 
 class MatterProfile(HaloProfile):
+    """
+    Parent matter profile class from which matter profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
     pass
 
 

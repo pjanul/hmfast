@@ -28,6 +28,11 @@ class HankelTransform:
 
 
 class HaloProfile(ABC):
+    """
+    Parent halo profile class from which all halo profile classes inherit.
+
+    Child profile classes must implement :meth:`real` and :meth:`fourier`.
+    """
 
     @property
     def has_central_contribution(self):

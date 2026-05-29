@@ -16,31 +16,7 @@ class HaloMassFunction(ABC):
 
     @abstractmethod
     def dndlnm(self, cosmology, m, z, mass_definition=None, convert_masses=False):
-        """
-        Evaluate :math:`dn/d\\ln M` on a mass-redshift grid.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology used to evaluate the halo mass function.
-        m : array-like
-            Halo mass grid in physical :math:`M_\\odot`.
-        z : array-like
-            Redshift grid.
-        mass_definition : MassDefinition, optional
-            Halo mass definition at which to evaluate the halo mass
-            function. If omitted, subclasses default to their native
-            calibration mass definition.
-        convert_masses : bool, optional
-            Whether to convert from the native calibration mass definition
-            when required.
-
-        Returns
-        -------
-        array-like
-            Halo mass function values :math:`dn/d\\ln M` in comoving
-            :math:`\\mathrm{Mpc}^{-3}`.
-        """
+        """Required halo mass function evaluator."""
         pass
 
 
@@ -338,28 +314,7 @@ class SubHaloMassFunction(ABC):
     @abstractmethod
     @partial(jax.jit, static_argnums=(0,))
     def dndlnmu(self, cosmology, m_host, m_sub):
-        """
-        Compute the subhalo abundance per logarithmic mass ratio.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology supplied for cosmology-dependent subhalo mass functions.
-            The built-in implementations currently depend only on the mass
-            ratio and are agnostic of mass definition.
-        m_host : float or array_like
-            Host halo mass in physical :math:`M_\\odot`.
-        m_sub : float or array_like
-            Subhalo mass in physical :math:`M_\\odot`.
-
-        Returns
-        -------
-        array-like
-            Dimensionless subhalo abundance :math:`dN/d\\ln \\mu`, i.e.
-            number of subhalos per host per logarithmic mass ratio, with shape
-            broadcast from ``m_host`` and ``m_sub``, where singleton
-            dimensions get squeezed before return.
-        """
+        """Required subhalo mass function evaluator."""
         pass
 
 class TW10SubHaloMassFunction(SubHaloMassFunction):

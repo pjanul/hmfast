@@ -148,10 +148,6 @@ class S12CIBProfile(CIBProfile):
         self.T0, self.M_eff, self.sigma2_LM = T0, M_eff, sigma2_LM
         self.delta, self.z_p, self.M_min = delta, z_p, M_min
 
-    @property
-    def has_central_contribution(self):
-        return True
-
     def _tree_flatten(self):
         leaves = (self.nu, self.L0, self.alpha, self.beta, self.gamma, self.T0, 
                   self.M_eff, self.sigma2_LM, self.delta, self.z_p, self.M_min)
@@ -463,34 +459,6 @@ class S12CIBProfile(CIBProfile):
         
         return jnp.squeeze(intensity)
 
-
-    def _sat_and_cen_contribution(self, halo_model, k, m, z):
-
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-
-        
-        cparams = halo_model.cosmology._cosmo_params()
-        nu = self.nu
-       
-        chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
-
-        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
-        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
-
-        # Apply flux cut if flux cut is not None
-        #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
-        #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
-
-        _, u_m = self._u_k_nfw(halo_model, k, m, z)
-        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
-
-        # Compute central and satellite terms
-        sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
-        cen_term = jnp.broadcast_to(1 / (4 * jnp.pi) * lc[None, :, :], sat_term.shape)
-
-        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
-
-
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
@@ -549,11 +517,15 @@ class S12CIBProfile(CIBProfile):
             Fourier-space profile with shape :math:`(N_k, N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-        # Get the individual components (scaled correctly by h_factors and 4pi)
-
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        
-        sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
+
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
+
+        sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
+        cen_term = jnp.broadcast_to((1 / (4 * jnp.pi)) * lc[None, :, :], sat_term.shape)
 
         return jnp.squeeze(cen_term + sat_term)
 
@@ -709,10 +681,6 @@ class M21CIBProfile(CIBProfile):
         else:
             self.s_nu = s_nu
 
-    @property
-    def has_central_contribution(self):
-        return True
-        
     def _tree_flatten(self):
         leaves = (self.nu, self.eta_max, self.z_c, self.tau, self.f_sub, 
                   self.M_min, self.M_eff, self.sigma2_LM)
@@ -1009,32 +977,6 @@ class M21CIBProfile(CIBProfile):
         
         return jnp.squeeze(intensity)
 
-    
-    def _sat_and_cen_contribution(self, halo_model, k, m, z):
-
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-
-        cparams = halo_model.cosmology._cosmo_params()
-       
-        chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
-
-        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
-        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
-
-        # Apply flux cut if flux cut is not None
-        #mask = ((ls + lc) / (4 * jnp.pi * (1 + z) * chi**2) * 1e3 > self.flux_cut) 
-        #lc, ls = jax.lax.cond(self.flux_cut is not None, lambda _: (jnp.where(mask, 0.0, lc), jnp.where(mask, 0.0, ls)), lambda _: (lc, ls), operand=None)
-
-        _, u_m = self._u_k_nfw(halo_model, k, m, z)
-        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
-
-        # Compute central and satellite terms
-        sat_term =  1  / (4*jnp.pi)    *   (ls[None, :, :] * u_m ) 
-        cen_term = jnp.broadcast_to(1 / (4 * jnp.pi) * lc[None, :, :], sat_term.shape)
-
-        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
-
-
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
@@ -1096,7 +1038,13 @@ class M21CIBProfile(CIBProfile):
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        sat_term, cen_term = self._sat_and_cen_contribution(halo_model, k, m, z)
+        ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
+        lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
+        _, u_m = self._u_k_nfw(halo_model, k, m, z)
+        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
+
+        sat_term = (1 / (4 * jnp.pi)) * (ls[None, :, :] * u_m)
+        cen_term = jnp.broadcast_to((1 / (4 * jnp.pi)) * lc[None, :, :], sat_term.shape)
 
         return jnp.squeeze(cen_term + sat_term)
 

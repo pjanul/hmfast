@@ -13,6 +13,7 @@ from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
 from hmfast.halos.massdef import MassDefinition
 from hmfast.cosmology import Cosmology
+from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
 
 jax.config.update("jax_enable_x64", True)
 
@@ -232,28 +233,9 @@ class HaloModel:
 
         # Process a single mass bin at a time and extract the uk^2 at the lowest mass for the halo model consistency term
         def process_bin(i):
-            # We need the profiles for index 'i' while squaring uk if the user is doing an autocorrelation
-            if is_same_tracer:
-                if tracer1.profile.has_central_contribution:
-                    s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m, z)
-                    s1 = jnp.reshape(s1, (len(k), len(m), len(z)))
-                    c1 = jnp.reshape(c1, (len(k), len(m), len(z)))
-                    uk_sq_row = s1[:, i, :] * s1[:, i, :] + 2.0 * s1[:, i, :] * c1[:, i, :]
-                else:
-                    u1 = jnp.reshape(tracer1.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
-                    uk_sq_row = u1[:, i, :] ** 2
-            elif tracer1.profile.has_central_contribution and tracer2.profile.has_central_contribution:
-                s1, c1 = tracer1.profile._sat_and_cen_contribution(self, k, m, z)
-                s2, c2 = tracer2.profile._sat_and_cen_contribution(self, k, m, z)
-                s1 = jnp.reshape(s1, (len(k), len(m), len(z)))
-                c1 = jnp.reshape(c1, (len(k), len(m), len(z)))
-                s2 = jnp.reshape(s2, (len(k), len(m), len(z)))
-                c2 = jnp.reshape(c2, (len(k), len(m), len(z)))
-                uk_sq_row = s1[:, i, :] * s2[:, i, :] + s1[:, i, :] * c2[:, i, :] + s2[:, i, :] * c1[:, i, :]
-            else:
-                u1 = jnp.reshape(tracer1.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
-                u2 = jnp.reshape(tracer2.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
-                uk_sq_row = u1[:, i, :] * u2[:, i, :]
+            pair_kernel = _fourier_2pt(self, tracer1.profile, tracer2.profile, k, m, z)
+            pair_kernel = jnp.reshape(pair_kernel, (len(k), len(m), len(z)))
+            uk_sq_row = pair_kernel[:, i, :]
     
             return uk_sq_row * total_weights[i], uk_sq_row
     

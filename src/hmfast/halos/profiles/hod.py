@@ -101,11 +101,6 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         
         self.sigma_log10M, self.alpha_s, self.M1_prime, self.M_min, self.M0  = sigma_log10M, alpha_s, M1_prime, M_min, M0
 
-    @property
-    def has_central_contribution(self):
-        return True
-    
-  
     # --- JAX PyTree Registration ---
 
     def _tree_flatten(self):
@@ -265,27 +260,6 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
         return jnp.squeeze(bg_num / ng)
 
-
-    def _sat_and_cen_contribution(self, halo_model, k, m, z):
-        """ 
-        Compute the satellite and central pieces of the galaxy HOD tracer.
-        """
-
-        k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-
-        Ns = self.n_sat(halo_model, m)
-        Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
-
-        _, u_m = self._u_k_nfw(halo_model, k, m, z)
-        u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
-
-        sat_term = (1/ng) * (Ns[None, :, None] * u_m)
-        cen_term = jnp.broadcast_to((1/ng) * (Nc[None, :, None]**0), sat_term.shape)
-    
-        return jnp.squeeze(sat_term), jnp.squeeze(cen_term)
-
-
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
@@ -358,7 +332,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
     
-        u_k = (1/ng) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
+        u_k = (1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
         return jnp.squeeze(u_k)
         
 

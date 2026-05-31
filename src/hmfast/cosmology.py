@@ -38,7 +38,7 @@ class Cosmology:
         ``"wcdm:v1"``, ``"ede:v1"``, ``"mnu-3states:v1"``, and ``"ede:v2"``.
     H0 : float
         Hubble constant at :math:`z = 0` in units of
-        :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
+        :math:`\\mathrm{km} \\\, \\mathrm{s}^{-1} \\\, \\mathrm{Mpc}^{-1}`.
     omega_cdm : float
         Physical cold dark matter density,
         :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2`.
@@ -319,14 +319,14 @@ class Cosmology:
 
         .. math::
 
-            \\sigma^2(M, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
-            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
+            \\sigma^2(M, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\\, k^2\\,
+            P_{\\mathrm{L}}(k, z)\\, \\\hat{W}^2(kR),
 
         with Fourier-space top-hat window
 
         .. math::
 
-            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
+            \\\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
@@ -366,14 +366,14 @@ class Cosmology:
 
         .. math::
 
-            \\sigma^2(R, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
-            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
+            \\sigma^2(R, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\\, k^2\\,
+            P_{\\mathrm{L}}(k, z)\\, \\\hat{W}^2(kR),
 
         with Fourier-space top-hat window
 
         .. math::
 
-            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
+            \\\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
@@ -425,7 +425,7 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Hubble parameter(s) in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`
+            Hubble parameter(s) in :math:`\\mathrm{km} \\\, \\mathrm{s}^{-1} \\\, \\mathrm{Mpc}^{-1}`
         """
         
         params = self._to_dict()
@@ -466,7 +466,7 @@ class Cosmology:
 
         :math:`\\sigma_8(z)` is the dimensionless root-mean-square linear
         matter fluctuation amplitude in spheres of radius
-        :math:`8 \\, \\mathrm{Mpc}/h`.
+        :math:`8 \\\, \\mathrm{Mpc}/h`.
 
         Parameters
         ----------
@@ -509,7 +509,7 @@ class Cosmology:
               massive neutrinos
             - ``Omega0_cb``: Present-day CDM+baryon density parameter
             - ``Rho_crit_0``: Present-day critical density in
-                            :math:`M_\\odot \\, \\mathrm{Mpc}^{-3}`
+                            :math:`M_\\odot \\\, \\mathrm{Mpc}^{-3}`
     
         """
     
@@ -554,7 +554,7 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Critical density in :math:`M_\\odot \\, \\mathrm{Mpc}^{-3}`
+            Critical density in :math:`M_\\odot \\\, \\mathrm{Mpc}^{-3}`
         """
         
         # Get Hubble parameter    
@@ -608,7 +608,7 @@ class Cosmology:
           .. math::
 
               \\delta_c(z) = \\frac{3}{20}(12\\pi)^{2/3}
-              \\left[1 + 0.012299 \\, \\log_{10}(\\Omega_m(z))\\right].
+              \\left[1 + 0.012299 \\\, \\log_{10}(\\Omega_m(z))\\right].
 
         Parameters
         ----------
@@ -748,7 +748,7 @@ class Cosmology:
     
         .. math::
     
-            \\frac{dV}{dz\\,d\\Omega} = \\frac{(1+z)^2\\, D_A(z)^2 \\, c}{H(z)}
+            \\frac{dV}{dz\\\,d\\Omega} = \\frac{(1+z)^2\\\, D_A(z)^2 \\\, c}{H(z)}
     
         Parameters
         ----------
@@ -758,7 +758,7 @@ class Cosmology:
         Returns
         -------
         float or jnp.ndarray
-            :math:`\\frac{dV}{dz\\,d\\Omega}` in :math:`\\mathrm{Mpc}^3 \\, \\mathrm{sr}^{-1}`
+            :math:`\\frac{dV}{dz\\\,d\\Omega}` in :math:`\\mathrm{Mpc}^3 \\\, \\mathrm{sr}^{-1}`
         """
 
         dAz = self.angular_diameter_distance(z)
@@ -818,18 +818,18 @@ class Cosmology:
 
     def cl_tt(self, l):
         """
-        Evaluate the CMB temperature power spectrum :math:`C_\ell^{TT}` at
+        Evaluate the CMB temperature power spectrum :math:`C_\\ell^{TT}` at
         requested multipoles `l` using the emulator.
 
         Parameters
         ----------
         l : int or array-like
-            Multipole(s) at which to evaluate :math:`C_\ell`.
+            Multipole(s) at which to evaluate :math:`C_\\ell`.
 
         Returns
         -------
         jnp.ndarray
-            :math:`C_\ell^{TT}` evaluated at `l`, where singleton dimensions
+            :math:`C_\\ell^{TT}` evaluated at `l`, where singleton dimensions
             get squeezed before return. Values for `l` outside the emulator
             training range are returned as NaN.
         """
@@ -841,7 +841,7 @@ class Cosmology:
 
     def cl_ee(self, l):
         """
-        Evaluate the CMB E-mode polarization power spectrum :math:`C_\ell^{EE}`
+        Evaluate the CMB E-mode polarization power spectrum :math:`C_\\ell^{EE}`
         at requested multipoles `l`, where singleton dimensions get squeezed
         before return. Out-of-range `l` return NaN.
         """
@@ -853,7 +853,7 @@ class Cosmology:
 
     def cl_te(self, l):
         """
-        Evaluate the CMB temperature-E cross power spectrum :math:`C_\ell^{TE}`
+        Evaluate the CMB temperature-E cross power spectrum :math:`C_\\ell^{TE}`
         at requested multipoles `l`, where singleton dimensions get squeezed
         before return. Out-of-range `l` return NaN.
         """
@@ -865,7 +865,7 @@ class Cosmology:
 
     def cl_pp(self, l):
         """
-        Evaluate the CMB lensing potential power spectrum :math:`C_\ell^{\phi\phi}`
+        Evaluate the CMB lensing potential power spectrum :math:`C_\\ell^{\\phi\\phi}`
         at requested multipoles `l`, where singleton dimensions get squeezed
         before return. Out-of-range `l` return NaN. Applies the same 1/(2pi)
         normalization as before.

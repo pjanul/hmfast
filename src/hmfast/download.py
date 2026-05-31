@@ -1,6 +1,17 @@
 import os
 import requests
 
+
+_EMULATOR_SET_TO_MODEL = {
+    "lcdm:v1": "lcdm",
+    "mnu:v1": "mnu",
+    "neff:v1": "neff",
+    "wcdm:v1": "wcdm",
+    "ede:v1": "ede-v1",
+    "mnu-3states:v1": "mnu-3states",
+    "ede:v2": "ede-v2",
+}
+
 COSMOPOWER_MODELS = {
     "ede-v2": [
         "growth-and-distances/DAZ_v2.npz",
@@ -152,25 +163,47 @@ def download_file(url, local_path, skip_existing=True):
         f.write(response.content)
     #print(f"  Saved to {local_path}")
 
-def download_emulators(models="all", skip_existing=True):
+def _resolve_emulator_sets(emulator_set):
+    if emulator_set == "all" or emulator_set == ["all"]:
+        return list(COSMOPOWER_MODELS.keys())
+
+    if isinstance(emulator_set, str):
+        emulator_sets = [emulator_set]
+    else:
+        emulator_sets = list(emulator_set)
+
+    invalid_sets = [name for name in emulator_sets if name not in _EMULATOR_SET_TO_MODEL]
+    if invalid_sets:
+        allowed_sets = [*list(_EMULATOR_SET_TO_MODEL.keys()), "all"]
+        raise ValueError(
+            f"Unknown emulator_set value(s) {invalid_sets}. Available: {allowed_sets}"
+        )
+
+    return [_EMULATOR_SET_TO_MODEL[name] for name in emulator_sets]
+
+
+def download_emulators(emulator_set="all", skip_existing=True):
+    """
+    Download emulator files and auxiliary data for one or more cosmology emulator sets.
+
+    Parameters
+    ----------
+    emulator_set : str or sequence of str, default="all"
+        Accepted values are ``"lcdm:v1"``, ``"mnu:v1"``, ``"neff:v1"``,
+        ``"wcdm:v1"``, ``"ede:v1"``, ``"mnu-3states:v1"``, ``"ede:v2"``,
+        or ``"all"`` to download every available set at once.
+    skip_existing : bool, default=True
+        If `True`, files already present on disk are not downloaded again.
+
+    Returns
+    -------
+    None
+        Files are downloaded into the hmfast data directory.
+    """
     target_dir = get_default_data_path()
     os.makedirs(target_dir, exist_ok=True)
 
-    valid_models = list(COSMOPOWER_MODELS.keys())
-
-    if models == "all" or models == ["all"]:
-        models_to_fetch = valid_models
-    elif models is None:
-        models_to_fetch = ["ede-v2"]
-    elif isinstance(models, str):
-        models_to_fetch = [models]
-    else:
-        models_to_fetch = models
-
-    for m in models_to_fetch:
-        if m not in valid_models:
-            raise ValueError(f"Unknown model '{m}'. Available: {valid_models}")
-
+    models_to_fetch = _resolve_emulator_sets(emulator_set)
 
     for model in models_to_fetch:
         subdir = "ede" if model.startswith("ede") else model

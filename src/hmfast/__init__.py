@@ -12,12 +12,12 @@ __email__ = "pj407@cam.ac.uk"
 
 from .download import download_emulators
 
-download_emulators(models=["lcdm", "ede-v2"], skip_existing=True)
+download_emulators(emulator_set=["lcdm:v1", "ede:v2"], skip_existing=True)
 
 
-#from .halos import HaloModel
-from .cosmology import Cosmology
+from . import halos
+from . import cosmology
 from . import tracers
 
 
-#__all__ = ["HaloModel", "Cosmology"]
+__all__ = ["cosmology", "halos", "tracers", "download_emulators"]

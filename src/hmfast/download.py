@@ -198,7 +198,9 @@ def download_emulators(emulator_set="all", skip_existing=True):
     Returns
     -------
     None
-        Files are downloaded into the hmfast data directory.
+        Files are downloaded into the hmfast data directory (defaults to
+        ``~/.cache/hmfast`` or the path specified by the ``HMFAST_DATA_PATH``
+        environment variable).
     """
     target_dir = get_default_data_path()
     os.makedirs(target_dir, exist_ok=True)

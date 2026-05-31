@@ -38,7 +38,7 @@ class Cosmology:
         ``"wcdm:v1"``, ``"ede:v1"``, ``"mnu-3states:v1"``, and ``"ede:v2"``.
     H0 : float
         Hubble constant at :math:`z = 0` in units of
-        :math:`\\mathrm{km} \\\, \\mathrm{s}^{-1} \\\, \\mathrm{Mpc}^{-1}`.
+        :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
     omega_cdm : float
         Physical cold dark matter density,
         :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2`.
@@ -319,14 +319,14 @@ class Cosmology:
 
         .. math::
 
-            \\sigma^2(M, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\\, k^2\\,
-            P_{\\mathrm{L}}(k, z)\\, \\\hat{W}^2(kR),
+            \\sigma^2(M, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
+            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
 
         with Fourier-space top-hat window
 
         .. math::
 
-            \\\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
+            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
@@ -366,14 +366,13 @@ class Cosmology:
 
         .. math::
 
-            \\sigma^2(R, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\\, k^2\\,
-            P_{\\mathrm{L}}(k, z)\\, \\\hat{W}^2(kR),
-
+            \\sigma^2(R, z) = \\frac{1}{2\\pi^2} \\int_0^\\infty dk\, k^2\,
+            P_{\\mathrm{L}}(k, z)\, \\hat{W}^2(kR),
         with Fourier-space top-hat window
 
         .. math::
 
-            \\\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
+            \\hat{W}(x) = \\frac{3}{x^3}\\left[\\sin x - x \\cos x\\right].
 
         Parameters
         ----------
@@ -425,7 +424,7 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Hubble parameter(s) in :math:`\\mathrm{km} \\\, \\mathrm{s}^{-1} \\\, \\mathrm{Mpc}^{-1}`
+            Hubble parameter(s) in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`
         """
         
         params = self._to_dict()
@@ -466,7 +465,7 @@ class Cosmology:
 
         :math:`\\sigma_8(z)` is the dimensionless root-mean-square linear
         matter fluctuation amplitude in spheres of radius
-        :math:`8 \\\, \\mathrm{Mpc}/h`.
+        :math:`8 \\, \\mathrm{Mpc}/h`.
 
         Parameters
         ----------
@@ -508,8 +507,7 @@ class Cosmology:
             - ``Omega0_m_nonu``: Present-day matter density parameter excluding
               massive neutrinos
             - ``Omega0_cb``: Present-day CDM+baryon density parameter
-            - ``Rho_crit_0``: Present-day critical density in
-                            :math:`M_\\odot \\\, \\mathrm{Mpc}^{-3}`
+            - ``Rho_crit_0``: Present-day critical density in :math:`M_\\odot \\, \\mathrm{Mpc}^{-3}`
     
         """
     
@@ -554,7 +552,7 @@ class Cosmology:
         Returns
         -------
         jnp.ndarray
-            Critical density in :math:`M_\\odot \\\, \\mathrm{Mpc}^{-3}`
+            Critical density in :math:`M_\\odot \\, \\mathrm{Mpc}^{-3}`
         """
         
         # Get Hubble parameter    
@@ -608,7 +606,7 @@ class Cosmology:
           .. math::
 
               \\delta_c(z) = \\frac{3}{20}(12\\pi)^{2/3}
-              \\left[1 + 0.012299 \\\, \\log_{10}(\\Omega_m(z))\\right].
+              \\left[1 + 0.012299 \\, \\log_{10}(\\Omega_m(z))\\right].
 
         Parameters
         ----------
@@ -748,7 +746,7 @@ class Cosmology:
     
         .. math::
     
-            \\frac{dV}{dz\\\,d\\Omega} = \\frac{(1+z)^2\\\, D_A(z)^2 \\\, c}{H(z)}
+            \\frac{dV}{dz\\,d\\Omega} = \\frac{(1+z)^2\\, D_A(z)^2 \\, c}{H(z)}
     
         Parameters
         ----------
@@ -758,7 +756,7 @@ class Cosmology:
         Returns
         -------
         float or jnp.ndarray
-            :math:`\\frac{dV}{dz\\\,d\\Omega}` in :math:`\\mathrm{Mpc}^3 \\\, \\mathrm{sr}^{-1}`
+            :math:`\\frac{dV}{dz\\,d\\Omega}` in :math:`\\mathrm{Mpc}^3 \\, \\mathrm{sr}^{-1}`
         """
 
         dAz = self.angular_diameter_distance(z)

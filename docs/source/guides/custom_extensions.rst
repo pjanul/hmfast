@@ -1,4 +1,4 @@
-Custom extensions guide
+Create custom tracers & halo components
 =======================
 
 This guide explains how to add custom extension points to HMFast: tracers, halo-model

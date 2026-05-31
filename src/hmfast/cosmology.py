@@ -291,7 +291,8 @@ class Cosmology:
         cparams = self._cosmo_params()
 
         # Power spectra for all redshifts, shape: (n_k, n_z)
-        pk_grid = jax.vmap(lambda zp: self.pk(zp, linear=True)[1].flatten())(z_grid).T
+        k_grid, _ = self._pk_grid()
+        pk_grid = self.pk(k_grid, z_grid, linear=True)
 
         # Compute σ²(R, z) using the cached top-hat helper.
         R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
@@ -660,8 +661,10 @@ class Cosmology:
 
         k0 = 1e-2
         z_grid_pk = self._z_grid_pk()
-        pk0_grid = jax.vmap(lambda zp: jnp.interp(k0, *self.pk(zp, linear=True)))(z_grid_pk)
-        D_grid = jnp.sqrt(pk0_grid / jnp.interp(k0, *self.pk(0.0, linear=True)))
+        pk0_tmp = self.pk(jnp.array([k0]), z_grid_pk, linear=True)
+        pk0_grid = jnp.atleast_2d(pk0_tmp)[0, :]
+        pk0_z0_tmp = self.pk(jnp.array([k0]), jnp.array([0.0]), linear=True)
+        D_grid = jnp.sqrt(pk0_grid / jnp.atleast_2d(pk0_z0_tmp)[0, 0])
     
         return jnp.squeeze(jnp.interp(z, z_grid_pk, D_grid))
 
@@ -726,7 +729,7 @@ class Cosmology:
         k_grid = jnp.geomspace(1e-5, 1e1, 1000)
         z_grid_pk = self._z_grid_pk()
 
-        P_grid = jax.vmap(lambda zp: jnp.interp(k_grid, *self.pk(zp, linear=True)))(z_grid_pk)
+        P_grid = self.pk(k_grid, z_grid_pk, linear=True).T
     
         a_grid = 1.0 / (1.0 + z_grid_pk)
         H_grid = self.hubble_parameter(z_grid_pk)
@@ -768,100 +771,111 @@ class Cosmology:
     # Matter power spectra
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(2,))
-    def pk(self, z, linear=True):
+    @partial(jax.jit, static_argnums=(3,))
+    def pk(self, k, z, linear=True):
         """
-        Get the matter power spectrum :math:`P(k, z)` from the emulator.
+        Get the matter power spectrum :math:`P(k, z)` interpolated at
+        requested wavenumbers `k` and redshifts `z`.
 
         Parameters
         ----------
+        k : float or jnp.ndarray
+            Wavenumber(s) in :math:`\\mathrm{Mpc}^{-1}` to evaluate the power spectrum at.
         z : float or jnp.ndarray
-            Redshift(s)
+            Redshift(s) at which to evaluate the power spectrum.
         linear : bool
-            True for linear :math:`P(k)`, False for nonlinear :math:`P(k)`
+            True for linear :math:`P(k)`, False for nonlinear :math:`P(k)`.
 
         Returns
         -------
-        tuple
-            :math:`(k, P(k))`, with :math:`k` in physical
-            :math:`\\mathrm{Mpc}^{-1}` and :math:`P(k)` in physical
-            :math:`\mathrm{Mpc}^3`.
+        P : jnp.ndarray
+            Power spectrum values with shape :math:`(N_k, N_z)`, where singleton
+            dimensions get squeezed before return.
         """
-        params = self._to_dict()
-        params["z_pk_save_nonclass"] = jnp.atleast_1d(z)[0]
+        k = jnp.atleast_1d(k)
+        z = jnp.atleast_1d(z)
 
+        params_base = self._to_dict()
         key = "PKL" if linear else "PKNL"
         emu = self._load_emulator(key)
         k_grid, pk_power_fac = self._pk_grid()
-        pk_log = emu.predictions(params)
-        pk = 10.0 ** pk_log * pk_power_fac
 
-        return k_grid, pk
+        # Predict on the emulator grid for each redshift, then interpolate
+        def predict_for_z(z_i):
+            params = dict(params_base)
+            params["z_pk_save_nonclass"] = z_i
+            pk_log = emu.predictions(params)
+            pk_vals = 10.0 ** pk_log * pk_power_fac
+            return jnp.interp(k, k_grid, pk_vals)
+
+        pk_for_z = jax.vmap(predict_for_z)(z)  # shape (Nz, Nk)
+        pk_out = jnp.transpose(pk_for_z)  # shape (Nk, Nz)
+        return jnp.squeeze(pk_out)
 
     # ------------------------------------------------------------------
     # CMB
     # ------------------------------------------------------------------
 
-    @jax.jit
-    def cl_tt(self):
+    def cl_tt(self, l):
         """
-        Get CMB temperature power spectrum :math:`C_\\ell^{TT}` from the emulator.
+        Evaluate the CMB temperature power spectrum :math:`C_\ell^{TT}` at
+        requested multipoles `l` using the emulator.
+
+        Parameters
+        ----------
+        l : int or array-like
+            Multipole(s) at which to evaluate :math:`C_\ell`.
 
         Returns
         -------
-        tuple
-            :math:`(\\ell, C_\\ell^{TT})`
+        jnp.ndarray
+            :math:`C_\ell^{TT}` evaluated at `l`, where singleton dimensions
+            get squeezed before return. Values for `l` outside the emulator
+            training range are returned as NaN.
         """
         params = self._to_dict()
         preds = self._load_emulator("TT").ten_to_predictions(params)
         ell = jnp.arange(2, len(preds) + 2)
-        return ell, preds
+        l = jnp.atleast_1d(l)
+        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
 
-    @jax.jit
-    def cl_ee(self):
+    def cl_ee(self, l):
         """
-        Get CMB :math:`E`-mode polarization power spectrum :math:`C_\\ell^{EE}` from the emulator.
-
-        Returns
-        -------
-        tuple
-            :math:`(\\ell, C_\\ell^{EE})`
+        Evaluate the CMB E-mode polarization power spectrum :math:`C_\ell^{EE}`
+        at requested multipoles `l`, where singleton dimensions get squeezed
+        before return. Out-of-range `l` return NaN.
         """
         params = self._to_dict()
         preds = self._load_emulator("EE").ten_to_predictions(params)
         ell = jnp.arange(2, len(preds) + 2)
-        return ell, preds
+        l = jnp.atleast_1d(l)
+        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
 
-    @jax.jit
-    def cl_te(self):
+    def cl_te(self, l):
         """
-        Get CMB temperature-:math:`E`-mode cross power spectrum :math:`C_\\ell^{TE}` from the emulator.
-
-        Returns
-        -------
-        tuple
-            :math:`(\\ell, C_\\ell^{TE})`
+        Evaluate the CMB temperature-E cross power spectrum :math:`C_\ell^{TE}`
+        at requested multipoles `l`, where singleton dimensions get squeezed
+        before return. Out-of-range `l` return NaN.
         """
         params = self._to_dict()
         preds = self._load_emulator("TE").predictions(params)
         ell = jnp.arange(2, len(preds) + 2)
-        return ell, preds
+        l = jnp.atleast_1d(l)
+        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
 
-    @jax.jit
-    def cl_pp(self):
+    def cl_pp(self, l):
         """
-        Get CMB lensing potential power spectrum :math:`C_\\ell^{\\phi\\phi}` from the emulator.
-
-        Returns
-        -------
-        tuple
-            :math:`(\\ell, C_\\ell^{\\phi\\phi})`
+        Evaluate the CMB lensing potential power spectrum :math:`C_\ell^{\phi\phi}`
+        at requested multipoles `l`, where singleton dimensions get squeezed
+        before return. Out-of-range `l` return NaN. Applies the same 1/(2pi)
+        normalization as before.
         """
         params = self._to_dict()
         preds = self._load_emulator("PP").ten_to_predictions(params)
+        preds = preds / (2 * jnp.pi)
         ell = jnp.arange(2, len(preds) + 2)
-        # Apply the 1/(2pi) normalization used in your original code
-        return ell, preds / (2 * jnp.pi)
+        l = jnp.atleast_1d(l)
+        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
 
     # def cl_bb(self):
     #     if self.emulator_set != "ede:v2": 

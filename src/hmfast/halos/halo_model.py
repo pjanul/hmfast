@@ -389,8 +389,10 @@ class HaloModel:
         I1 = get_I(tracer1)
         I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
 
-        P_lin = jax.vmap(lambda zi: jnp.interp(k, *self.cosmology.pk(zi, linear=True)))(z).T
-        
+        P_lin = self.cosmology.pk(k, z, linear=True)
+        # Ensure P_lin has shape (N_k, N_z)
+        P_lin = jnp.reshape(P_lin, (len(k), -1))
+
         return jnp.squeeze(P_lin * I1 * I2)
 
 

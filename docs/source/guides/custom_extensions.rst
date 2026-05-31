@@ -1,4 +1,4 @@
-Create custom tracers & halo components
+Custom extensions guide
 =======================
 
 This guide explains how to add custom extension points to HMFast: tracers, halo-model
@@ -32,6 +32,29 @@ class for common transforms (Hankel, NFW helpers, etc.).
    :members:
    :undoc-members:
    :inherited-members:
+
+Profile parent classes
+----------------------
+
+`HaloProfile` is the grandparent class for all halo profiles. When adding a
+custom profile prefer to subclass the most appropriate parent class rather
+than `HaloProfile` directly. We list the parent classes below.
+
+.. autoclass:: hmfast.halos.profiles.CIBProfile
+   :members:
+   :undoc-members:
+
+.. autoclass:: hmfast.halos.profiles.PressureProfile
+   :members:
+   :undoc-members:
+
+.. autoclass:: hmfast.halos.profiles.MatterProfile
+   :members:
+   :undoc-members:
+
+.. autoclass:: hmfast.halos.profiles.GalaxyHODProfile
+   :members:
+   :undoc-members:
 
 Halo-model ingredients
 ----------------------

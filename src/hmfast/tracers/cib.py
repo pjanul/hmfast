@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from hmfast.tracers.base_tracer import Tracer
 from hmfast.halos.profiles import CIBProfile, S12CIBProfile
 from hmfast.utils import lambertw, Const
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 
 class CIBTracer(Tracer):
     """

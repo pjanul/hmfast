@@ -137,7 +137,7 @@ AUX_FILES = [
 
 
 
-def get_default_data_path():
+def _get_default_data_path():
     """
     Returns the base data path for emulator and auxiliary files.
     Uses the HMFAST_DATA_PATH environment variable if set,
@@ -148,7 +148,7 @@ def get_default_data_path():
 
     return os.path.join(os.path.expanduser("~"), ".cache", "hmfast")
 
-def download_file(url, local_path, skip_existing=True):
+def _download_file(url, local_path, skip_existing=True):
     if skip_existing and os.path.exists(local_path):
         #print(f"  Already exists: {local_path} (skipped)")
         return
@@ -202,7 +202,7 @@ def download_emulators(emulator_set="all", skip_existing=True):
         ``~/.cache/hmfast`` or the path specified by the ``HMFAST_DATA_PATH``
         environment variable).
     """
-    target_dir = get_default_data_path()
+    target_dir = _get_default_data_path()
     os.makedirs(target_dir, exist_ok=True)
 
     models_to_fetch = _resolve_emulator_sets(emulator_set)
@@ -229,7 +229,7 @@ def download_emulators(emulator_set="all", skip_existing=True):
             url = f"https://github.com/cosmopower-organization/{subdir}/raw/main/{rel_path}"
             local_dir = os.path.join(target_dir, subdir, os.path.dirname(rel_path))
             local_path = os.path.join(local_dir, os.path.basename(rel_path))
-            download_file(url, local_path, skip_existing=skip_existing)
+            _download_file(url, local_path, skip_existing=skip_existing)
 
     # Auxiliary files section
     aux_dir_root = os.path.join(target_dir, "auxiliary_files")
@@ -248,5 +248,5 @@ def download_emulators(emulator_set="all", skip_existing=True):
     for aux in AUX_FILES:
         aux_dir = os.path.join(target_dir, aux["subdir"])
         aux_path = os.path.join(aux_dir, aux["filename"])
-        download_file(aux["url"], aux_path, skip_existing=skip_existing)
+        _download_file(aux["url"], aux_path, skip_existing=skip_existing)
 

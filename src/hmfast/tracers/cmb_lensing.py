@@ -5,7 +5,7 @@ import jax.scipy as jscipy
 from jax.scipy.special import sici, erf 
 
 from hmfast.tracers.base_tracer import Tracer
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 from hmfast.utils import Const
 from hmfast.halos.profiles import MatterProfile, NFWMatterProfile
 jax.config.update("jax_enable_x64", True)

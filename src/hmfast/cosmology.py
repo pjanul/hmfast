@@ -5,7 +5,7 @@ import jax.scipy as jscipy
 from typing import Dict, Union
 from mcfit import TophatVar
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 from hmfast.utils import Const
 from functools import partial
 
@@ -186,7 +186,7 @@ class Cosmology:
     # ------------------------------------------------------------------
 
     def _base_path(self):
-        return os.path.join(get_default_data_path(),_COSMO_MODELS[self.emulator_set]["subdir"])
+        return os.path.join(_get_default_data_path(),_COSMO_MODELS[self.emulator_set]["subdir"])
                          
 
     def _load_emulator(self, key: str):

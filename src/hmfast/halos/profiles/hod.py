@@ -6,7 +6,7 @@ import mcfit
 from functools import partial
 from jax.scipy.special import erf
 
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 from hmfast.halos.profiles import HaloProfile
 
 

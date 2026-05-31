@@ -6,7 +6,7 @@ import jax.scipy as jscipy
 import mcfit
 from functools import partial
 
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 from hmfast.utils import lambertw, Const
 from hmfast.halos.profiles import HaloProfile
 
@@ -674,9 +674,9 @@ class M21CIBProfile(CIBProfile):
 
 
         if s_nu is None:
-            s_nu_z_path = os.path.join(get_default_data_path(), "auxiliary_files", "filtered_snu_planck_z_fine.txt")
-            s_nu_nu_path = os.path.join(get_default_data_path(), "auxiliary_files", "filtered_snu_planck_nu_fine.txt")
-            s_nu_path = os.path.join(get_default_data_path(), "auxiliary_files", "filtered_snu_planck_fine.txt")
+            s_nu_z_path = os.path.join(_get_default_data_path(), "auxiliary_files", "filtered_snu_planck_z_fine.txt")
+            s_nu_nu_path = os.path.join(_get_default_data_path(), "auxiliary_files", "filtered_snu_planck_nu_fine.txt")
+            s_nu_path = os.path.join(_get_default_data_path(), "auxiliary_files", "filtered_snu_planck_fine.txt")
             self.s_nu = (np.loadtxt(s_nu_z_path), np.loadtxt(s_nu_nu_path), np.loadtxt(s_nu_path))
         else:
             self.s_nu = s_nu

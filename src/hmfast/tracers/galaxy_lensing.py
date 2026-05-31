@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from hmfast.tracers.base_tracer import Tracer
 from hmfast.halos.profiles import MatterProfile, NFWMatterProfile
 from hmfast.utils import Const
-from hmfast.download import get_default_data_path
+from hmfast.download import _get_default_data_path
 
 
 jax.config.update("jax_enable_x64", True)
@@ -31,7 +31,7 @@ class GalaxyLensingTracer(Tracer):
 
         if dndz is None:
             # Call _load_dndz_data from BaseTracer
-            dndz_path = os.path.join(get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
+            dndz_path = os.path.join(_get_default_data_path(), "auxiliary_files", "nz_source_normalized_bin4.txt")
             self.dndz = self._load_dndz_data(dndz_path)
         else:
             self.dndz = dndz

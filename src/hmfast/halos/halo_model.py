@@ -219,6 +219,8 @@ class HaloModel:
         """
     
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
+        profile1 = tracer1.profile
+        profile2 = tracer2.profile if tracer2 is not None else profile1
         
         # Weights and Setup
         logm = jnp.log(m)
@@ -228,12 +230,9 @@ class HaloModel:
         dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
-        is_same_tracer = (tracer2 is None) or (tracer1 == tracer2)
-        tracer2 = tracer1 if tracer2 is None else tracer2
-
         # Process a single mass bin at a time and extract the uk^2 at the lowest mass for the halo model consistency term
         def process_bin(i):
-            pair_kernel = _fourier_2pt(self, tracer1.profile, tracer2.profile, k, m, z)
+            pair_kernel = _fourier_2pt(self, profile1, profile2, k, m, z)
             pair_kernel = jnp.reshape(pair_kernel, (len(k), len(m), len(z)))
             uk_sq_row = pair_kernel[:, i, :]
     
@@ -356,7 +355,9 @@ class HaloModel:
         """
         
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        tracer2 = tracer1 if tracer2 is None else tracer2
+
+        profile1 = tracer1.profile
+        profile2 = tracer2.profile if tracer2 is not None else profile1
     
         # Weights and Ingredients
         logm = jnp.log(m)
@@ -368,26 +369,26 @@ class HaloModel:
         bias = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
-        def get_I(tracer):
+        def get_I(profile):
             # This function processes a single index 'i' of the mass axis
             def process_bin(i):
-                uk_full = jnp.reshape(tracer.profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
+                uk_full = jnp.reshape(profile.fourier(self, k, m, z), (len(k), len(m), len(z)))
                 uk_slice = uk_full[:, i, :] 
                 return uk_slice * total_weights[i], uk_slice
-    
+
             # Vmap over the indices 0...Nm-1, then integrate and pluck index 0 for hm consistency
             integrand_rows, all_profiles = jax.vmap(process_bin)(jnp.arange(len(m)))
             integral = jnp.sum(integrand_rows, axis=0)
             u_k_min = all_profiles[0] # vmap output is (Nm, Nk, Nz)
-    
+
             n_min, b1_min, _ = self._counter_terms(m, z)
             correction = b1_min[None, :] * n_min[None, :] * u_k_min
             
             return integral + self.hm_consistency * correction
     
         # Final Power Spectrum
-        I1 = get_I(tracer1)
-        I2 = I1 if tracer1 == tracer2 else get_I(tracer2)
+        I1 = get_I(profile1)
+        I2 = I1 if profile1 is profile2 else get_I(profile2)
 
         P_lin = self.cosmology.pk(k, z, linear=True)
         # Ensure P_lin has shape (N_k, N_z)

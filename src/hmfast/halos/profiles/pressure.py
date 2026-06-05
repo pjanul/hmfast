@@ -149,9 +149,13 @@ class GNFWPressureProfile(PressureProfile):
         Inner-slope parameter :math:`\\gamma` of the gNFW profile.
     B : float
         Hydrostatic mass bias factor :math:`B` used in the :math:`M_{500c}` normalization.
+    alpha_P : float
+        Additional mass-scaling exponent entering the pressure normalization as :math:`\\tilde{M}_{500c}^{2/3 + \\alpha_P}`.
+    P0_hexp : float
+        Exponent controlling the :math:`h/0.7` scaling of the normalization. Should be set to ``-1`` for SZ-calibrated profiles and ``-3/2`` for X-ray-calibrated profiles.
     """
     
-    def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4):
+    def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0):
 
         self.P0 = P0
         self.c500 = c500
@@ -159,6 +163,8 @@ class GNFWPressureProfile(PressureProfile):
         self.beta = beta
         self.gamma = gamma
         self.B = B
+        self.alpha_P = alpha_P
+        self.P0_hexp = P0_hexp
 
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256) 
 
@@ -178,7 +184,7 @@ class GNFWPressureProfile(PressureProfile):
 
     def _tree_flatten(self):
         # The dynamic parameters JAX should track
-        leaves = (self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B)
+        leaves = (self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp)
         # Static metadata: the grid and the Hankel object
         aux_data = (self._x, self._hankel)
         return (leaves, aux_data)
@@ -188,12 +194,12 @@ class GNFWPressureProfile(PressureProfile):
         x, hankel = aux_data
         # Create object without calling __init__ to avoid rebuilding Hankel
         obj = cls.__new__(cls)
-        obj.P0, obj.c500, obj.alpha, obj.beta, obj.gamma, obj.B = leaves
+        obj.P0, obj.c500, obj.alpha, obj.beta, obj.gamma, obj.B, obj.alpha_P, obj.P0_hexp = leaves
         obj._x = x
         obj._hankel = hankel
         return obj
 
-    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None):
+    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None):
         """
         Return a new profile instance with updated GNFW pressure profile parameters.
 
@@ -205,6 +211,8 @@ class GNFWPressureProfile(PressureProfile):
         beta : float, optional
         gamma : float, optional
         B : float, optional
+        alpha_P : float, optional
+        P0_hexp : float, optional
 
         Returns
         -------
@@ -220,6 +228,8 @@ class GNFWPressureProfile(PressureProfile):
             beta if beta is not None else self.beta,
             gamma if gamma is not None else self.gamma,
             B if B is not None else self.B,
+            alpha_P if alpha_P is not None else self.alpha_P,
+            P0_hexp if P0_hexp is not None else self.P0_hexp,
         )
 
         return self._tree_unflatten(treedef, new_leaves)
@@ -248,7 +258,7 @@ class GNFWPressureProfile(PressureProfile):
             where singleton dimensions get squeezed before return.
         """
         H0 = halo_model.cosmology.H0
-        P0, c500, alpha, beta, gamma, B = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B
+        P0, c500, alpha, beta, gamma, B, alpha_P, P0_hexp = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = H0 / 100.0
     
@@ -261,14 +271,14 @@ class GNFWPressureProfile(PressureProfile):
         r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), m500c.shape)  # (Nm, Nz)
     
         # Convert the comoving radius to the calibrated physical 500c coordinate.
-        x_500c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_500c[None, :, :])  # (Nr, Nm, Nz)
+        x_500c = r[:, None, None] / ((1.0 + z[None, None, :]) * (r_500c / B ** (1 / 3))[None, :, :])  # (Nr, Nm, Nz)
     
         # Compute normalization P_500c (with hydrostatic bias)
         h = H0 / 100.0
         H = halo_model.cosmology.hubble_parameter(z)  # (Nz,)
         H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
         m500c_tilde = (m500c * h / B)[None, :, None]  # (1, Nm, 1)
-        P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + 0.12) * (0.7 / h) ** 1.5)  # (1, Nm, Nz)
+        P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + alpha_P) * (h / 0.7) ** P0_hexp)  # (1, Nm, Nz)
     
         # GNFW profile
         scaled_x = c500 * x_500c  # (Nr, Nm, Nz)

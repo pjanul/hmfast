@@ -346,7 +346,7 @@ def mass_translator(mass_def_old, mass_def_new, concentration, max_iter=20):
 
 	@jax.jit
 	def f(cosmology, m, z):
-		c_old = concentration.c_delta(cosmology, m, z, mass_definition=mass_def_old)
+		c_old = concentration.c_delta(cosmology, m, z, mass_def=mass_def_old)
 
 		return _solve_m_delta_nfw(cosmology, m, z, mass_def_old=mass_def_old, mass_def_new=mass_def_new, c_old=c_old, max_iter=max_iter)
 

@@ -15,7 +15,7 @@ class HaloMassFunction(ABC):
     """
 
     @abstractmethod
-    def dndlnm(self, cosmology, m, z, mass_definition=None, convert_masses=False):
+    def dndlnm(self, cosmology, m, z, mass_def=None, convert_masses=False):
         """Required halo mass function evaluator."""
         pass
 
@@ -34,7 +34,7 @@ class T08HaloMassFunction(HaloMassFunction):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def _f_sigma(self, cosmology, sigma, z, mass_definition=MassDefinition(delta=200, reference="mean")):
+    def _f_sigma(self, cosmology, sigma, z, mass_def=MassDefinition(delta=200, reference="mean")):
         """
         Evaluate the internal Tinker et al. (2008) fitting function.
     
@@ -47,7 +47,7 @@ class T08HaloMassFunction(HaloMassFunction):
             :math:`\\sigma(R, z)`.
         z : float or jnp.ndarray
             Redshift(s) corresponding to ``sigma``.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Halo mass definition used when evaluating the fitting function.
         
     
@@ -59,12 +59,12 @@ class T08HaloMassFunction(HaloMassFunction):
         """
         
         # Overdensity threshold converted to log scale
-        delta_numeric = mass_definition._delta_numeric(cosmology, z)
-        delta_mean = mass_definition._convert_reference(
+        delta_numeric = mass_def._delta_numeric(cosmology, z)
+        delta_mean = mass_def._convert_reference(
             cosmology,
             z,
             delta_numeric,
-            from_ref=mass_definition.reference,
+            from_ref=mass_def.reference,
             to_ref='mean',
         )
         delta_mean = jnp.log10(delta_mean)
@@ -88,7 +88,7 @@ class T08HaloMassFunction(HaloMassFunction):
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def dndlnm(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False):
+    def dndlnm(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="mean"), convert_masses=False):
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     
@@ -120,7 +120,7 @@ class T08HaloMassFunction(HaloMassFunction):
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Halo mass definition at which to evaluate the halo mass
             function. Defaults to the native :math:`200\\mathrm{m}`
             calibration definition.
@@ -147,7 +147,7 @@ class T08HaloMassFunction(HaloMassFunction):
         pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
 
         sigma_m = jnp.exp(sigma_interp(pts))
-        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_def=mass_def).T
         dlnnu_dlnm = dlnnu_dlnm_interp(pts)
 
         cparams = cosmology._cosmo_params()
@@ -170,7 +170,7 @@ class T10HaloMassFunction(HaloMassFunction):
         pass
 
     @partial(jax.jit, static_argnums=(0,))
-    def _f_sigma(self, cosmology, sigma, z, mass_definition=MassDefinition(delta=200, reference="mean")):
+    def _f_sigma(self, cosmology, sigma, z, mass_def=MassDefinition(delta=200, reference="mean")):
         """
         Evaluate the internal Tinker et al. (2010) fitting function.
     
@@ -188,12 +188,12 @@ class T10HaloMassFunction(HaloMassFunction):
             Values of the dimensionless fitting function with shape matching
             ``sigma``.
         """
-        delta_numeric = mass_definition._delta_numeric(cosmology, z)
-        delta_mean = mass_definition._convert_reference(
+        delta_numeric = mass_def._delta_numeric(cosmology, z)
+        delta_mean = mass_def._convert_reference(
             cosmology,
             z,
             delta_numeric,
-            from_ref=mass_definition.reference,
+            from_ref=mass_def.reference,
             to_ref="mean",
         )
         ldelta_mean = jnp.log10(delta_mean)
@@ -234,7 +234,7 @@ class T10HaloMassFunction(HaloMassFunction):
         return f_nu
 
     @partial(jax.jit, static_argnums=(0, 5))
-    def dndlnm(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False):
+    def dndlnm(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="mean"), convert_masses=False):
         """
         Compute the halo mass function :math:`dn/d\\ln M`.
     
@@ -265,7 +265,7 @@ class T10HaloMassFunction(HaloMassFunction):
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Halo mass definition at which to evaluate the halo mass
             function. Defaults to the native :math:`200\\mathrm{m}`
             calibration definition.
@@ -292,7 +292,7 @@ class T10HaloMassFunction(HaloMassFunction):
         pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
 
         sigma_m = jnp.exp(sigma_interp(pts))
-        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_definition=mass_definition).T
+        hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_def=mass_def).T
         dlnnu_dlnm = dlnnu_dlnm_interp(pts)
 
         cparams = cosmology._cosmo_params()

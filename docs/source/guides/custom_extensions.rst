@@ -74,13 +74,11 @@ Not physical — only intended as a tiny runnable example users can adapt::
     """
     def real(self, halo_model, r, m, z):
       r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
-      # broadcast a simple (Nr, Nm, Nz) array (one-liner broadcasting)
-      return jnp.squeeze(jnp.broadcast_to((r[:, None] * 0 + m[None, :])[:, :, None], (len(r), len(m), len(z))))
+      return jnp.squeeze(jnp.broadcast_to(1.0, (len(r), len(m), len(z))))
 
     def fourier(self, halo_model, k, m, z):
       k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-      # one-liner: broadcast to (Nk, Nm, Nz) and squeeze
-      return jnp.squeeze(jnp.broadcast_to((k[:, None] * 0 + m[None, :])[:, :, None], (len(k), len(m), len(z))))
+      return jnp.squeeze(jnp.broadcast_to(1.0, (len(k), len(m), len(z))))
 
   class NewTracer(Tracer):
     """Simple tracer carrying a profile and a trivial kernel."""

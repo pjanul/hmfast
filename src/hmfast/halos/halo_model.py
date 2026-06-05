@@ -48,7 +48,7 @@ class HaloModel:
 
     def __init__(self, 
                  cosmology=Cosmology(emulator_set="lcdm:v1"), 
-                 mass_definition=MassDefinition(delta=200, reference="critical"),
+                 mass_def=MassDefinition(delta=200, reference="critical"),
                  halo_mass_function=T08HaloMassFunction(),
                  halo_bias=T10HaloBias(),
                  subhalo_mass_function=TW10SubHaloMassFunction(),
@@ -69,7 +69,7 @@ class HaloModel:
         self.subhalo_mass_function = subhalo_mass_function
         self.concentration = concentration
 
-        self.mass_definition = mass_definition
+        self.mass_definition = mass_def
         self.hm_consistency = hm_consistency
         self.convert_masses = convert_masses
 
@@ -93,14 +93,14 @@ class HaloModel:
          obj.convert_masses) = aux_data
         return obj
 
-    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_definition=None, 
+    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None, 
                hm_consistency=None, convert_masses=None):
         """
         Return a new HaloModel instance with updated components.
 
         Parameters
         ----------
-        cosmology, halo_mass_function, halo_bias, subhalo_mass_function, concentration, mass_definition, hm_consistency, convert_masses : optional
+        cosmology, halo_mass_function, halo_bias, subhalo_mass_function, concentration, mass_def, hm_consistency, convert_masses : optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
@@ -123,7 +123,7 @@ class HaloModel:
         new_halo_bias = halo_bias if halo_bias is not None else halo_bias0
         new_subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else subhalo_mass_function0
         new_concentration = concentration if concentration is not None else concentration0
-        new_mass_definition = mass_definition if mass_definition is not None else mass_definition0
+        new_mass_definition = mass_def if mass_def is not None else mass_definition0
         new_hm_consistency = hm_consistency if hm_consistency is not None else hm_consistency0
         new_convert_masses = convert_masses if convert_masses is not None else convert_masses0
     
@@ -165,8 +165,8 @@ class HaloModel:
     
         # Public HMF and bias interfaces use physical masses.
         dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
-        b1 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
-        b2 = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
+        b1 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
+        b2 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
     
         # Compute integrals I0, I1, I2
         I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
@@ -183,7 +183,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=(1, 2))
-    def pk_1h(self, tracer1, tracer2, k, m, z,  k_damp=0.01):
+    def pk_1h(self, profile1, profile2, k, m, z,  k_damp=0.01):
         """
         Compute the 1-halo contribution to the 3D power spectrum.
 
@@ -196,10 +196,10 @@ class HaloModel:
 
         Parameters
         ----------
-        tracer1 : Tracer
-            First tracer object.
-        tracer2 : Tracer or None
-            Second tracer object (if None, uses tracer1).
+        profile1 : HaloProfile
+            First halo profile object.
+        profile2 : HaloProfile or None
+            Second halo profile object (if None, uses profile1).
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
@@ -219,8 +219,7 @@ class HaloModel:
         """
     
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        profile1 = tracer1.profile
-        profile2 = tracer2.profile if tracer2 is not None else profile1
+        profile2 = profile2 if profile2 is not None else profile1
         
         # Weights and Setup
         logm = jnp.log(m)
@@ -297,7 +296,7 @@ class HaloModel:
         def get_pk_slice(zi):
             chi_i = self.cosmology.angular_diameter_distance(zi) * (1 + zi) 
             ki = (l + 0.5) / chi_i
-            pk = self.pk_1h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi), k_damp=k_damp)
+            pk = self.pk_1h(tracer1.profile, tracer2.profile, k=ki, m=m, z=jnp.atleast_1d(zi), k_damp=k_damp)
             return pk.flatten()
 
         # Get the halo model pk_1h, the kernel, and the comoving volume
@@ -314,7 +313,7 @@ class HaloModel:
 
 
     @partial(jax.jit, static_argnums=(1, 2))
-    def pk_2h(self, tracer1, tracer2, k, m, z):
+    def pk_2h(self, profile1, profile2, k, m, z):
         """
         Compute the 2-halo contribution to the 3D power spectrum.
 
@@ -334,10 +333,10 @@ class HaloModel:
 
         Parameters
         ----------
-        tracer1 : Tracer
-            First tracer object.
-        tracer2 : Tracer or None
-            Second tracer object (if None, uses tracer1).
+        profile1 : HaloProfile
+            First halo profile object.
+        profile2 : HaloProfile or None
+            Second halo profile object (if None, uses profile1).
         k : array-like
             Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
         m : array
@@ -356,8 +355,7 @@ class HaloModel:
         
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
 
-        profile1 = tracer1.profile
-        profile2 = tracer2.profile if tracer2 is not None else profile1
+        profile2 = profile2 if profile2 is not None else profile1
     
         # Weights and Ingredients
         logm = jnp.log(m)
@@ -366,7 +364,7 @@ class HaloModel:
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
         dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
-        bias = jnp.reshape(self.halo_bias.halo_bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        bias = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
         def get_I(profile):
@@ -436,7 +434,7 @@ class HaloModel:
             # Map l to k using the Limber approximation and then get the pk_2h  
             chi_i = self.cosmology.angular_diameter_distance(zi) * (1 + zi) 
             ki = (l + 0.5) / chi_i
-            return self.pk_2h(tracer1, tracer2, k=ki, m=m, z=jnp.atleast_1d(zi)).flatten()
+            return self.pk_2h(tracer1.profile, tracer2.profile, k=ki, m=m, z=jnp.atleast_1d(zi)).flatten()
     
         # Map over redshift to get P(k=l/chi, z)
         P_2h_grid = jax.vmap(get_pk_slice)(z) 

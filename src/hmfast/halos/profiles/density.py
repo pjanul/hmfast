@@ -407,7 +407,7 @@ class _NFWDensityProfile(DensityProfile):
                 halo_model.cosmology,
                 m,
                 z,
-                mass_definition=halo_model.mass_definition,
+                mass_def=halo_model.mass_definition,
             ),
             (len(m), len(z)),
         )
@@ -455,7 +455,7 @@ class _NFWDensityProfile(DensityProfile):
                 halo_model.cosmology,
                 m,
                 z,
-                mass_definition=halo_model.mass_definition,
+                mass_def=halo_model.mass_definition,
             ),
             (len(m), len(z)),
         )

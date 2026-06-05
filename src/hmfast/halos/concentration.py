@@ -15,7 +15,7 @@ class Concentration(ABC):
     """
     @abstractmethod
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=None):
+    def c_delta(self, cosmology, m, z, mass_def=None):
         """Required concentration evaluator."""
         pass
 
@@ -34,7 +34,7 @@ class ConstantConcentration(Concentration):
         pass
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
+    def c_delta(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="critical")):
         """
         Returns a constant value for the concentration parameter, broadcast to the shape of the input masses and redshifts.
 
@@ -46,7 +46,7 @@ class ConstantConcentration(Concentration):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Target halo mass definition. Included for API consistency.
 
         Returns
@@ -78,7 +78,7 @@ class D08Concentration(Concentration):
 
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
+    def c_delta(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -90,7 +90,7 @@ class D08Concentration(Concentration):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta="vir", reference="critical")``.
 
@@ -104,7 +104,7 @@ class D08Concentration(Concentration):
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = cosmology.H0 / 100.0
         m_internal = m * h
-        mdef = mass_definition
+        mdef = mass_def
 
         # Parameter Lookup Table
         coeffs = {
@@ -146,7 +146,7 @@ class B13Concentration(Concentration):
         pass
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
+    def c_delta(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -158,7 +158,7 @@ class B13Concentration(Concentration):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta="vir", reference="critical")``.
 
@@ -169,7 +169,7 @@ class B13Concentration(Concentration):
             singleton dimensions get squeezed before return.
         """
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
-        mdef = mass_definition
+        mdef = mass_def
         
         # Parameter Lookup Table
         coeffs = {
@@ -219,7 +219,7 @@ class K11Concentration(Concentration):
         pass
 
     @partial(jax.jit, static_argnums=(0, 4))
-    def c_delta(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="critical")):
+    def c_delta(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="critical")):
         """
         Compute the concentration parameter.
 
@@ -231,7 +231,7 @@ class K11Concentration(Concentration):
             Halo masses in physical :math:`M_\\odot`.
         z : array-like
             Redshifts.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Target halo mass definition. Defaults to
             ``MassDefinition(delta="vir", reference="critical")``.
 
@@ -244,7 +244,7 @@ class K11Concentration(Concentration):
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = cosmology.H0 / 100.0
         m_internal = m * h
-        mdef = mass_definition
+        mdef = mass_def
 
         key = (mdef.delta, mdef.reference)
         if key != ("vir", "critical"):

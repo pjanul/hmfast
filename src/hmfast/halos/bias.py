@@ -10,10 +10,10 @@ class HaloBias(ABC):
     """
     Parent halo bias class from which halo bias models inherit.
 
-    Child classes must implement :meth:`halo_bias`.
+    Child classes must implement :meth:`bias`.
     """
     @abstractmethod
-    def halo_bias(self, cosmology, m, z, mass_definition=None, convert_masses=False, order=1):
+    def bias(self, cosmology, m, z, mass_def=None, convert_masses=False, order=1):
         """Required halo bias evaluator."""
         pass
 
@@ -122,7 +122,7 @@ class T10HaloBias(HaloBias):
 
 
     @partial(jax.jit, static_argnums=(0, 5, 6))
-    def halo_bias(self, cosmology, m, z, mass_definition=MassDefinition(delta=200, reference="mean"), convert_masses=False, order=1):
+    def bias(self, cosmology, m, z, mass_def=MassDefinition(delta=200, reference="mean"), convert_masses=False, order=1):
         """
         Compute the halo bias for a given order.
         
@@ -151,7 +151,7 @@ class T10HaloBias(HaloBias):
             Halo mass grid in physical :math:`M_\\odot`.
         z : array-like
             Redshift grid.
-        mass_definition : MassDefinition, optional
+        mass_def : MassDefinition, optional
             Halo mass definition at which to evaluate the bias. Defaults to
             the native :math:`200\\mathrm{m}` calibration definition.
         convert_masses : bool, optional
@@ -174,12 +174,12 @@ class T10HaloBias(HaloBias):
         zz = jnp.broadcast_to(z[:, None], sigma_M.shape)
 
         # Handle delta values
-        delta_numeric = mass_definition._delta_numeric(cosmology, z)
-        delta_mean = mass_definition._convert_reference(
+        delta_numeric = mass_def._delta_numeric(cosmology, z)
+        delta_mean = mass_def._convert_reference(
             cosmology,
             z,
             delta_numeric,
-            from_ref=mass_definition.reference,
+            from_ref=mass_def.reference,
             to_ref='mean',
         )
         

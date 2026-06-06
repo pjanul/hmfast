@@ -145,7 +145,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
     # --- Physics Implementations ---
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def n_cen(self, halo_model, m):
         """
         Expected number of central galaxies in a halo of mass ``m``.
@@ -169,7 +169,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         x = (jnp.log10(m) - jnp.log10(self.M_min)) / self.sigma_log10M
         return 0.5 * (1.0 + erf(x))
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def n_sat(self, halo_model, m):
         """
         Expected number of satellite galaxies in a halo of mass ``m``.
@@ -192,7 +192,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         pow_term = jnp.maximum((m - self.M0) / self.M1_prime, 0.0)**self.alpha_s
         return self.n_cen(halo_model, m) * pow_term
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def ng_bar(self, halo_model, m, z):
         """
         Comoving mean galaxy number density at redshift ``z``.
@@ -225,7 +225,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         # HM Consistency check
         return jnp.squeeze(jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val))
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def galaxy_bias(self, halo_model, m, z):
         """
         Large-scale galaxy bias at redshift ``z``.
@@ -260,7 +260,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
         return jnp.squeeze(bg_num / ng)
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Real-space galaxy HOD profile.
@@ -296,7 +296,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         return jnp.squeeze((1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m))
 
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
         Fourier-space galaxy HOD profile.

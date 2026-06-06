@@ -188,7 +188,7 @@ class B16DensityProfile(DensityProfile):
             raise ValueError(f"Model {model_key} not recognized. Choose 'agn' or 'shock'.")
         return presets[key]
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
@@ -248,7 +248,7 @@ class B16DensityProfile(DensityProfile):
         return jnp.squeeze(rho_gas)
 
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
@@ -372,7 +372,18 @@ class _NFWDensityProfile(DensityProfile):
         self._x = value
         self._hankel = HankelTransform(self._x, nu=0.5)
 
-    @jax.jit
+    def _tree_flatten(self):
+        return ((), (self._x, self._hankel))
+
+    @classmethod
+    def _tree_unflatten(cls, aux_data, leaves):
+        x, hankel = aux_data
+        obj = cls.__new__(cls)
+        obj._x = x
+        obj._hankel = hankel
+        return obj
+
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
@@ -426,7 +437,7 @@ class _NFWDensityProfile(DensityProfile):
         return jnp.squeeze(rho_gas)
         
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
@@ -486,9 +497,12 @@ class _NFWDensityProfile(DensityProfile):
 
         return jnp.squeeze(vmapped_interp(ell_target, ell_native, u_ell_val))
 
-    
 
-
+jax.tree_util.register_pytree_node(
+    _NFWDensityProfile,
+    lambda obj: obj._tree_flatten(),
+    lambda aux_data, children: _NFWDensityProfile._tree_unflatten(aux_data, children),
+)
 
 
 class _BCMDensityProfile(DensityProfile):
@@ -641,7 +655,7 @@ class _BCMDensityProfile(DensityProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Compute the gas-density profile.
@@ -702,7 +716,7 @@ class _BCMDensityProfile(DensityProfile):
 
 
     
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space gas-density profile for halo-model calculations.

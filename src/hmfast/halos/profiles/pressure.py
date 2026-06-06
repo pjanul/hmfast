@@ -18,7 +18,7 @@ class PressureProfile(HaloProfile):
 
     Child profile classes must implement :meth:`real` and :meth:`fourier`.
     """
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space pressure profile for halo-model calculations.
@@ -151,7 +151,7 @@ class GNFWPressureProfile(PressureProfile):
         Exponent controlling the :math:`h_{70}` scaling of the normalization. Set to ``-1`` for SZ-calibrated profiles and ``-3/2`` for X-ray-calibrated profiles.
     """
     
-    def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0):
+    def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0, x_out=jnp.inf):
 
         self.P0 = P0
         self.c500 = c500
@@ -161,6 +161,7 @@ class GNFWPressureProfile(PressureProfile):
         self.B = B
         self.alpha_P = alpha_P
         self.P0_hexp = P0_hexp
+        self.x_out = x_out
 
         self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256) 
 
@@ -180,7 +181,7 @@ class GNFWPressureProfile(PressureProfile):
 
     def _tree_flatten(self):
         # The dynamic parameters JAX should track
-        leaves = (self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp)
+        leaves = (self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp, self.x_out)
         # Static metadata: the grid and the Hankel object
         aux_data = (self._x, self._hankel)
         return (leaves, aux_data)
@@ -190,12 +191,12 @@ class GNFWPressureProfile(PressureProfile):
         x, hankel = aux_data
         # Create object without calling __init__ to avoid rebuilding Hankel
         obj = cls.__new__(cls)
-        obj.P0, obj.c500, obj.alpha, obj.beta, obj.gamma, obj.B, obj.alpha_P, obj.P0_hexp = leaves
+        obj.P0, obj.c500, obj.alpha, obj.beta, obj.gamma, obj.B, obj.alpha_P, obj.P0_hexp, obj.x_out = leaves
         obj._x = x
         obj._hankel = hankel
         return obj
 
-    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None):
+    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None, x_out=None):
         """
         Return a new profile instance with updated GNFW pressure profile parameters.
 
@@ -209,6 +210,7 @@ class GNFWPressureProfile(PressureProfile):
         B : float, optional
         alpha_P : float, optional
         P0_hexp : float, optional
+        x_out : float, optional
 
         Returns
         -------
@@ -226,11 +228,12 @@ class GNFWPressureProfile(PressureProfile):
             B if B is not None else self.B,
             alpha_P if alpha_P is not None else self.alpha_P,
             P0_hexp if P0_hexp is not None else self.P0_hexp,
+            x_out if x_out is not None else self.x_out,
         )
 
         return self._tree_unflatten(treedef, new_leaves)
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
@@ -254,7 +257,7 @@ class GNFWPressureProfile(PressureProfile):
             where singleton dimensions get squeezed before return.
         """
         H0 = halo_model.cosmology.H0
-        P0, c500, alpha, beta, gamma, B, alpha_P, P0_hexp = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp
+        P0, c500, alpha, beta, gamma, B, alpha_P, P0_hexp, x_out = self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp, self.x_out
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = H0 / 100.0
     
@@ -279,6 +282,7 @@ class GNFWPressureProfile(PressureProfile):
         # GNFW profile
         scaled_x = c500 * x_500c  # (Nr, Nm, Nz)
         Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
+        Pe = jnp.where(x_500c <= x_out, Pe, 0.0)
     
         return jnp.squeeze(Pe)
 
@@ -361,12 +365,13 @@ class B12PressureProfile(PressureProfile):
     def __init__(self, x=None, 
                  A_P0=18.1, A_xc=0.497, A_beta=4.35,
                  alpha_m_P0=0.154, alpha_m_xc=-0.00865, alpha_m_beta=0.0393,
-                 alpha_z_P0=-0.758, alpha_z_xc=0.731, alpha_z_beta=0.415):
+                 alpha_z_P0=-0.758, alpha_z_xc=0.731, alpha_z_beta=0.415, x_out=jnp.inf):
         
         # Physics Parameters (The Leaves)
         self.A_P0, self.A_xc, self.A_beta = A_P0, A_xc, A_beta
         self.alpha_m_P0, self.alpha_m_xc, self.alpha_m_beta = alpha_m_P0, alpha_m_xc, alpha_m_beta
         self.alpha_z_P0, self.alpha_z_xc, self.alpha_z_beta = alpha_z_P0, alpha_z_xc, alpha_z_beta
+        self.x_out = x_out
 
         # Grid initialization
         self.x = x if x is not None else jnp.logspace(-4, 1, 256)
@@ -385,6 +390,7 @@ class B12PressureProfile(PressureProfile):
             self.A_P0, self.A_xc, self.A_beta,
             self.alpha_m_P0, self.alpha_m_xc, self.alpha_m_beta,
             self.alpha_z_P0, self.alpha_z_xc, self.alpha_z_beta,
+            self.x_out,
         )
         aux_data = (self._x, self._hankel)
         return (leaves, aux_data)
@@ -396,7 +402,8 @@ class B12PressureProfile(PressureProfile):
 
         (obj.A_P0, obj.A_xc, obj.A_beta,
          obj.alpha_m_P0, obj.alpha_m_xc, obj.alpha_m_beta,
-         obj.alpha_z_P0, obj.alpha_z_xc, obj.alpha_z_beta) = leaves
+         obj.alpha_z_P0, obj.alpha_z_xc, obj.alpha_z_beta,
+         obj.x_out) = leaves
 
         obj._x = x
         obj._hankel = hankel
@@ -404,13 +411,13 @@ class B12PressureProfile(PressureProfile):
 
     def update(self, A_P0=None, A_xc=None, A_beta=None,
                alpha_m_P0=None, alpha_m_xc=None, alpha_m_beta=None,
-               alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None):
+               alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None, x_out=None):
         """
         Return a new profile instance with updated B12 parameters.
     
         Parameters
         ----------
-        A_P0, A_xc, A_beta, alpha_m_P0, alpha_m_xc, alpha_m_beta, alpha_z_P0, alpha_z_xc, alpha_z_beta : float, optional
+        A_P0, A_xc, A_beta, alpha_m_P0, alpha_m_xc, alpha_m_beta, alpha_z_P0, alpha_z_xc, alpha_z_beta, x_out : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
     
         Returns
@@ -430,11 +437,12 @@ class B12PressureProfile(PressureProfile):
             alpha_z_P0 if alpha_z_P0 is not None else self.alpha_z_P0,
             alpha_z_xc if alpha_z_xc is not None else self.alpha_z_xc,
             alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
+            x_out if x_out is not None else self.x_out,
         )
         
         return self._tree_unflatten(treedef, new_leaves)
 
-    @jax.jit
+    @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
@@ -460,6 +468,7 @@ class B12PressureProfile(PressureProfile):
         cparams = halo_model.cosmology._cosmo_params()
         h = cparams["h"]
         alpha, gamma = 1.0, -0.3
+        x_out = self.x_out
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Convert input mass to M200c for normalization
@@ -492,7 +501,10 @@ class B12PressureProfile(PressureProfile):
         # Use M200c and r_200c for normalization
         P_200c = ((m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :])**2)
     
-        return jnp.squeeze(P_200c * P0 * p_x)
+        Pe = P_200c * P0 * p_x
+        Pe = jnp.where(x_200c <= x_out, Pe, 0.0)
+
+        return jnp.squeeze(Pe)
 
 jax.tree_util.register_pytree_node(
     B12PressureProfile,

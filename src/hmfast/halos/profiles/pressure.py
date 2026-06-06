@@ -18,7 +18,7 @@ class PressureProfile(HaloProfile):
 
     Child profile classes must implement :meth:`real` and :meth:`fourier`.
     """
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space pressure profile for halo-model calculations.
@@ -91,33 +91,29 @@ class GNFWPressureProfile(PressureProfile):
     """
     Electron pressure profile from `Nagai, Kravtsov & Vikhlinin (2007) <https://ui.adsabs.harvard.edu/abs/2007ApJ...668....1N/abstract>`_.
 
-    The profile is evaluated as a function of the comoving radius
-    :math:`r`, but its normalization and shape are defined using the native
-    :math:`500c` calibration mass and radius:
+    The profile is evaluated as a function of the comoving radius :math:`r`,
+    and its normalization and shape are defined using the native :math:`500c`
+    calibration mass and radius. 
 
     .. math::
 
-        P_e(r, M, z) = P_{500c} \\, P_0
-        \\left(c_{500} x_{500c}\\right)^{-\\gamma}
-        \\left[1 + \\left(c_{500} x_{500c}\\right)^\\alpha\\right]^{(\\gamma-\\beta)/\\alpha}
+        P_e(r, M, z) = P_{500c}\\, P_0
+        \\left(c_{500} x\\right)^{-\\gamma}
+        \\left[1 + \\left(c_{500} x\\right)^{\\alpha}\\right]^{(\\gamma-\\beta)/\\alpha}
         \\tag{1}
 
-    where :math:`x_{500c} = r / r_{500c}` and :math:`r_{500c}` has the same
-    units as :math:`r`, and
+    Here we define the dimensionless radius :math:`x \\equiv \\frac{r}{\\tilde{r}_{500c}}`,
+    where :math:`\\tilde{r}_{500c}` is the radius computed from the
+    hydrostatically-biased mass :math:`\\tilde{M}_{500c}`. The
+    pressure normalization is written as:
 
     .. math::
 
-        P_{500c} =
-        1.65
-        \\left(\\frac{h}{0.7}\\right)^2
-        E(z)^{8/3}
-        \\left(\\frac{M_{500c} / B}{0.7 \\times 3 \\times 10^{14} \\, M_\\odot}\\right)^{2/3 + 0.12}
-        \\left(\\frac{0.7}{h}\\right)^{3/2}
+        P_{500c} = 1.65\\; h_{70}^{2}\\; E(z)^{8/3}\\; \\left(\\frac{\\tilde{M}_{500c}}{0.7\\times 3\\times 10^{14}\\,M_{\\odot}}\\right)^{2/3 + \\alpha_P}\\; h_{70}^{P0\\_hexp}
         \\tag{2}
 
-    with :math:`E(z) = H(z) / H_0`. In the implementation, the input halo mass
-    is first converted from the halo model's mass definition to
-    :math:`M_{500c}`.
+    with :math:`E(z)=H(z)/H_0`. In this notation we introduce the shorthand
+    :math:`h_{70} \\equiv h / 0.7`. 
 
     The projected Fourier-space pressure profile is evaluated as
 
@@ -150,9 +146,9 @@ class GNFWPressureProfile(PressureProfile):
     B : float
         Hydrostatic mass bias factor :math:`B` used in the :math:`M_{500c}` normalization.
     alpha_P : float
-        Additional mass-scaling exponent entering the pressure normalization as :math:`\\tilde{M}_{500c}^{2/3 + \\alpha_P}`.
+        Additional mass-scaling exponent entering the pressure normalization.
     P0_hexp : float
-        Exponent controlling the :math:`h/0.7` scaling of the normalization. Should be set to ``-1`` for SZ-calibrated profiles and ``-3/2`` for X-ray-calibrated profiles.
+        Exponent controlling the :math:`h_{70}` scaling of the normalization. Set to ``-1`` for SZ-calibrated profiles and ``-3/2`` for X-ray-calibrated profiles.
     """
     
     def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0):
@@ -234,7 +230,7 @@ class GNFWPressureProfile(PressureProfile):
 
         return self._tree_unflatten(treedef, new_leaves)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
@@ -438,7 +434,7 @@ class B12PressureProfile(PressureProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.

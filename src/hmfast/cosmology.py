@@ -811,66 +811,42 @@ class Cosmology:
         return jnp.squeeze(pk_out)
 
     # ------------------------------------------------------------------
-    # CMB
+    # CMB angular power spectra
     # ------------------------------------------------------------------
 
-    def cl_tt(self, l):
+    @partial(jax.jit, static_argnums=(1,))
+    def cl(self, type, l):
         """
-        Evaluate the CMB temperature power spectrum :math:`C_\\ell^{TT}` at
-        requested multipoles `l` using the emulator.
+        Evaluate the CMB power spectrum of the specified type at requested multipoles `l` using the emulator.
+        This method can be used to evaluate :math:`C_\\ell^{TT}`, :math:`C_\\ell^{EE}`, :math:`C_\\ell^{TE}`, and :math:`C_\\ell^{\\phi\\phi}` by passing the appropriate `type` argument.
 
         Parameters
         ----------
+        type : str
+            Power-spectrum specifier, e.g. 'TT', 'EE', 'TE', or 'PP'. Case-insensitive.
         l : int or array-like
-            Multipole(s) at which to evaluate :math:`C_\\ell`.
+            Multipole(s) at which to evaluate C_ell.
 
         Returns
         -------
         jnp.ndarray
-            :math:`C_\\ell^{TT}` evaluated at `l`, where singleton dimensions
-            get squeezed before return. Values for `l` outside the emulator
-            training range are returned as NaN.
+            C_ell for the requested type evaluated at `l`. Out-of-range `l` return NaN.
         """
+        s = str(type).upper()
         params = self._to_dict()
-        preds = self._load_emulator("TT").ten_to_predictions(params)
-        ell = jnp.arange(2, len(preds) + 2)
-        l = jnp.atleast_1d(l)
-        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
 
-    def cl_ee(self, l):
-        """
-        Evaluate the CMB E-mode polarization power spectrum :math:`C_\\ell^{EE}`
-        at requested multipoles `l`, where singleton dimensions get squeezed
-        before return. Out-of-range `l` return NaN.
-        """
-        params = self._to_dict()
-        preds = self._load_emulator("EE").ten_to_predictions(params)
-        ell = jnp.arange(2, len(preds) + 2)
-        l = jnp.atleast_1d(l)
-        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
+        if s == "TT":
+            preds = self._load_emulator("TT").ten_to_predictions(params)
+        elif s == "EE":
+            preds = self._load_emulator("EE").ten_to_predictions(params)
+        elif s == "TE":
+            preds = self._load_emulator("TE").predictions(params)
+        elif s == "PP":
+            preds = self._load_emulator("PP").ten_to_predictions(params)
+            preds = preds / (2 * jnp.pi)
+        else:
+            raise ValueError(f"Unsupported spectrum type: {type}")
 
-    def cl_te(self, l):
-        """
-        Evaluate the CMB temperature-E cross power spectrum :math:`C_\\ell^{TE}`
-        at requested multipoles `l`, where singleton dimensions get squeezed
-        before return. Out-of-range `l` return NaN.
-        """
-        params = self._to_dict()
-        preds = self._load_emulator("TE").predictions(params)
-        ell = jnp.arange(2, len(preds) + 2)
-        l = jnp.atleast_1d(l)
-        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
-
-    def cl_pp(self, l):
-        """
-        Evaluate the CMB lensing potential power spectrum :math:`C_\\ell^{\\phi\\phi}`
-        at requested multipoles `l`, where singleton dimensions get squeezed
-        before return. Out-of-range `l` return NaN. Applies the same 1/(2pi)
-        normalization as before.
-        """
-        params = self._to_dict()
-        preds = self._load_emulator("PP").ten_to_predictions(params)
-        preds = preds / (2 * jnp.pi)
         ell = jnp.arange(2, len(preds) + 2)
         l = jnp.atleast_1d(l)
         return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))

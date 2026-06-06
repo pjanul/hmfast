@@ -18,10 +18,13 @@ class PressureProfile(HaloProfile):
 
     Child profile classes must implement :meth:`real` and :meth:`fourier`.
     """
+    def _fourier_radius_scale(self, halo_model, m, z):
+        raise NotImplementedError()
+
     @partial(jax.jit, static_argnums=(0,))
     def fourier(self, halo_model, k, m, z):
         """
-        Compute the projected Fourier-space pressure profile for halo-model calculations.
+        Compute the Fourier-space pressure profile for halo-model calculations.
 
         Parameters
         ----------
@@ -41,46 +44,36 @@ class PressureProfile(HaloProfile):
             singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        B = getattr(self, "B", 1.0)
+        r_scale = jnp.reshape(self._fourier_radius_scale(halo_model, m, z), (len(m), len(z)))
+        r = self.x[:, None, None] * r_scale[None, :, :] * (1.0 + z[None, None, :])
+        real_profile = jnp.reshape(self.real(halo_model, r, m, z), (len(self.x), len(m), len(z)))
 
-        r_delta_native = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
-        r_delta = r_delta_native / B**(1 / 3)
-        r = self.x[:, None, None] * r_delta_native[None, :, :] * (1.0 + z[None, None, :])
-        d_A = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
-        ell_delta = d_A[None, :] / r_delta  # (Nm, Nz)
-        
-        mpc_to_m = Const._Mpc_over_m_
-        prefactor = (1 + z)[None, :] * 4 * jnp.pi * r_delta * mpc_to_m / (ell_delta**2)  # (Nm, Nz)
-        
-        # Target ell grid for interpolation: (Nk, Nz)
-        chi = d_A * (1 + z)
-        ell_target = k[:, None] * chi[None, :] - 0.5 
-        
-        # Get native Hankel transform outputs, which may not align with the k from this function's input
         k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
-        
-        # Calculate native u_ell and the native ell grid
-        u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None])) 
-        ell_native = k_native[:, None, None] * ell_delta[None, :, :] # (Nk_native, Nm, Nz)
-        
-        # Apply prefactor
-        u_ell_base = prefactor[None, :, :] * u_ell_native # (Nk_native, Nm, Nz)
-        u_ell_val = u_ell_base
-    
-        # Interpolate over the native k-axis (axis 0) for every combination of m and z    
-        def interp_at_z(ell_t, ell_n, u_n):
-            return jnp.interp(ell_t, ell_n, u_n)
-       
+
+        q_native = jnp.broadcast_to(k_native[:, None, None], (len(k_native), len(m), len(z)))
+        q_target = k[:, None, None] * r_scale[None, :, :] * (1.0 + z[None, None, :])
+        prefactor = 4.0 * jnp.pi * r_scale**3 * (1.0 + z)[None, :]**3
+        u_k_val = prefactor[None, :, :] * u_k_native * jnp.sqrt(jnp.pi / (2.0 * q_native))
+        u_k_zero = prefactor * jnp.trapezoid(self.x[:, None, None]**2 * real_profile, x=self.x, axis=0)
+
+        q_native = jnp.concatenate([jnp.zeros((1, len(m), len(z))), q_native], axis=0)
+        u_k_val = jnp.concatenate([u_k_zero[None, :, :], u_k_val], axis=0)
+
+        def interp_at_z(q_t, q_n, u_n):
+            return jnp.interp(q_t, q_n, u_n)
+
+        q_target_cols = jnp.transpose(q_target, (1, 2, 0))
+        q_native_cols = jnp.transpose(q_native, (1, 2, 0))
+        u_k_cols = jnp.transpose(u_k_val, (1, 2, 0))
+
         vmap_interp = jax.vmap(
-            jax.vmap(interp_at_z, in_axes=(None, 1, 1), out_axes=1), 
-            in_axes=(1, 2, 2), out_axes=2
+            jax.vmap(interp_at_z, in_axes=(0, 0, 0), out_axes=0),
+            in_axes=(0, 0, 0), out_axes=0,
         )
-        
-        # Resulting shape: (Nk, Nm, Nz)
-        u_ell_interp = vmap_interp(ell_target, ell_native, u_ell_val)
-        
-        return jnp.squeeze(u_ell_interp)
+
+        u_interp = vmap_interp(q_target_cols, q_native_cols, u_k_cols)
+        return jnp.squeeze(jnp.transpose(u_interp, (2, 0, 1)))
 
 
 
@@ -233,6 +226,16 @@ class GNFWPressureProfile(PressureProfile):
 
         return self._tree_unflatten(treedef, new_leaves)
 
+    def _fourier_radius_scale(self, halo_model, m, z):
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        mass_def_500c = MassDefinition(500, "critical")
+        translate_to_500c = mass_translator(halo_model.mass_definition, mass_def_500c, halo_model.concentration)
+        m500c = jnp.reshape(translate_to_500c(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), (len(m), len(z)))
+        return r_500c / self.B**(1 / 3)
+
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
@@ -276,7 +279,7 @@ class GNFWPressureProfile(PressureProfile):
         h = H0 / 100.0
         H = halo_model.cosmology.hubble_parameter(z)  # (Nz,)
         H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
-        m500c_tilde = (m500c * h / B)[None, :, None]  # (1, Nm, 1)
+        m500c_tilde = (m500c * h / B)[None, :, :]  # (1, Nm, Nz)
         P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + alpha_P) * (h / 0.7) ** P0_hexp)  # (1, Nm, Nz)
     
         # GNFW profile
@@ -442,6 +445,15 @@ class B12PressureProfile(PressureProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
+    def _fourier_radius_scale(self, halo_model, m, z):
+        m = jnp.atleast_1d(m)
+        z = jnp.atleast_1d(z)
+
+        mass_def_200c = MassDefinition(200, "critical")
+        translate_to_200c = mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)
+        m200c = jnp.reshape(translate_to_200c(halo_model.cosmology, m, z), (len(m), len(z)))
+        return jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m200c, z), (len(m), len(z)))
+
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
         """
@@ -481,7 +493,7 @@ class B12PressureProfile(PressureProfile):
     
         # Convert the comoving radius to the calibrated physical 200c coordinate.
         x_200c = r[:, None, None] / ((1.0 + z[None, None, :]) * r_200c[None, :, :])  # (Nr, Nm, Nz)
-        m200c_b = m200c[None, :, None]
+        m200c_b = m200c[None, :, :]
         z_b = z[None, None, :]
         mass_ratio = m200c_b / 1e14
     

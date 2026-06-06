@@ -88,13 +88,12 @@ class tSZTracer(Tracer):
             tSZ kernel evaluated at redshift(s) :math:`z`.
         """
         
-        h = cosmology.H0/100 
-        
-        # Get electon mass in eV, Thomson cross section in cm^2, and Mpc/h in cm
+        z = jnp.atleast_1d(z)
+
         m_e = Const._m_e_ * Const._c_**2 / Const._eV_
         sigma_T = Const._sigma_T_ * 1e6
-        mpc_per_h_to_cm =  Const._Mpc_over_m_ / h
-        return (sigma_T / m_e) / (1+z) # Check this
+        chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
+        return (sigma_T / m_e) * Const._Mpc_over_m_ / (chi**2 * (1.0 + z))
 
 
 

@@ -6,7 +6,7 @@ from typing import Dict, Union
 from mcfit import TophatVar
 from hmfast.emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from hmfast.download import _get_default_data_path
-from hmfast.utils import Const
+from hmfast.utils import Const, log_interp1d_extrap
 from functools import partial
 
 jax.config.update("jax_enable_x64", True)
@@ -29,6 +29,7 @@ class Cosmology:
     Cosmology model and emulator interface.
 
     Provides access to cosmological parameters and emulator-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
+    Note that using parameters outside the emulator training bounds will result in NaN outputs.
 
     Attributes
     ----------
@@ -238,6 +239,40 @@ class Cosmology:
             'T_cmb': self.T_cmb,
             'deg_ncdm': self.deg_ncdm
         }
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _emulator_params_in_bounds(self):
+        """
+        Return whether the cosmology lies within the emulator training domain.
+
+        The LCDM emulators use a narrower prior on ``n_s`` than the extension
+        emulators; all other bounds follow the shared emulator training ranges.
+        """
+        ns_min, ns_max = (0.8812, 1.0492) if self.emulator_set == "lcdm:v1" else (0.8, 1.2)
+        ln_1e10_As = jnp.log(1.0e10 * self.A_s)
+        log10_z_c = jnp.log10(self.z_c)
+
+        return (
+            (ln_1e10_As >= 2.5) & (ln_1e10_As <= 3.5)
+            & (self.omega_cdm >= 0.08) & (self.omega_cdm <= 0.20)
+            & (self.omega_b >= 0.01933) & (self.omega_b <= 0.02533)
+            & (self.H0 >= 39.99) & (self.H0 <= 100.01)
+            & (self.n_s >= ns_min) & (self.n_s <= ns_max)
+            & (self.tau >= 0.02) & (self.tau <= 0.12)
+            & (self.m_ncdm >= 0.0) & (self.m_ncdm <= 0.33333)
+            & (self.w0 >= -2.0) & (self.w0 <= -0.33)
+            & (self.N_ur >= 0.49) & (self.N_ur <= 4.49)
+            & (self.theta_i >= 0.1) & (self.theta_i <= 3.1)
+            & (log10_z_c >= 3.0) & (log10_z_c <= 4.3)
+            & (self.f_ede >= 0.001) & (self.f_ede <= 0.5)
+            & (self.r >= 0.0) & (self.r <= 0.3)
+        )
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _enforce_bounds(self, values):
+        valid = self._emulator_params_in_bounds()
+        values = jnp.asarray(values)
+        return jnp.where(valid, values, jnp.full_like(values, jnp.nan))
                        
 
     # ------------------------------------------------------------------
@@ -430,7 +465,7 @@ class Cosmology:
         params = self._to_dict()
         emu = self._load_emulator("HZ")
         preds = 10.0 ** emu.predictions(params) * (Const._c_ / 1e3)
-        return self._interp_z(z, self._z_grid_bg(), preds)
+        return self._enforce_bounds(self._interp_z(z, self._z_grid_bg(), preds))
 
     @jax.jit
     def angular_diameter_distance(self, z):
@@ -456,7 +491,7 @@ class Cosmology:
             preds = 10.0 ** preds
             preds = jnp.insert(preds, 0, 0.0)
 
-        return self._interp_z(z, self._z_grid_bg(), preds)
+        return self._enforce_bounds(self._interp_z(z, self._z_grid_bg(), preds))
 
     @jax.jit
     def sigma8(self, z):
@@ -482,7 +517,7 @@ class Cosmology:
         params = self._to_dict()
         emu = self._load_emulator("S8Z")
         preds = emu.predictions(params)
-        return self._interp_z(z, self._z_grid_bg(), preds)
+        return self._enforce_bounds(self._interp_z(z, self._z_grid_bg(), preds))
 
     @jax.jit
     def _cosmo_params(self):
@@ -804,11 +839,11 @@ class Cosmology:
             params["z_pk_save_nonclass"] = z_i
             pk_log = emu.predictions(params)
             pk_vals = 10.0 ** pk_log * pk_power_fac
-            return jnp.interp(k, k_grid, pk_vals)
+            return log_interp1d_extrap(k, k_grid, pk_vals)
 
         pk_for_z = jax.vmap(predict_for_z)(z)  # shape (Nz, Nk)
         pk_out = jnp.transpose(pk_for_z)  # shape (Nk, Nz)
-        return jnp.squeeze(pk_out)
+        return jnp.squeeze(self._enforce_bounds(pk_out))
 
     # ------------------------------------------------------------------
     # CMB angular power spectra
@@ -849,7 +884,8 @@ class Cosmology:
 
         ell = jnp.arange(2, len(preds) + 2)
         l = jnp.atleast_1d(l)
-        return jnp.squeeze(jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan))
+        cl_out = jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan)
+        return jnp.squeeze(self._enforce_bounds(cl_out))
 
     # def cl_bb(self):
     #     if self.emulator_set != "ede:v2": 
@@ -909,8 +945,9 @@ class Cosmology:
 
         
         out = {n: preds[i] for i, n in enumerate(names) if i < len(preds)}
-        
-        return out
+
+        valid = self._emulator_params_in_bounds()
+        return {name: jnp.where(valid, value, jnp.asarray(jnp.nan, dtype=jnp.asarray(value).dtype)) for name, value in out.items()}
 
 
 

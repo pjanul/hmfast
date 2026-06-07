@@ -115,3 +115,46 @@ def lambertw(x, k=0, max_steps=5):
         raise NotImplementedError()
 
     return _lambertwk0(x, max_steps=max_steps)
+
+
+@jax.jit
+def log_interp1d_extrap(x, xp, fp):
+    """
+    Interpolate positive 1D data in log-log space and extrapolate using the
+    endpoint log-slopes.
+
+    Parameters
+    ----------
+    x : float or jnp.ndarray
+        Evaluation points. Must be strictly positive.
+    xp : jnp.ndarray
+        Monotonic sample points. Must be strictly positive.
+    fp : jnp.ndarray
+        Positive function values sampled on ``xp``.
+
+    Returns
+    -------
+    jnp.ndarray
+        Interpolated or extrapolated values with the same shape as ``x``.
+    """
+    x = jnp.asarray(x)
+    xp = jnp.asarray(xp)
+    fp = jnp.asarray(fp)
+
+    log_x = jnp.log(x)
+    log_xp = jnp.log(xp)
+    log_fp = jnp.log(fp)
+
+    left_slope = (log_fp[1] - log_fp[0]) / (log_xp[1] - log_xp[0])
+    right_slope = (log_fp[-1] - log_fp[-2]) / (log_xp[-1] - log_xp[-2])
+
+    log_f_interp = jnp.interp(log_x, log_xp, log_fp)
+    log_f_left = log_fp[0] + left_slope * (log_x - log_xp[0])
+    log_f_right = log_fp[-1] + right_slope * (log_x - log_xp[-1])
+
+    log_f = jnp.where(
+        x < xp[0],
+        log_f_left,
+        jnp.where(x > xp[-1], log_f_right, log_f_interp),
+    )
+    return jnp.exp(log_f)

@@ -224,7 +224,7 @@ class B16DensityProfile(DensityProfile):
         r_b, m_b, z_b = r[:, None, None], m[None, :, None], z[None, None, :]
 
         mass_def_200c = MassDefinition(200, "critical")
-        m_200c = jnp.reshape(mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z), (len(m), len(z)))
+        m_200c = jnp.reshape(mass_translator(halo_model.mass_def, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z), (len(m), len(z)))
         r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m_200c, z), (len(m), len(z)))
         
         x_200c = r_b / ((1.0 + z_b) * r_200c[None, :, :])
@@ -276,7 +276,7 @@ class B16DensityProfile(DensityProfile):
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         mass_def_200c = MassDefinition(200, "critical")
-        m_200c = mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z)
+        m_200c = mass_translator(halo_model.mass_def, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z)
         m_200c = jnp.reshape(m_200c, (len(m), len(z)))
         r_delta = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m_200c, z), (len(m), len(z)))
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
@@ -420,13 +420,13 @@ class _NFWDensityProfile(DensityProfile):
         f_b = cparams["Omega_b"] / cparams["Omega0_m"]
         
         # Get scale radius r_s
-        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z))) * cparams["h"]
+        r_delta = jnp.reshape(halo_model.mass_def.r_delta(halo_model.cosmology, m, z), (len(m), len(z))) * cparams["h"]
         c_delta = jnp.reshape(
             halo_model.concentration.c_delta(
                 halo_model.cosmology,
                 m,
                 z,
-                mass_def=halo_model.mass_definition,
+                mass_def=halo_model.mass_def,
             ),
             (len(m), len(z)),
         )
@@ -468,13 +468,13 @@ class _NFWDensityProfile(DensityProfile):
             singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_delta = jnp.reshape(halo_model.mass_def.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         c_delta = jnp.reshape(
             halo_model.concentration.c_delta(
                 halo_model.cosmology,
                 m,
                 z,
-                mass_def=halo_model.mass_definition,
+                mass_def=halo_model.mass_def,
             ),
             (len(m), len(z)),
         )

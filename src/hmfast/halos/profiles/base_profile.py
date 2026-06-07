@@ -125,11 +125,11 @@ class HaloProfile(ABC):
                 halo_model.cosmology,
                 m,
                 z,
-                mass_def=halo_model.mass_definition,
+                mass_def=halo_model.mass_def,
             ),
             (len(m), len(z)),
         )
-        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_delta = jnp.reshape(halo_model.mass_def.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         r_s = r_delta * (1.0 + z[None, :]) / c_delta
 
         f_nfw = 1.0 / (jnp.log1p(c_delta) - c_delta / (1.0 + c_delta))
@@ -163,11 +163,11 @@ class HaloProfile(ABC):
                 halo_model.cosmology,
                 m,
                 z,
-                mass_def=halo_model.mass_definition,
+                mass_def=halo_model.mass_def,
             ),
             (len(m), len(z)),
         )
-        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_delta = jnp.reshape(halo_model.mass_def.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
         lambda_val = 1.0 
         
         # Compute analytical profile q terms with shape: (N_k, N_m, N_z)

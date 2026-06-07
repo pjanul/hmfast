@@ -408,7 +408,7 @@ class S12CIBProfile(CIBProfile):
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
 
         # Correct for Maniyar if needed
         chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
@@ -929,7 +929,7 @@ class M21CIBProfile(CIBProfile):
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
         
         # Get the halo mass function dn/dlnm 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
 
         # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
         integrand = dndlnm * (lc + ls)

@@ -30,7 +30,7 @@ class HaloModel:
     ----------
     cosmology : Cosmology
         Cosmology object supplying background, growth, and matter power spectra quantities.
-    mass_definition : MassDefinition
+    mass_def : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
     halo_mass_function : HaloMassFunction
         Halo mass function model used to compute :math:`dn / d\\ln M`.
@@ -49,6 +49,7 @@ class HaloModel:
     def __init__(self, 
                  cosmology=Cosmology(emulator_set="lcdm:v1"), 
                  mass_def=MassDefinition(delta=200, reference="critical"),
+                 mass_definition=None,
                  halo_mass_function=T08HaloMassFunction(),
                  halo_bias=T10HaloBias(),
                  subhalo_mass_function=TW10SubHaloMassFunction(),
@@ -69,7 +70,11 @@ class HaloModel:
         self.subhalo_mass_function = subhalo_mass_function
         self.concentration = concentration
 
-        self.mass_definition = mass_def
+        # Backwards-compatibility: accept legacy `mass_definition` kwarg
+        if mass_definition is not None:
+            self.mass_def = mass_definition
+        else:
+            self.mass_def = mass_def
         self.hm_consistency = hm_consistency
         self.convert_masses = convert_masses
 
@@ -79,7 +84,7 @@ class HaloModel:
         # Everything else is configuration/metadata.
         children = (self.cosmology,)
         aux_data = (self.halo_mass_function, self.halo_bias, self.subhalo_mass_function, self.concentration,
-            self.mass_definition, self.hm_consistency, self.convert_masses
+            self.mass_def, self.hm_consistency, self.convert_masses
         )
         return (children, aux_data)
 
@@ -89,11 +94,11 @@ class HaloModel:
         obj = cls.__new__(cls)
         obj.cosmology = cosmology
         (obj.halo_mass_function, obj.halo_bias, obj.subhalo_mass_function, 
-         obj.concentration, obj.mass_definition, obj.hm_consistency, 
+         obj.concentration, obj.mass_def, obj.hm_consistency, 
          obj.convert_masses) = aux_data
         return obj
 
-    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None, 
+    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None, mass_definition=None,
                hm_consistency=None, convert_masses=None):
         """
         Return a new HaloModel instance with updated components.
@@ -114,7 +119,7 @@ class HaloModel:
         (cosmo_child,) = children
         (
             halo_mass_function0, halo_bias0, subhalo_mass_function0, concentration0,
-            mass_definition0, hm_consistency0, convert_masses0
+            mass_def0, hm_consistency0, convert_masses0
         ) = aux_data
     
         # Update only provided components
@@ -123,13 +128,17 @@ class HaloModel:
         new_halo_bias = halo_bias if halo_bias is not None else halo_bias0
         new_subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else subhalo_mass_function0
         new_concentration = concentration if concentration is not None else concentration0
-        new_mass_definition = mass_def if mass_def is not None else mass_definition0
+        # Support legacy `mass_definition` kwarg
+        if mass_definition is not None:
+            new_mass_def = mass_definition
+        else:
+            new_mass_def = mass_def if mass_def is not None else mass_def0
         new_hm_consistency = hm_consistency if hm_consistency is not None else hm_consistency0
         new_convert_masses = convert_masses if convert_masses is not None else convert_masses0
     
         new_aux_data = (
             new_halo_mass_function, new_halo_bias, new_subhalo_mass_function, new_concentration,
-            new_mass_definition, new_hm_consistency, new_convert_masses
+            new_mass_def, new_hm_consistency, new_convert_masses
         )
         # Use _tree_unflatten to create the new instance efficiently
         return self._tree_unflatten(new_aux_data, (new_cosmo,))
@@ -164,9 +173,9 @@ class HaloModel:
     
     
         # Public HMF and bias interfaces use physical masses.
-        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
-        b1 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 1), (len(m), len(z)))
-        b2 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses, 2), (len(m), len(z)))
+        dn_dlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_def, self.convert_masses), (len(m), len(z)))
+        b1 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_def, self.convert_masses, 1), (len(m), len(z)))
+        b2 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_def, self.convert_masses, 2), (len(m), len(z)))
     
         # Compute integrals I0, I1, I2
         I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
@@ -226,7 +235,7 @@ class HaloModel:
         dm = jnp.diff(logm)
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
         
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_def, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * w[:, None] # (Nm, Nz)
     
         # Process a single mass bin at a time and extract the uk^2 at the lowest mass for the halo model consistency term
@@ -363,8 +372,8 @@ class HaloModel:
         w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
-        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
-        bias = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_definition, self.convert_masses), (len(m), len(z)))
+        dndlnm = jnp.reshape(self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_def, self.convert_masses), (len(m), len(z)))
+        bias = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_def, self.convert_masses), (len(m), len(z)))
         total_weights = dndlnm * bias * w[:, None]
     
         def get_I(profile):

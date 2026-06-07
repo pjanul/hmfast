@@ -219,7 +219,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses), (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses), (len(m), len(z)))
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
@@ -252,8 +252,8 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses), (len(m), len(z)))
-        bh = jnp.reshape(halo_model.halo_bias.bias(halo_model.cosmology, m, z, halo_model.mass_definition, halo_model.convert_masses, 1), (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses), (len(m), len(z)))
+        bh = jnp.reshape(halo_model.halo_bias.bias(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses, 1), (len(m), len(z)))
         ng = self.ng_bar(halo_model, m, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)

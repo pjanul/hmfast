@@ -233,7 +233,7 @@ class GNFWPressureProfile(PressureProfile):
         m_tilde = jnp.reshape(m[:, None] / self.B, (len(m), 1))
         m_tilde = jnp.broadcast_to(m_tilde, (len(m), len(z)))
         r_tilde = jnp.reshape(
-            halo_model.mass_definition.r_delta(halo_model.cosmology, m_tilde, z),
+            halo_model.mass_def.r_delta(halo_model.cosmology, m_tilde, z),
             (len(m), len(z)),
         )
         return r_tilde
@@ -268,7 +268,7 @@ class GNFWPressureProfile(PressureProfile):
     
         m_tilde = jnp.broadcast_to((m / B)[:, None], (len(m), len(z)))
         r_tilde = jnp.reshape(
-            halo_model.mass_definition.r_delta(halo_model.cosmology, m_tilde, z),
+            halo_model.mass_def.r_delta(halo_model.cosmology, m_tilde, z),
             (len(m), len(z)),
         )
     
@@ -450,7 +450,7 @@ class B12PressureProfile(PressureProfile):
         z = jnp.atleast_1d(z)
 
         mass_def_200c = MassDefinition(200, "critical")
-        translate_to_200c = mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)
+        translate_to_200c = mass_translator(halo_model.mass_def, mass_def_200c, halo_model.concentration)
         m200c = jnp.reshape(translate_to_200c(halo_model.cosmology, m, z), (len(m), len(z)))
         return jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m200c, z), (len(m), len(z)))
 
@@ -484,7 +484,7 @@ class B12PressureProfile(PressureProfile):
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Convert input mass to M200c for normalization
-        mass_def_old = halo_model.mass_definition
+        mass_def_old = halo_model.mass_def
         mass_def_200c = MassDefinition(200, "critical")
         translate_to_200c = mass_translator(mass_def_old, mass_def_200c, halo_model.concentration)
         m200c = jnp.reshape(translate_to_200c(halo_model.cosmology, m, z), (len(m), len(z)))

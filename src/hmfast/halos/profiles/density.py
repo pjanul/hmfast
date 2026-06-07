@@ -7,7 +7,7 @@ from functools import partial
 
 from hmfast.download import _get_default_data_path
 from hmfast.utils import lambertw, Const
-from hmfast.halos.massdef import MassDefinition
+from hmfast.halos.massdef import MassDefinition, mass_translator
 from hmfast.halos.profiles import HaloProfile, HankelTransform
 
 
@@ -49,7 +49,8 @@ class B16DensityProfile(DensityProfile):
         (1 + z)^{\\alpha_z^X}
         \\tag{2}
 
-    where :math:`X \\in \\{C, \\alpha, \\beta\\}`.
+    where :math:`X \\in \\{C, \\alpha, \\beta\\}`. Note that the scaling parameters must be calibrated with respect to a :math:`200c` mass definition.
+
 
     The Fourier-space density profile used by the halo model is evaluated as
 
@@ -140,7 +141,7 @@ class B16DensityProfile(DensityProfile):
                alpha_m_rho0=None, alpha_m_alpha=None, alpha_m_beta=None,
                alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None):
         """
-        Return a new profile instance with updated Battaglia density parameters.
+        Return a new profile instance with updated Battaglia density parameters. 
 
         Parameters
         ----------
@@ -222,14 +223,17 @@ class B16DensityProfile(DensityProfile):
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m),  jnp.atleast_1d(z)
         r_b, m_b, z_b = r[:, None, None], m[None, :, None], z[None, None, :]
 
-        r_200c = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        mass_def_200c = MassDefinition(200, "critical")
+        m_200c = jnp.reshape(mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z), (len(m), len(z)))
+        r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m_200c, z), (len(m), len(z)))
+        
         x_200c = r_b / ((1.0 + z_b) * r_200c[None, :, :])
         
         # Critical density broadcast to (1, 1, Nz) in physical units.
         rho_crit_z = jnp.atleast_1d(halo_model.cosmology.critical_density(z))[None, None, :]
         
         # Mass scaling logic
-        m_200c_msun = m_b
+        m_200c_msun = m_200c[None, :, :]
         mass_ratio = m_200c_msun / 1e14 
        
         # Compute Shape Parameters (Equations A1, A2 from B16)
@@ -271,7 +275,10 @@ class B16DensityProfile(DensityProfile):
             singleton dimensions get squeezed before return.
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-        r_delta = jnp.reshape(halo_model.mass_definition.r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
+        mass_def_200c = MassDefinition(200, "critical")
+        m_200c = mass_translator(halo_model.mass_definition, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z)
+        m_200c = jnp.reshape(m_200c, (len(m), len(z)))
+        r_delta = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m_200c, z), (len(m), len(z)))
         d_A_z = jnp.atleast_1d(halo_model.cosmology.angular_diameter_distance(z))
         ell_delta = d_A_z[None, :] / r_delta
 
@@ -281,7 +288,8 @@ class B16DensityProfile(DensityProfile):
         prefactor = 4 * jnp.pi * r_delta**3 * (1 + z)[None, :]**3
 
         r = self.x[:, None, None] * r_delta[None, :, :] * (1.0 + z[None, None, :])
-        k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        halo_model_200c = halo_model.update(mass_def=mass_def_200c)
+        k_native, u_k_native = self._u_k_hankel(halo_model_200c, self.x, r, m_200c, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))

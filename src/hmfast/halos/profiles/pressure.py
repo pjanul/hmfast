@@ -191,7 +191,7 @@ class GNFWPressureProfile(PressureProfile):
 
     def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None, x_out=None):
         """
-        Return a new profile instance with updated GNFW pressure profile parameters.
+        Return a new profile instance with updated GNFW pressure profile parameters. Any argument left as ``None`` keeps its current value.
 
         Parameters
         ----------
@@ -230,11 +230,13 @@ class GNFWPressureProfile(PressureProfile):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        mass_def_500c = MassDefinition(500, "critical")
-        translate_to_500c = mass_translator(halo_model.mass_definition, mass_def_500c, halo_model.concentration)
-        m500c = jnp.reshape(translate_to_500c(halo_model.cosmology, m, z), (len(m), len(z)))
-        r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), (len(m), len(z)))
-        return r_500c / self.B**(1 / 3)
+        m_tilde = jnp.reshape(m[:, None] / self.B, (len(m), 1))
+        m_tilde = jnp.broadcast_to(m_tilde, (len(m), len(z)))
+        r_tilde = jnp.reshape(
+            halo_model.mass_definition.r_delta(halo_model.cosmology, m_tilde, z),
+            (len(m), len(z)),
+        )
+        return r_tilde
 
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
@@ -264,28 +266,26 @@ class GNFWPressureProfile(PressureProfile):
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
         h = H0 / 100.0
     
-        # Convert input mass to M500c for normalization, since this profile was calibrated for 500c
-        mass_def_old = halo_model.mass_definition
-        mass_def_500c = MassDefinition(500, "critical")
-        translate_to_500c = mass_translator(mass_def_old, mass_def_500c, halo_model.concentration)
-        m500c = jnp.reshape(translate_to_500c(halo_model.cosmology, m, z), (len(m), len(z)))
-
-        r_500c = jnp.reshape(mass_def_500c.r_delta(halo_model.cosmology, m500c, z), m500c.shape)  # (Nm, Nz)
+        m_tilde = jnp.broadcast_to((m / B)[:, None], (len(m), len(z)))
+        r_tilde = jnp.reshape(
+            halo_model.mass_definition.r_delta(halo_model.cosmology, m_tilde, z),
+            (len(m), len(z)),
+        )
     
-        # Convert the comoving radius to the calibrated physical 500c coordinate.
-        x_500c = r[:, None, None] / ((1.0 + z[None, None, :]) * (r_500c / B ** (1 / 3))[None, :, :])  # (Nr, Nm, Nz)
+        # Convert the comoving radius to the calibrated physical coordinate.
+        x_tilde = r[:, None, None] / ((1.0 + z[None, None, :]) * r_tilde[None, :, :])
     
         # Compute normalization P_500c (with hydrostatic bias)
         h = H0 / 100.0
         H = halo_model.cosmology.hubble_parameter(z)  # (Nz,)
         H = jnp.atleast_1d(H)[None, None, :]  # (1, 1, Nz)
-        m500c_tilde = (m500c * h / B)[None, :, :]  # (1, Nm, Nz)
-        P_500c = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m500c_tilde / (0.7 * 3e14)) ** (2 / 3 + alpha_P) * (h / 0.7) ** P0_hexp)  # (1, Nm, Nz)
+        m_tilde_h = (m_tilde * h)[None, :, :]
+        P_tilde = (1.65 * (h / 0.7) ** 2 * (H / H0) ** (8 / 3) * (m_tilde_h / (0.7 * 3e14)) ** (2 / 3 + alpha_P) * (h / 0.7) ** P0_hexp)
     
         # GNFW profile
-        scaled_x = c500 * x_500c  # (Nr, Nm, Nz)
-        Pe = P_500c * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
-        Pe = jnp.where(x_500c <= x_out, Pe, 0.0)
+        scaled_x = c500 * x_tilde
+        Pe = P_tilde * P0 * scaled_x ** (-gamma) * (1 + scaled_x ** alpha) ** ((gamma - beta) / alpha)
+        Pe = jnp.where(x_tilde <= x_out, Pe, 0.0)
     
         return jnp.squeeze(Pe)
 
@@ -326,7 +326,7 @@ class B12PressureProfile(PressureProfile):
 
     where :math:`X \\in \\{P_0, x_c, \\beta\\}`. In the implementation, the
     input halo mass is first converted from the halo model's mass definition to
-    :math:`M_{200c}`.
+    :math:`M_{200c}`. Note that the scaling parameters must be calibrated with respect to a :math:`200c` mass definition.
 
     The projected Fourier-space pressure profile is evaluated as
 

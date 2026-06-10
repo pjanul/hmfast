@@ -382,16 +382,14 @@ class S12CIBProfile(CIBProfile):
 
      
     @partial(jax.jit, static_argnums=(0,))
-    def mean_emissivity(self, halo_model, m, z):
+    def mean_emissivity(self, halo_model, z):
         """
         Compute the mean emissivity.
-    
+
         Parameters
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology and halo mass function.
-        m : float or jnp.ndarray
-            Halo mass grid in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift grid.
 
@@ -402,30 +400,24 @@ class S12CIBProfile(CIBProfile):
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m, z = halo_model.m_grid, jnp.atleast_1d(z)
+        h = halo_model.cosmology.H0 / 100
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
-        
-        # Get the halo mass function dn/dlnm 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
 
-        # Correct for Maniyar if needed
-        chi = halo_model.cosmology.angular_diameter_distance(z) * (1 + z) 
-        
-        # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z)))
+
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
-        # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        h = halo_model.cosmology.H0 / 100
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
-        
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
+
         return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def monopole(self, halo_model, m, z):
+    def monopole(self, halo_model, z):
         """
         Compute the CIB monopole intensity.
 
@@ -433,8 +425,6 @@ class S12CIBProfile(CIBProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
-        m : float or jnp.ndarray
-            Halo mass grid.
         z : float or jnp.ndarray
             Redshift grid.
 
@@ -444,19 +434,16 @@ class S12CIBProfile(CIBProfile):
             Monopole intensity :math:`I_\\nu` as a scalar with shape
             :math:`()`, where singleton dimensions get squeezed before return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        z = jnp.atleast_1d(z)
 
-        # Get the mean emissivity (Shape: Nz)
-        j_bar = self.mean_emissivity(halo_model, m, z)
-        
-        # dchi/dz = c / H(z), a(z) = 1/(1+z)
+        j_bar = self.mean_emissivity(halo_model, z)
+
         dchi_dz = (Const._c_ / 1e3) / halo_model.cosmology.hubble_parameter(z)
         a = 1.0 / (1.0 + z)
-        
-        # Final Integral over redshift
+
         integrand = dchi_dz * a * j_bar
-        intensity = jnp.trapezoid(integrand, x=z) 
-        
+        intensity = jnp.trapezoid(integrand, x=z)
+
         return jnp.squeeze(intensity)
 
     @partial(jax.jit, static_argnums=(0,))
@@ -529,7 +516,6 @@ class S12CIBProfile(CIBProfile):
 
         return jnp.squeeze(cen_term + sat_term)
 
-        
 
 jax.tree_util.register_pytree_node(
     S12CIBProfile,
@@ -903,7 +889,7 @@ class M21CIBProfile(CIBProfile):
     
     
     @partial(jax.jit, static_argnums=(0,))
-    def mean_emissivity(self, halo_model, m, z):
+    def mean_emissivity(self, halo_model, z):
         """
         Compute the mean emissivity.
 
@@ -911,8 +897,6 @@ class M21CIBProfile(CIBProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology and halo mass function.
-        m : float or jnp.ndarray
-            Halo mass grid in physical :math:`M_\\odot`.
         z : float or jnp.ndarray
             Redshift grid.
 
@@ -923,27 +907,24 @@ class M21CIBProfile(CIBProfile):
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m, z = halo_model.m_grid, jnp.atleast_1d(z)
+        h = halo_model.cosmology.H0 / 100
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
-        
-        # Get the halo mass function dn/dlnm 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z))) # Shape: (Nm, Nz)
 
-        # Integrate: j_bar = integral [dn/dlnm * (L_c + L_s)] dlnm
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z)))
+
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
-        # Add the consistency counter-term (correction for unbound mass) if hm_consistency is True
-        h = halo_model.cosmology.H0 / 100
-        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * lc[0], lambda x: x, j_bar)
+        j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
 
         return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def monopole(self, halo_model, m, z):
+    def monopole(self, halo_model, z):
         """
         Compute the CIB monopole intensity.
 
@@ -951,30 +932,25 @@ class M21CIBProfile(CIBProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
-        m : float or jnp.ndarray
-            Halo mass grid.
         z : float or jnp.ndarray
             Redshift grid.
-        
+
         Returns
         -------
         float or jnp.ndarray
             Monopole intensity :math:`I_\\nu` as a scalar with shape
             :math:`()`, where singleton dimensions get squeezed before return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        z = jnp.atleast_1d(z)
 
-        # Get the mean emissivity (Shape: Nz)
-        j_bar = self.mean_emissivity(halo_model, m, z)
-        
-        # dchi/dz = c / H(z), a(z) = 1/(1+z)
+        j_bar = self.mean_emissivity(halo_model, z)
+
         dchi_dz = (Const._c_ / 1e3) / halo_model.cosmology.hubble_parameter(z)
         a = 1.0 / (1.0 + z)
-        
-        # Final Integral over redshift
+
         integrand = dchi_dz * a * j_bar
-        intensity = jnp.trapezoid(integrand, x=z) 
-        
+        intensity = jnp.trapezoid(integrand, x=z)
+
         return jnp.squeeze(intensity)
 
     @partial(jax.jit, static_argnums=(0,))

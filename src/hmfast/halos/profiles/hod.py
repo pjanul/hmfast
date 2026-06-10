@@ -193,21 +193,20 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         return self.n_cen(halo_model, m) * pow_term
 
     @partial(jax.jit, static_argnums=(0,))
-    def ng_bar(self, halo_model, m, z):
+    def ng_bar(self, halo_model, z):
         """
         Comoving mean galaxy number density at redshift ``z``.
 
-        See Eq. (4) for :math:`\\bar{n}_g(z)`.
+        See Eq. (4) for :math:`\\bar{n}_g(z)`. The mass integral is performed
+        over ``halo_model.m_grid``.
 
         Parameters
         ----------
         halo_model : HaloModel
             The parent halo model instance.
-        m : array-like
-            Halo mass grid in physical :math:`M_{\\odot}`.
         z : array-like
             Redshift grid.
-    
+
         Returns
         -------
         ng : array-like
@@ -215,7 +214,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
             :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_z,)`, where
             singleton dimensions get squeezed before return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m, z = halo_model.m_grid, jnp.atleast_1d(z)
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
@@ -223,24 +222,23 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
 
         # HM Consistency check
-        return jnp.squeeze(jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[0] * Ntot[0], lambda x: x, ng_val))
+        return jnp.squeeze(jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * Ntot[0], lambda x: x, ng_val))
 
     @partial(jax.jit, static_argnums=(0,))
-    def galaxy_bias(self, halo_model, m, z):
+    def galaxy_bias(self, halo_model, z):
         """
         Large-scale galaxy bias at redshift ``z``.
 
-        See Eq. (5) for :math:`b_g(z)`.
+        See Eq. (5) for :math:`b_g(z)`. The mass integral is performed
+        over ``halo_model.m_grid``.
 
         Parameters
         ----------
         halo_model : HaloModel
             The parent halo model instance.
-        m : array-like
-            Halo mass grid in physical :math:`M_{\\odot}`.
         z : array-like
             Redshift grid.
-    
+
         Returns
         -------
         bias : array-like
@@ -248,16 +246,16 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
             Dimensionless, with shape :math:`(N_z,)`, where singleton
             dimensions get squeezed before return.
         """
-        m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
+        m, z = halo_model.m_grid, jnp.atleast_1d(z)
         logm = jnp.log(m)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
         dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses), (len(m), len(z)))
         bh = jnp.reshape(halo_model.halo_bias.bias(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses, 1), (len(m), len(z)))
-        ng = self.ng_bar(halo_model, m, z)
+        ng = self.ng_bar(halo_model, z)
 
         bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)
-        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(m, z)[1] * Ntot[0], lambda x: x, bg_num)
+        bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[1] * Ntot[0], lambda x: x, bg_num)
         return jnp.squeeze(bg_num / ng)
 
     @partial(jax.jit, static_argnums=(0,))
@@ -289,7 +287,7 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
 
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, z))
 
         u_m = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
 
@@ -324,14 +322,14 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
         """
 
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
-       
+
         Ns = self.n_sat(halo_model, m)
         Nc = self.n_cen(halo_model, m)
-        ng = jnp.atleast_1d(self.ng_bar(halo_model, m, z))
+        ng = jnp.atleast_1d(self.ng_bar(halo_model, z))
 
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
-    
+
         u_k = (1 / ng[None, None, :]) * (Nc[None, :, None] + Ns[None, :, None] * u_m)
         return jnp.squeeze(u_k)
         

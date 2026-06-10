@@ -67,12 +67,11 @@ class B16DensityProfile(DensityProfile):
 
     Attributes
     ----------
-    x : jnp.ndarray
+    x_grid : jnp.ndarray
         Dimensionless radial grid :math:`x = r / [(1+z) r_\\Delta]` used to tabulate the profile and define the Hankel transform.
     x_out : float
         Outer truncation radius in units of :math:`r_{200c}`. The profile is set to zero
-        for :math:`x > x_{\\mathrm{out}}`. Stored as a pytree leaf so it is differentiable
-        and does not trigger JIT recompilation when changed.
+        for :math:`x > x_{\\mathrm{out}}`. 
     A_rho0 : float
         Amplitude :math:`A_C` controlling the normalization of the density profile.
     A_alpha : float
@@ -92,14 +91,14 @@ class B16DensityProfile(DensityProfile):
     alpha_z_beta : float
         Redshift-scaling exponent :math:`\\alpha_z^\\beta`.
     """
-    def __init__(self, x=None, x_out=1.0,
+    def __init__(self, x_grid=None, x_out=1.0,
                  A_rho0=4000.0, A_alpha=0.88, A_beta=3.83,
                  alpha_m_rho0=0.29, alpha_m_alpha=-0.03, alpha_m_beta=0.04,
                  alpha_z_rho0=-0.66, alpha_z_alpha=0.19, alpha_z_beta=-0.025,
                 ):
 
-        # Grid initialization (triggers the x.setter)
-        self.x = x if x is not None else jnp.logspace(-4, 1, 256)
+        # Grid initialization (triggers the x_grid.setter)
+        self.x_grid = x_grid if x_grid is not None else jnp.logspace(-4, 1, 256)
         self.x_out = x_out
 
         self.A_rho0, self.A_alpha, self.A_beta = A_rho0, A_alpha, A_beta
@@ -107,13 +106,13 @@ class B16DensityProfile(DensityProfile):
         self.alpha_z_rho0, self.alpha_z_alpha, self.alpha_z_beta = alpha_z_rho0, alpha_z_alpha, alpha_z_beta
 
     @property
-    def x(self):
-        return self._x
+    def x_grid(self):
+        return self._x_grid
 
-    @x.setter
-    def x(self, value):
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
+    @x_grid.setter
+    def x_grid(self, value):
+        self._x_grid = jnp.sort(value)
+        self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
 
     def _tree_flatten(self):
@@ -123,12 +122,12 @@ class B16DensityProfile(DensityProfile):
             self.alpha_z_rho0, self.alpha_z_alpha, self.alpha_z_beta,
             self.x_out,
         )
-        aux_data = (self._x, self._hankel)
+        aux_data = (self._x_grid, self._hankel)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x, hankel = aux_data
+        x_grid, hankel = aux_data
         obj = cls.__new__(cls)
 
         (obj.A_rho0, obj.A_alpha, obj.A_beta,
@@ -136,14 +135,14 @@ class B16DensityProfile(DensityProfile):
          obj.alpha_z_rho0, obj.alpha_z_alpha, obj.alpha_z_beta,
          obj.x_out) = leaves
 
-        obj._x = x
+        obj._x_grid = x_grid
         obj._hankel = hankel
         return obj
 
 
     def update(self, x_out=None, A_rho0=None, A_alpha=None, A_beta=None,
                alpha_m_rho0=None, alpha_m_alpha=None, alpha_m_beta=None,
-               alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None):
+               alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None, x_grid=None):
         """
         Return a new profile instance with updated Battaglia density parameters.
 
@@ -153,6 +152,8 @@ class B16DensityProfile(DensityProfile):
             Replacement truncation radius in units of :math:`r_{200c}`.
         A_rho0, A_alpha, A_beta, alpha_m_rho0, alpha_m_alpha, alpha_m_beta, alpha_z_rho0, alpha_z_alpha, alpha_z_beta : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
+        x_grid : jnp.ndarray, optional
+            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
 
         Returns
         -------
@@ -173,6 +174,10 @@ class B16DensityProfile(DensityProfile):
             alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
             x_out if x_out is not None else self.x_out,
         )
+
+        if x_grid is not None:
+            sorted_grid = jnp.sort(x_grid)
+            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -203,7 +208,7 @@ class B16DensityProfile(DensityProfile):
         -------
         B16DensityProfile
             New profile instance with all nine shape parameters replaced. The radial
-            grid ``x`` and truncation radius ``x_out`` are preserved unchanged.
+            grid ``x_grid`` and truncation radius ``x_out`` are preserved unchanged.
 
         """
         key = model_key.lower()
@@ -310,9 +315,9 @@ class B16DensityProfile(DensityProfile):
 
         prefactor = 4 * jnp.pi * r_delta**3 * (1 + z)[None, :]**3
 
-        r = self.x[:, None, None] * r_delta[None, :, :] * (1.0 + z[None, None, :])
+        r = self.x_grid[:, None, None] * r_delta[None, :, :] * (1.0 + z[None, None, :])
         halo_model_200c = halo_model.update(mass_def=mass_def_200c)
-        k_native, u_k_native = self._u_k_hankel(halo_model_200c, self.x, r, m_200c, z)
+        k_native, u_k_native = self._u_k_hankel(halo_model_200c, self.x_grid, r, m_200c, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
@@ -384,33 +389,30 @@ class _NFWDensityProfile(DensityProfile):
 
     Attributes
     ----------
-    x : jnp.ndarray
+    x_grid : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_s` used to tabulate the profile and define the Hankel transform, with :math:`r_s` expressed in the same units as :math:`r`.
     """
-    def __init__(self, x=None):
-        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(1.0), 256)
-    
+    def __init__(self, x_grid=None):
+        self.x_grid = x_grid if x_grid is not None else jnp.logspace(jnp.log10(1e-4), jnp.log10(1.0), 256)
+
 
     @property
-    def x(self):
-        return self._x
+    def x_grid(self):
+        return self._x_grid
 
-    @x.setter
-    def x(self, value):
-        """
-        Whenever x is modified, immediately rebuild the hankel transform object
-        """
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
+    @x_grid.setter
+    def x_grid(self, value):
+        self._x_grid = jnp.sort(value)
+        self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
     def _tree_flatten(self):
-        return ((), (self._x, self._hankel))
+        return ((), (self._x_grid, self._hankel))
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x, hankel = aux_data
+        x_grid, hankel = aux_data
         obj = cls.__new__(cls)
-        obj._x = x
+        obj._x_grid = x_grid
         obj._hankel = hankel
         return obj
 
@@ -510,8 +512,8 @@ class _NFWDensityProfile(DensityProfile):
 
         prefactor = 4 * jnp.pi * r_s**3 * (1 + z)[None, :]**3
 
-        r = self.x[:, None, None] * r_s[None, :, :] * (1.0 + z[None, None, :])
-        k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        r = self.x_grid[:, None, None] * r_s[None, :, :] * (1.0 + z[None, None, :])
+        k_native, u_k_native = self._u_k_hankel(halo_model, self.x_grid, r, m, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))
@@ -594,7 +596,7 @@ class _BCMDensityProfile(DensityProfile):
 
     Attributes
     ----------
-    x : jnp.ndarray
+    x_grid : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_{\\mathrm{vir}}` used to tabulate the profile and define the Hankel transform, with :math:`r_{\\mathrm{vir}}` expressed in the same units as :math:`r`.
     log10Mc : float
         Characteristic mass scale :math:`\\log_{10} M_c` controlling the gas fraction suppression.
@@ -611,26 +613,26 @@ class _BCMDensityProfile(DensityProfile):
     nu_log10Mc : float
         Redshift exponent :math:`\\nu_{\\log_{10} M_c}` of the characteristic mass scale.
     """
-    def __init__(self, x=None, 
-                 log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2, 
+    def __init__(self, x_grid=None,
+                 log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2,
                  delta = 7.0, gamma = 2.5, mu = 1.0, nu_log10Mc = -0.038,
                 ):
-        
-        # Grid initialization (triggers the x.setter)
-        self.x = x if x is not None else jnp.logspace(-4, 1, 256)
+
+        # Grid initialization (triggers the x_grid.setter)
+        self.x_grid = x_grid if x_grid is not None else jnp.logspace(-4, 1, 256)
 
         self.log10Mc, self.theta_ej, self.eta_star = log10Mc, theta_ej, eta_star
         self.delta, self.gamma, self.mu, self.nu_log10Mc = delta, gamma, mu, nu_log10Mc
         
 
     @property
-    def x(self):
-        return self._x
+    def x_grid(self):
+        return self._x_grid
 
-    @x.setter
-    def x(self, value):
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
+    @x_grid.setter
+    def x_grid(self, value):
+        self._x_grid = jnp.sort(value)
+        self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
 
     def _tree_flatten(self):
@@ -640,25 +642,25 @@ class _BCMDensityProfile(DensityProfile):
             self.delta, self.gamma, self.mu, self.nu_log10Mc
         )
         # Static metadata
-        aux_data = (self._x, self._hankel)
+        aux_data = (self._x_grid, self._hankel)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x, hankel = aux_data
+        x_grid, hankel = aux_data
         obj = cls.__new__(cls)
-        
+
         # Unpack leaves back into attributes
         (obj.log10Mc, obj.theta_ej, obj.eta_star,
          obj.delta, obj.gamma, obj.mu, obj.nu_log10Mc) = leaves
-        
-        obj._x = x
+
+        obj._x_grid = x_grid
         obj._hankel = hankel
         return obj
 
 
-    def update(self, log10Mc=None, theta_ej=None, eta_star=None, 
-               delta=None, gamma=None, mu=None, nu_log10Mc=None):
+    def update(self, log10Mc=None, theta_ej=None, eta_star=None,
+               delta=None, gamma=None, mu=None, nu_log10Mc=None, x_grid=None):
         """
         Return a new profile instance with updated BCM parameters.
 
@@ -666,14 +668,16 @@ class _BCMDensityProfile(DensityProfile):
         ----------
         log10Mc, theta_ej, eta_star, delta, gamma, mu, nu_log10Mc : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
+        x_grid : jnp.ndarray, optional
+            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
 
         Returns
         -------
         BCMDensityProfile
             New profile instance with updated parameters.
         """
-        leaves, treedef = self._tree_flatten()
-        
+        leaves, aux_data = self._tree_flatten()
+
         new_leaves = (
             log10Mc if log10Mc is not None else self.log10Mc,
             theta_ej if theta_ej is not None else self.theta_ej,
@@ -683,8 +687,12 @@ class _BCMDensityProfile(DensityProfile):
             mu if mu is not None else self.mu,
             nu_log10Mc if nu_log10Mc is not None else self.nu_log10Mc,
         )
-        
-        return self._tree_unflatten(treedef, new_leaves)
+
+        if x_grid is not None:
+            sorted_grid = jnp.sort(x_grid)
+            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+
+        return self._tree_unflatten(aux_data, new_leaves)
 
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
@@ -786,8 +794,8 @@ class _BCMDensityProfile(DensityProfile):
 
         prefactor = 4 * jnp.pi * r_vir**3 * (1 + z)[None, :]**3
 
-        r = self.x[:, None, None] * r_vir[None, :, :] * (1.0 + z[None, None, :])
-        k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        r = self.x_grid[:, None, None] * r_vir[None, :, :] * (1.0 + z[None, None, :])
+        k_native, u_k_native = self._u_k_hankel(halo_model, self.x_grid, r, m, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         u_ell_native = u_k_native * jnp.sqrt(jnp.pi / (2 * k_native[:, None, None]))

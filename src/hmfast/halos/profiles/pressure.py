@@ -45,17 +45,17 @@ class PressureProfile(HaloProfile):
         """
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
         r_scale = jnp.reshape(self._fourier_radius_scale(halo_model, m, z), (len(m), len(z)))
-        r = self.x[:, None, None] * r_scale[None, :, :] * (1.0 + z[None, None, :])
-        real_profile = jnp.reshape(self.real(halo_model, r, m, z), (len(self.x), len(m), len(z)))
+        r = self.x_grid[:, None, None] * r_scale[None, :, :] * (1.0 + z[None, None, :])
+        real_profile = jnp.reshape(self.real(halo_model, r, m, z), (len(self.x_grid), len(m), len(z)))
 
-        k_native, u_k_native = self._u_k_hankel(halo_model, self.x, r, m, z)
+        k_native, u_k_native = self._u_k_hankel(halo_model, self.x_grid, r, m, z)
         u_k_native = jnp.reshape(u_k_native, (len(k_native), len(m), len(z)))
 
         q_native = jnp.broadcast_to(k_native[:, None, None], (len(k_native), len(m), len(z)))
         q_target = k[:, None, None] * r_scale[None, :, :] * (1.0 + z[None, None, :])
         prefactor = 4.0 * jnp.pi * r_scale**3 * (1.0 + z)[None, :]**3
         u_k_val = prefactor[None, :, :] * u_k_native * jnp.sqrt(jnp.pi / (2.0 * q_native))
-        u_k_zero = prefactor * jnp.trapezoid(self.x[:, None, None]**2 * real_profile, x=self.x, axis=0)
+        u_k_zero = prefactor * jnp.trapezoid(self.x_grid[:, None, None]**2 * real_profile, x=self.x_grid, axis=0)
 
         q_native = jnp.concatenate([jnp.zeros((1, len(m), len(z))), q_native], axis=0)
         u_k_val = jnp.concatenate([u_k_zero[None, :, :], u_k_val], axis=0)
@@ -124,7 +124,7 @@ class GNFWPressureProfile(PressureProfile):
 
     Attributes
     ----------
-    x : jnp.ndarray
+    x_grid : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
     P0 : float
         Dimensionless gNFW normalization :math:`P_0`.
@@ -144,7 +144,7 @@ class GNFWPressureProfile(PressureProfile):
         Exponent controlling the :math:`h_{70}` scaling of the normalization. Set to ``-1`` for SZ-calibrated profiles and ``-3/2`` for X-ray-calibrated profiles.
     """
     
-    def __init__(self, x=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0, x_out=jnp.inf):
+    def __init__(self, x_grid=None, P0=8.130, c500=1.156, alpha=1.0620, beta=5.4807, gamma=0.3292, B=1.4, alpha_P=0.12, P0_hexp=-1.0, x_out=jnp.inf):
 
         self.P0 = P0
         self.c500 = c500
@@ -156,40 +156,37 @@ class GNFWPressureProfile(PressureProfile):
         self.P0_hexp = P0_hexp
         self.x_out = x_out
 
-        self.x = x if x is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256) 
+        self.x_grid = x_grid if x_grid is not None else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256)
 
 
     @property
-    def x(self):
-       return self._x
+    def x_grid(self):
+        return self._x_grid
 
-    @x.setter
-    def x(self, value):
-        """
-        Whenever x is modified, immediately rebuild the hankel transform object
-        """
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
+    @x_grid.setter
+    def x_grid(self, value):
+        self._x_grid = jnp.sort(value)
+        self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
 
     def _tree_flatten(self):
         # The dynamic parameters JAX should track
         leaves = (self.P0, self.c500, self.alpha, self.beta, self.gamma, self.B, self.alpha_P, self.P0_hexp, self.x_out)
         # Static metadata: the grid and the Hankel object
-        aux_data = (self._x, self._hankel)
+        aux_data = (self._x_grid, self._hankel)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x, hankel = aux_data
+        x_grid, hankel = aux_data
         # Create object without calling __init__ to avoid rebuilding Hankel
         obj = cls.__new__(cls)
         obj.P0, obj.c500, obj.alpha, obj.beta, obj.gamma, obj.B, obj.alpha_P, obj.P0_hexp, obj.x_out = leaves
-        obj._x = x
+        obj._x_grid = x_grid
         obj._hankel = hankel
         return obj
 
-    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None, x_out=None):
+    def update(self, P0=None, c500=None, alpha=None, beta=None, gamma=None, B=None, alpha_P=None, P0_hexp=None, x_out=None, x_grid=None):
         """
         Return a new profile instance with updated GNFW pressure profile parameters. Any argument left as ``None`` keeps its current value.
 
@@ -204,13 +201,15 @@ class GNFWPressureProfile(PressureProfile):
         alpha_P : float, optional
         P0_hexp : float, optional
         x_out : float, optional
+        x_grid : jnp.ndarray, optional
+            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
 
         Returns
         -------
         GNFWPressureProfile
             New profile instance with updated parameters.
         """
-        leaves, treedef = self._tree_flatten()
+        leaves, aux_data = self._tree_flatten()
 
         new_leaves = (
             P0 if P0 is not None else self.P0,
@@ -224,7 +223,11 @@ class GNFWPressureProfile(PressureProfile):
             x_out if x_out is not None else self.x_out,
         )
 
-        return self._tree_unflatten(treedef, new_leaves)
+        if x_grid is not None:
+            sorted_grid = jnp.sort(x_grid)
+            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+
+        return self._tree_unflatten(aux_data, new_leaves)
 
     def _fourier_radius_scale(self, halo_model, m, z):
         m = jnp.atleast_1d(m)
@@ -344,7 +347,7 @@ class B12PressureProfile(PressureProfile):
 
     Attributes
     ----------
-    x : jnp.ndarray
+    x_grid : jnp.ndarray
         Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
     A_P0 : float
         Amplitude :math:`A_{P_0}` of the pressure normalization scaling.
@@ -365,11 +368,11 @@ class B12PressureProfile(PressureProfile):
     alpha_z_beta : float
         Redshift-scaling exponent :math:`\\alpha_z^\\beta`.
     """
-    def __init__(self, x=None, 
+    def __init__(self, x_grid=None,
                  A_P0=18.1, A_xc=0.497, A_beta=4.35,
                  alpha_m_P0=0.154, alpha_m_xc=-0.00865, alpha_m_beta=0.0393,
                  alpha_z_P0=-0.758, alpha_z_xc=0.731, alpha_z_beta=0.415, x_out=jnp.inf):
-        
+
         # Physics Parameters (The Leaves)
         self.A_P0, self.A_xc, self.A_beta = A_P0, A_xc, A_beta
         self.alpha_m_P0, self.alpha_m_xc, self.alpha_m_beta = alpha_m_P0, alpha_m_xc, alpha_m_beta
@@ -377,16 +380,16 @@ class B12PressureProfile(PressureProfile):
         self.x_out = x_out
 
         # Grid initialization
-        self.x = x if x is not None else jnp.logspace(-4, 1, 256)
+        self.x_grid = x_grid if x_grid is not None else jnp.logspace(-4, 1, 256)
 
     @property
-    def x(self):
-        return self._x
+    def x_grid(self):
+        return self._x_grid
 
-    @x.setter
-    def x(self, value):
-        self._x = value
-        self._hankel = HankelTransform(self._x, nu=0.5)
+    @x_grid.setter
+    def x_grid(self, value):
+        self._x_grid = jnp.sort(value)
+        self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
     def _tree_flatten(self):
         leaves = (
@@ -395,12 +398,12 @@ class B12PressureProfile(PressureProfile):
             self.alpha_z_P0, self.alpha_z_xc, self.alpha_z_beta,
             self.x_out,
         )
-        aux_data = (self._x, self._hankel)
+        aux_data = (self._x_grid, self._hankel)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x, hankel = aux_data
+        x_grid, hankel = aux_data
         obj = cls.__new__(cls)
 
         (obj.A_P0, obj.A_xc, obj.A_beta,
@@ -408,28 +411,30 @@ class B12PressureProfile(PressureProfile):
          obj.alpha_z_P0, obj.alpha_z_xc, obj.alpha_z_beta,
          obj.x_out) = leaves
 
-        obj._x = x
+        obj._x_grid = x_grid
         obj._hankel = hankel
         return obj
 
     def update(self, A_P0=None, A_xc=None, A_beta=None,
                alpha_m_P0=None, alpha_m_xc=None, alpha_m_beta=None,
-               alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None, x_out=None):
+               alpha_z_P0=None, alpha_z_xc=None, alpha_z_beta=None, x_out=None, x_grid=None):
         """
         Return a new profile instance with updated B12 parameters.
-    
+
         Parameters
         ----------
         A_P0, A_xc, A_beta, alpha_m_P0, alpha_m_xc, alpha_m_beta, alpha_z_P0, alpha_z_xc, alpha_z_beta, x_out : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
-    
+        x_grid : jnp.ndarray, optional
+            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
+
         Returns
         -------
         B12PressureProfile
             New profile instance with updated parameters.
         """
-        leaves, treedef = self._tree_flatten()
-        
+        leaves, aux_data = self._tree_flatten()
+
         new_leaves = (
             A_P0 if A_P0 is not None else self.A_P0,
             A_xc if A_xc is not None else self.A_xc,
@@ -442,8 +447,12 @@ class B12PressureProfile(PressureProfile):
             alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
             x_out if x_out is not None else self.x_out,
         )
-        
-        return self._tree_unflatten(treedef, new_leaves)
+
+        if x_grid is not None:
+            sorted_grid = jnp.sort(x_grid)
+            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+
+        return self._tree_unflatten(aux_data, new_leaves)
 
     _PRESETS = {
         "agn": dict(
@@ -467,7 +476,7 @@ class B12PressureProfile(PressureProfile):
         -------
         B12PressureProfile
             New profile instance with all nine shape parameters replaced. The radial
-            grid ``x`` and truncation radius ``x_out`` are preserved unchanged.
+            grid ``x_grid`` and truncation radius ``x_out`` are preserved unchanged.
 
         """
         key = model_key.lower()

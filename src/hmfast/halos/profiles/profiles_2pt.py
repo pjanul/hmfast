@@ -11,8 +11,8 @@ def _fourier_2pt_hod(halo_model, profile1, profile2, k, m, z):
 
     ns1 = jnp.atleast_1d(profile1.n_sat(halo_model, m))
     ns2 = jnp.atleast_1d(profile2.n_sat(halo_model, m))
-    ng1 = jnp.atleast_1d(profile1.ng_bar(halo_model, m, z))
-    ng2 = jnp.atleast_1d(profile2.ng_bar(halo_model, m, z))
+    ng1 = jnp.atleast_1d(profile1.ng_bar(halo_model, z))
+    ng2 = jnp.atleast_1d(profile2.ng_bar(halo_model, z))
 
     _, u1 = profile1._u_k_nfw(halo_model, k, m, z)
     _, u2 = profile2._u_k_nfw(halo_model, k, m, z)

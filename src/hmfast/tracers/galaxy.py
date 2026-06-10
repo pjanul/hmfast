@@ -76,7 +76,7 @@ class GalaxyTracer(Tracer):
         """
         flat, aux = self._tree_flatten()
         new_profile = profile if profile is not None else flat[0]
-        new_dndz = dndz if dndz is not None else flat[1]
+        new_dndz = self._normalize_dndz(dndz) if dndz is not None else flat[1]
         return self._tree_unflatten(aux, (new_profile, new_dndz))
 
 

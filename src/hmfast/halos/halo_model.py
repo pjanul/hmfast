@@ -49,7 +49,6 @@ class HaloModel:
     def __init__(self, 
                  cosmology=Cosmology(emulator_set="lcdm:v1"), 
                  mass_def=MassDefinition(delta=200, reference="critical"),
-                 mass_definition=None,
                  halo_mass_function=T08HaloMassFunction(),
                  halo_bias=T10HaloBias(),
                  subhalo_mass_function=TW10SubHaloMassFunction(),
@@ -70,11 +69,7 @@ class HaloModel:
         self.subhalo_mass_function = subhalo_mass_function
         self.concentration = concentration
 
-        # Backwards-compatibility: accept legacy `mass_definition` kwarg
-        if mass_definition is not None:
-            self.mass_def = mass_definition
-        else:
-            self.mass_def = mass_def
+        self.mass_def = mass_def
         self.hm_consistency = hm_consistency
         self.convert_masses = convert_masses
 
@@ -98,7 +93,7 @@ class HaloModel:
          obj.convert_masses) = aux_data
         return obj
 
-    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None, mass_definition=None,
+    def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None, 
                hm_consistency=None, convert_masses=None):
         """
         Return a new HaloModel instance with updated components.
@@ -128,11 +123,7 @@ class HaloModel:
         new_halo_bias = halo_bias if halo_bias is not None else halo_bias0
         new_subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else subhalo_mass_function0
         new_concentration = concentration if concentration is not None else concentration0
-        # Support legacy `mass_definition` kwarg
-        if mass_definition is not None:
-            new_mass_def = mass_definition
-        else:
-            new_mass_def = mass_def if mass_def is not None else mass_def0
+        new_mass_def = mass_def if mass_def is not None else mass_def0
         new_hm_consistency = hm_consistency if hm_consistency is not None else hm_consistency0
         new_convert_masses = convert_masses if convert_masses is not None else convert_masses0
     
@@ -308,14 +299,15 @@ class HaloModel:
             pk = self.pk_1h(tracer1.profile, tracer2.profile, k=ki, m=m, z=jnp.atleast_1d(zi), k_damp=k_damp)
             return pk.flatten()
 
-        # Get the halo model pk_1h, the kernel, and the comoving volume
+        # Get the halo model pk_1h, the kernels, and the Limber weight c/(H chi^2)
         P_1h_grid = jax.vmap(get_pk_slice)(z)
-        kernel1 = tracer1.kernel(self.cosmology, z)  
-        kernel2 = tracer2.kernel(self.cosmology, z)  
-        comov_vol = self.cosmology.comoving_volume_element(z)
+        kernel1 = tracer1.kernel(self.cosmology, z)
+        kernel2 = tracer2.kernel(self.cosmology, z)
+        chi = self.cosmology.angular_diameter_distance(z) * (1.0 + z)
+        limber_weight = self.cosmology.comoving_volume_element(z) / chi**4
 
-        # Integrate over redshift
-        integrand = P_1h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
+        # Limber integral: C_ell = int dz (c/H chi^2) W1 W2 P
+        integrand = P_1h_grid * (limber_weight[:, None] * kernel1[:, None] * kernel2[:, None])
         
         return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
     
@@ -448,14 +440,14 @@ class HaloModel:
         # Map over redshift to get P(k=l/chi, z)
         P_2h_grid = jax.vmap(get_pk_slice)(z) 
         
-        # Get individual kernels
+        # Get individual kernels and the Limber weight c/(H chi^2)
         kernel1 = tracer1.kernel(self.cosmology, z)
         kernel2 = tracer2.kernel(self.cosmology, z)
-        
-        comov_vol = self.cosmology.comoving_volume_element(z)
-    
-        # Limber Integral: C_l = int dz P(k,z) * [W1 * W2 * dV/dz]
-        integrand = P_2h_grid * (comov_vol[:, None] * kernel1[:, None] * kernel2[:, None])
+        chi = self.cosmology.angular_diameter_distance(z) * (1.0 + z)
+        limber_weight = self.cosmology.comoving_volume_element(z) / chi**4
+
+        # Limber integral: C_ell = int dz (c/H chi^2) W1 W2 P
+        integrand = P_2h_grid * (limber_weight[:, None] * kernel1[:, None] * kernel2[:, None])
         
         return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
 

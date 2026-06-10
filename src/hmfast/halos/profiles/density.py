@@ -69,6 +69,10 @@ class B16DensityProfile(DensityProfile):
     ----------
     x : jnp.ndarray
         Dimensionless radial grid :math:`x = r / [(1+z) r_\\Delta]` used to tabulate the profile and define the Hankel transform.
+    x_out : float
+        Outer truncation radius in units of :math:`r_{200c}`. The profile is set to zero
+        for :math:`x > x_{\\mathrm{out}}`. Stored as a pytree leaf so it is differentiable
+        and does not trigger JIT recompilation when changed.
     A_rho0 : float
         Amplitude :math:`A_C` controlling the normalization of the density profile.
     A_alpha : float
@@ -88,14 +92,15 @@ class B16DensityProfile(DensityProfile):
     alpha_z_beta : float
         Redshift-scaling exponent :math:`\\alpha_z^\\beta`.
     """
-    def __init__(self, x=None, 
+    def __init__(self, x=None, x_out=1.0,
                  A_rho0=4000.0, A_alpha=0.88, A_beta=3.83,
                  alpha_m_rho0=0.29, alpha_m_alpha=-0.03, alpha_m_beta=0.04,
                  alpha_z_rho0=-0.66, alpha_z_alpha=0.19, alpha_z_beta=-0.025,
                 ):
-        
+
         # Grid initialization (triggers the x.setter)
         self.x = x if x is not None else jnp.logspace(-4, 1, 256)
+        self.x_out = x_out
 
         self.A_rho0, self.A_alpha, self.A_beta = A_rho0, A_alpha, A_beta
         self.alpha_m_rho0, self.alpha_m_alpha, self.alpha_m_beta = alpha_m_rho0, alpha_m_alpha, alpha_m_beta
@@ -112,13 +117,12 @@ class B16DensityProfile(DensityProfile):
 
 
     def _tree_flatten(self):
-        # Dynamic calibration parameters
         leaves = (
             self.A_rho0, self.A_alpha, self.A_beta,
             self.alpha_m_rho0, self.alpha_m_alpha, self.alpha_m_beta,
-            self.alpha_z_rho0, self.alpha_z_alpha, self.alpha_z_beta
+            self.alpha_z_rho0, self.alpha_z_alpha, self.alpha_z_beta,
+            self.x_out,
         )
-        # Static metadata
         aux_data = (self._x, self._hankel)
         return (leaves, aux_data)
 
@@ -126,25 +130,27 @@ class B16DensityProfile(DensityProfile):
     def _tree_unflatten(cls, aux_data, leaves):
         x, hankel = aux_data
         obj = cls.__new__(cls)
-        
-        # Unpack leaves back into attributes
+
         (obj.A_rho0, obj.A_alpha, obj.A_beta,
          obj.alpha_m_rho0, obj.alpha_m_alpha, obj.alpha_m_beta,
-         obj.alpha_z_rho0, obj.alpha_z_alpha, obj.alpha_z_beta) = leaves
-        
+         obj.alpha_z_rho0, obj.alpha_z_alpha, obj.alpha_z_beta,
+         obj.x_out) = leaves
+
         obj._x = x
         obj._hankel = hankel
         return obj
 
 
-    def update(self, A_rho0=None, A_alpha=None, A_beta=None,
+    def update(self, x_out=None, A_rho0=None, A_alpha=None, A_beta=None,
                alpha_m_rho0=None, alpha_m_alpha=None, alpha_m_beta=None,
                alpha_z_rho0=None, alpha_z_alpha=None, alpha_z_beta=None):
         """
-        Return a new profile instance with updated Battaglia density parameters. 
+        Return a new profile instance with updated Battaglia density parameters.
 
         Parameters
         ----------
+        x_out : float, optional
+            Replacement truncation radius in units of :math:`r_{200c}`.
         A_rho0, A_alpha, A_beta, alpha_m_rho0, alpha_m_alpha, alpha_m_beta, alpha_z_rho0, alpha_z_alpha, alpha_z_beta : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
@@ -153,8 +159,8 @@ class B16DensityProfile(DensityProfile):
         B16DensityProfile
             New profile instance with updated parameters.
         """
-        leaves, treedef = self._tree_flatten()
-        
+        _, aux_data = self._tree_flatten()
+
         new_leaves = (
             A_rho0 if A_rho0 is not None else self.A_rho0,
             A_alpha if A_alpha is not None else self.A_alpha,
@@ -165,29 +171,48 @@ class B16DensityProfile(DensityProfile):
             alpha_z_rho0 if alpha_z_rho0 is not None else self.alpha_z_rho0,
             alpha_z_alpha if alpha_z_alpha is not None else self.alpha_z_alpha,
             alpha_z_beta if alpha_z_beta is not None else self.alpha_z_beta,
+            x_out if x_out is not None else self.x_out,
         )
-        
-        return self._tree_unflatten(treedef, new_leaves)
 
-    @staticmethod
-    def get_params(model_key="agn"):
-        """Static helper to grab Table 2 values."""
-        presets = {
-            "agn": {
-                'A_rho0': 4000.0, 'A_alpha': 0.88, 'A_beta': 3.83,
-                'alpha_m_rho0': 0.29, 'alpha_m_alpha': -0.03, 'alpha_m_beta': 0.04,
-                'alpha_z_rho0': -0.66, 'alpha_z_alpha': 0.19, 'alpha_z_beta': -0.025
-            },
-            "shock": {
-                'A_rho0': 1.9e4, 'A_alpha': 0.70, 'A_beta': 4.43,
-                'alpha_m_rho0': 0.09, 'alpha_m_alpha': -0.017, 'alpha_m_beta': 0.005,
-                'alpha_z_rho0': -0.95, 'alpha_z_alpha': 0.27, 'alpha_z_beta': 0.037
-            }
-        }
+        return self._tree_unflatten(aux_data, new_leaves)
+
+    _PRESETS = {
+        "agn": dict(
+            A_rho0=4000.0, A_alpha=0.88, A_beta=3.83,
+            alpha_m_rho0=0.29, alpha_m_alpha=-0.03, alpha_m_beta=0.04,
+            alpha_z_rho0=-0.66, alpha_z_alpha=0.19, alpha_z_beta=-0.025,
+        ),
+        "shock": dict(
+            A_rho0=1.9e4, A_alpha=0.70, A_beta=4.43,
+            alpha_m_rho0=0.09, alpha_m_alpha=-0.017, alpha_m_beta=0.005,
+            alpha_z_rho0=-0.95, alpha_z_alpha=0.27, alpha_z_beta=0.037,
+        ),
+    }
+
+    def calibrate(self, model_key):
+        """
+        Return a new profile with shape parameters set to a named Battaglia et al. (2016) calibration.
+        This acts as a wrapper around :meth:`update` that allows setting all nine shape parameters at once based on the calibration name.
+
+        Parameters
+        ----------
+        model_key : str
+            Case-insensitive calibration name.  Supported values: ``'agn'``, ``'shock'``.
+
+        Returns
+        -------
+        B16DensityProfile
+            New profile instance with all nine shape parameters replaced. The radial
+            grid ``x`` and truncation radius ``x_out`` are preserved unchanged.
+
+        """
         key = model_key.lower()
-        if key not in presets:
-            raise ValueError(f"Model {model_key} not recognized. Choose 'agn' or 'shock'.")
-        return presets[key]
+        if key not in self._PRESETS:
+            raise ValueError(
+                f"Unknown calibration '{model_key}'. Choose from: {list(self._PRESETS)}."
+            )
+        return self.update(**self._PRESETS[key])
+
 
     @partial(jax.jit, static_argnums=(0,))
     def real(self, halo_model, r, m, z):
@@ -218,7 +243,7 @@ class B16DensityProfile(DensityProfile):
 
         gamma = -0.2
         xc = 0.5
-        
+
         # Ensure 1D and setup broadcasting shapes
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m),  jnp.atleast_1d(z)
         r_b, m_b, z_b = r[:, None, None], m[None, :, None], z[None, None, :]
@@ -226,29 +251,27 @@ class B16DensityProfile(DensityProfile):
         mass_def_200c = MassDefinition(200, "critical")
         m_200c = jnp.reshape(mass_translator(halo_model.mass_def, mass_def_200c, halo_model.concentration)(halo_model.cosmology, m, z), (len(m), len(z)))
         r_200c = jnp.reshape(mass_def_200c.r_delta(halo_model.cosmology, m_200c, z), (len(m), len(z)))
-        
+
         x_200c = r_b / ((1.0 + z_b) * r_200c[None, :, :])
-        
+
         # Critical density broadcast to (1, 1, Nz) in physical units.
         rho_crit_z = jnp.atleast_1d(halo_model.cosmology.critical_density(z))[None, None, :]
-        
+
         # Mass scaling logic
         m_200c_msun = m_200c[None, :, :]
-        mass_ratio = m_200c_msun / 1e14 
-       
+        mass_ratio = m_200c_msun / 1e14
+
         # Compute Shape Parameters (Equations A1, A2 from B16)
-        rho0 = self.A_rho0 * mass_ratio**self.alpha_m_rho0 * (1 + z_b)**self.alpha_z_rho0 
-        alpha = self.A_alpha * mass_ratio**self.alpha_m_alpha * (1 + z_b)**self.alpha_z_alpha 
-        beta = self.A_beta * mass_ratio**self.alpha_m_beta * (1 + z_b)**self.alpha_z_beta 
-        
+        rho0 = self.A_rho0 * mass_ratio**self.alpha_m_rho0 * (1 + z_b)**self.alpha_z_rho0
+        alpha = self.A_alpha * mass_ratio**self.alpha_m_alpha * (1 + z_b)**self.alpha_z_alpha
+        beta = self.A_beta * mass_ratio**self.alpha_m_beta * (1 + z_b)**self.alpha_z_beta
+
         # Profile Shape Function (Nx, Nm, Nz)
         p_x = (x_200c / xc)**gamma * (1 + (x_200c / xc)**alpha)**(-(beta + gamma) / alpha)
-        
-        # Truncate at r_200c so the real-space and Fourier-space profiles
-        # describe the same finite halo.
+
         rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x
-        rho_gas = jnp.where(x_200c <= 1.0, rho_gas, 0.0)
-        
+        rho_gas = jnp.where(x_200c <= self.x_out, rho_gas, 0.0)
+
         return jnp.squeeze(rho_gas)
 
 

@@ -67,13 +67,13 @@ class tSZTracer(Tracer):
         Compute the tSZ kernel as a function of redshift.
     
         The kernel is given by:
-    
+
             .. math::
-    
-               W_{\\mathrm{tSZ}}(z) = \\frac{\\sigma_T}{m_e c^2} \\frac{1}{1+z}
-    
-        where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_e` is
-        the electron mass, and :math:`z` is the redshift.
+
+               W_{\\mathrm{tSZ}}(\\chi) = \\frac{\\sigma_T}{m_e c^2} \\frac{1}{1+z}
+
+        where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_e c^2` is
+        the electron rest-mass energy, and :math:`z` is the redshift.
     
         Parameters
         ----------
@@ -92,8 +92,7 @@ class tSZTracer(Tracer):
 
         m_e = Const._m_e_ * Const._c_**2 / Const._eV_
         sigma_T = Const._sigma_T_ * 1e6
-        chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
-        return (sigma_T / m_e) * Const._Mpc_over_m_ / (chi**2 * (1.0 + z))
+        return (sigma_T / m_e) * Const._Mpc_over_m_ / (1.0 + z)
 
 
 

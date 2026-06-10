@@ -82,14 +82,14 @@ class GalaxyTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the galaxy kernel :math:`W_g(z)` at redshift :math:`z`.
-    
+        Compute the galaxy kernel :math:`W_g(\\chi)` at redshift :math:`z`.
+
         The kernel is given by:
-    
+
         .. math::
-    
-            W_g(z) = \\frac{H(z)}{c\\,\\chi^2(z)} \\frac{dN}{dz}
-    
+
+            W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}
+
         where :math:`dN/dz` is the normalized redshift distribution of galaxies.
     
         Parameters
@@ -110,9 +110,8 @@ class GalaxyTracer(Tracer):
     
         phi_prime_g_at_z = jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
         H_grid = cosmology.hubble_parameter(z) / (Const._c_ / 1e3)
-        chi_grid = cosmology.angular_diameter_distance(z) * (1.0 + z)
 
-        return H_grid * (phi_prime_g_at_z / chi_grid**2)
+        return H_grid * phi_prime_g_at_z
 
 
 

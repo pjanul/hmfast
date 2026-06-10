@@ -445,6 +445,38 @@ class B12PressureProfile(PressureProfile):
         
         return self._tree_unflatten(treedef, new_leaves)
 
+    _PRESETS = {
+        "agn": dict(
+            A_P0=18.1, A_xc=0.497, A_beta=4.35,
+            alpha_m_P0=0.154, alpha_m_xc=-0.00865, alpha_m_beta=0.0393,
+            alpha_z_P0=-0.758, alpha_z_xc=0.731, alpha_z_beta=0.415,
+        ),
+    }
+
+    def calibrate(self, model_key):
+        """
+        Return a new profile with shape parameters set to a named Battaglia et al. (2012) calibration.
+        This acts as a wrapper around :meth:`update` that allows setting all nine shape parameters at once based on the calibration name.
+
+        Parameters
+        ----------
+        model_key : str
+            Case-insensitive calibration name.  Supported values: ``'agn'``.
+
+        Returns
+        -------
+        B12PressureProfile
+            New profile instance with all nine shape parameters replaced. The radial
+            grid ``x`` and truncation radius ``x_out`` are preserved unchanged.
+
+        """
+        key = model_key.lower()
+        if key not in self._PRESETS:
+            raise ValueError(
+                f"Unknown calibration '{model_key}'. Choose from: {list(self._PRESETS)}."
+            )
+        return self.update(**self._PRESETS[key])
+
     def _fourier_radius_scale(self, halo_model, m, z):
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)

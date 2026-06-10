@@ -68,15 +68,14 @@ class kSZTracer(Tracer):
 
         .. math::
 
-            W_{\\mathrm{kSZ}}(z) = \\frac{\\sigma_T}{m_p}
-            \\frac{v_{\\mathrm{rms}}(z)}{\\mu_e \\, \\chi^2(z) \\, (1+z)}
+            W_{\\mathrm{kSZ}}(\\chi) = \\frac{\\sigma_T}{m_p}
+            \\frac{v_{\\mathrm{rms}}(z)}{\\mu_e \\, (1+z)}
 
         where :math:`\\sigma_T` is the Thomson cross-section, :math:`m_p` is
-        the proton mass, :math:`\\mu_e = 1.14`, :math:`\\chi(z)` is the comoving
-        distance, and :math:`z` is the redshift. In the implementation,
-        :math:`\\sigma_T` is stored in m\\ :sup:`2`, :math:`m_p` is stored in kg,
-        and the kernel prefactor is converted to physical
-        :math:`\\mathrm{Mpc}^2 \\, M_\\odot^{-1}`.
+        the proton mass, :math:`\\mu_e = 1.14`, and :math:`z` is the redshift.
+        In the implementation, :math:`\\sigma_T` is stored in m\\ :sup:`2`,
+        :math:`m_p` is stored in kg, and the kernel prefactor is converted to
+        physical :math:`\\mathrm{Mpc}^2 \\, M_\\odot^{-1}`.
 
         Parameters
         ----------
@@ -93,10 +92,9 @@ class kSZTracer(Tracer):
         # sigmaT / m_prot in physical Mpc^2 / Msun.
         sigma_T_over_m_p = (Const._sigma_T_ / Const._m_p_) / Const._Mpc_over_m_**2 * Const._M_sun_
         z = jnp.atleast_1d(z)
-        chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
         velocity_dispersion = jnp.sqrt(cosmology.velocity_dispersion(z))
         mu_e = 1.14
-        return sigma_T_over_m_p * velocity_dispersion / (mu_e * chi**2 * (1.0 + z))
+        return sigma_T_over_m_p * velocity_dispersion / (mu_e * (1.0 + z))
 
 
 

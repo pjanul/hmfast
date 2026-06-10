@@ -57,9 +57,29 @@ class CIBTracer(Tracer):
         return self._tree_unflatten(aux, flat)
     
     def kernel(self, cosmology, z):
-        chi = cosmology.angular_diameter_distance(z) * (1 + z)
+        """
+        Compute the CIB kernel :math:`W_{\\mathrm{CIB}}(\\chi)` at redshift :math:`z`.
 
-        return 1.0 / ((1.0 + z) * chi**2)
+        The kernel is given by:
+
+        .. math::
+
+            W_{\\mathrm{CIB}}(\\chi) = \\frac{1}{1+z}
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to compute the kernel.
+
+        Returns
+        -------
+        W_cib : array_like
+            CIB kernel evaluated at redshift(s) :math:`z`.
+        """
+        z = jnp.atleast_1d(z)
+        return 1.0 / (1.0 + z)
 
 
 jax.tree_util.register_pytree_node(

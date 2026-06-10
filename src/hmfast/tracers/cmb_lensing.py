@@ -61,15 +61,15 @@ class CMBLensingTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Compute the CMB lensing kernel :math:`W_{\\kappa,\\mathrm{cmb}}(z)` at
+        Compute the CMB lensing kernel :math:`W_{\\kappa_{\\mathrm{CMB}}}(\\chi)` at
         redshift :math:`z`.
-    
+
         The kernel is given by:
-    
+
             .. math::
-    
-                W_{\\kappa_{\\mathrm{CMB}}}(z) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\frac{(1+z)}{\\chi(z)} \\frac{\\chi_* - \\chi(z)}{\\chi_*}
-    
+
+                W_{\\kappa_{\\mathrm{CMB}}}(\\chi) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,\\frac{\\chi_* - \\chi(z)}{\\chi_*}
+
         where :math:`\\chi_*` is the comoving distance to the last scattering
         surface.
     
@@ -102,12 +102,12 @@ class CMBLensingTracer(Tracer):
         chi_z_cmb = cosmology.derived_parameters()["chi_star"]
         
         # Compute the CMB lensing kernel
-        W_kappa_cmb =  (
-            (3.0 / 2.0) * Omega_m * 
+        W_kappa_cmb = (
+            (3.0 / 2.0) * Omega_m *
             (H0/c_km_s)**2 *
-            (1 + z) / chi_z  *
+            chi_z * (1 + z) *
             ((chi_z_cmb - chi_z) / chi_z_cmb)
-        )    
+        )
 
        
         return W_kappa_cmb 

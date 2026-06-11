@@ -274,10 +274,11 @@ class B16DensityProfile(DensityProfile):
         # Profile Shape Function (Nx, Nm, Nz)
         p_x = (x_200c / xc)**gamma * (1 + (x_200c / xc)**alpha)**(-(beta + gamma) / alpha)
 
+        mu_e = 1.14
         rho_gas = rho0 * rho_crit_z * f_b * f_free * p_x
         rho_gas = jnp.where(x_200c <= self.x_out, rho_gas, 0.0)
 
-        return jnp.squeeze(rho_gas)
+        return jnp.squeeze(rho_gas / mu_e)
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -352,7 +353,7 @@ class _NFWDensityProfile(DensityProfile):
 
     .. math::
 
-        \\rho_e(r, M, z) = f_b \\, f_{\\mathrm{free}} \\, \\rho_{\\mathrm{NFW}}(r)
+        \\rho_e(r, M, z) = \\frac{f_b \\, f_{\\mathrm{free}}}{\\mu_e} \\, \\rho_{\\mathrm{NFW}}(r)
         \\tag{1}
 
     where
@@ -384,8 +385,7 @@ class _NFWDensityProfile(DensityProfile):
         \\tag{4}
 
     where :math:`x = r / r_s`, :math:`r_s` has the same units as
-    :math:`r`, and :math:`f_{\\mathrm{free}} = 1`. Any kSZ-specific weighting
-    is applied by the tracer kernel rather than by this profile.
+    :math:`r`, and :math:`f_{\\mathrm{free}} = 1`.
 
     Attributes
     ----------
@@ -462,12 +462,13 @@ class _NFWDensityProfile(DensityProfile):
         m_nfw = jnp.log(1 + c_delta) - c_delta / (1 + c_delta) # (Nm, Nz)
         rho_s = m_internal[:, None] / (4 * jnp.pi * r_s**3 * m_nfw)    # (Nm, Nz)
         
+        mu_e = 1.14
         # Truncate at r_delta so the real-space and Fourier-space profiles
         # use the same finite-mass NFW definition.
         rho_gas = f_b * rho_s[None, :, :] / (x_s * (1 + x_s)**2)
         rho_gas = jnp.where(x_s <= c_delta[None, :, :], rho_gas, 0.0)
-        
-        return jnp.squeeze(rho_gas)
+
+        return jnp.squeeze(rho_gas / mu_e)
         
 
     @partial(jax.jit, static_argnums=(0,))
@@ -614,8 +615,8 @@ class _BCMDensityProfile(DensityProfile):
         Redshift exponent :math:`\\nu_{\\log_{10} M_c}` of the characteristic mass scale.
     """
     def __init__(self, x_grid=None,
-                 log10Mc=13.25, theta_ej = 4.711, eta_star = 0.2,
-                 delta = 7.0, gamma = 2.5, mu = 1.0, nu_log10Mc = -0.038,
+                 log10Mc=13.25, theta_ej=4.711, eta_star=0.2,
+                 delta=7.0, gamma=2.5, mu=1.0, nu_log10Mc=-0.038,
                 ):
 
         # Grid initialization (triggers the x_grid.setter)
@@ -636,12 +637,10 @@ class _BCMDensityProfile(DensityProfile):
 
 
     def _tree_flatten(self):
-        # Dynamic calibration parameters
         leaves = (
             self.log10Mc, self.theta_ej, self.eta_star,
-            self.delta, self.gamma, self.mu, self.nu_log10Mc
+            self.delta, self.gamma, self.mu, self.nu_log10Mc,
         )
-        # Static metadata
         aux_data = (self._x_grid, self._hankel)
         return (leaves, aux_data)
 
@@ -650,7 +649,6 @@ class _BCMDensityProfile(DensityProfile):
         x_grid, hankel = aux_data
         obj = cls.__new__(cls)
 
-        # Unpack leaves back into attributes
         (obj.log10Mc, obj.theta_ej, obj.eta_star,
          obj.delta, obj.gamma, obj.mu, obj.nu_log10Mc) = leaves
 
@@ -751,7 +749,8 @@ class _BCMDensityProfile(DensityProfile):
         denom2 = (1. + (scaled_r)**self.gamma)**((self.delta - beta_m) / self.gamma)
     
         
-        return jnp.squeeze(num / (denom1 * denom2))
+        mu_e = 1.14
+        return jnp.squeeze(num / (denom1 * denom2) / mu_e)
 
 
     

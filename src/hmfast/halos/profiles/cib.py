@@ -380,7 +380,7 @@ class S12CIBProfile(CIBProfile):
         return jnp.squeeze(n_cen[:, None] * l_gal)
 
 
-     
+
     @partial(jax.jit, static_argnums=(0,))
     def mean_emissivity(self, halo_model, z):
         """
@@ -396,30 +396,30 @@ class S12CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Mean emissivity :math:`\\bar{j}_\\nu(z)` with shape
+            Mean emissivity :math:`\\bar{j}_\\nu(z)` in
+            :math:`\\mathrm{Jy}\\,\\mathrm{Mpc}^{-1}\\,\\mathrm{sr}^{-1}` with shape
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
         m, z = halo_model.m_grid, jnp.atleast_1d(z)
-        h = halo_model.cosmology.H0 / 100
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses), (len(m), len(z)))
 
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
 
-        return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
+        return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def monopole(self, halo_model, z):
+    def mean_intensity(self, halo_model, z):
         """
-        Compute the CIB monopole intensity.
+        Compute the CIB mean intensity (monopole).
 
         Parameters
         ----------
@@ -431,8 +431,9 @@ class S12CIBProfile(CIBProfile):
         Returns
         -------
         float or jnp.ndarray
-            Monopole intensity :math:`I_\\nu` as a scalar with shape
-            :math:`()`, where singleton dimensions get squeezed before return.
+            Mean intensity :math:`I_\\nu` in :math:`\\mathrm{Jy}\\,\\mathrm{sr}^{-1}`
+            as a scalar with shape :math:`()`, where singleton dimensions get
+            squeezed before return.
         """
         z = jnp.atleast_1d(z)
 
@@ -840,8 +841,8 @@ class M21CIBProfile(CIBProfile):
             ms_min = self.M_min
             # Host efficiency scaling uses mass corrected by fsub
             ms_max = m_single * (1 - self.f_sub)
-            ngrid = 200
-            
+            ngrid = len(halo_model.m_grid)
+
             ms_grid = jnp.logspace(jnp.log10(ms_min), jnp.log10(ms_max), ngrid)
             dlnms = jnp.log(ms_grid[1] / ms_grid[0])
             
@@ -886,8 +887,9 @@ class M21CIBProfile(CIBProfile):
         l_gal = jnp.reshape(self.l_gal(halo_model, m_eff, z), (len(m), len(z)))
         return jnp.squeeze(n_cen[:, None] * l_gal)
 
-    
-    
+
+
+
     @partial(jax.jit, static_argnums=(0,))
     def mean_emissivity(self, halo_model, z):
         """
@@ -903,30 +905,30 @@ class M21CIBProfile(CIBProfile):
         Returns
         -------
         jnp.ndarray
-            Mean emissivity :math:`\\bar{j}_\\nu(z)` with shape
+            Mean emissivity :math:`\\bar{j}_\\nu(z)` in
+            :math:`\\mathrm{Jy}\\,\\mathrm{Mpc}^{-1}\\,\\mathrm{sr}^{-1}` with shape
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
         m, z = halo_model.m_grid, jnp.atleast_1d(z)
-        h = halo_model.cosmology.H0 / 100
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
 
-        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses) / h**3, (len(m), len(z)))
+        dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def, halo_model.convert_masses), (len(m), len(z)))
 
         integrand = dndlnm * (lc + ls)
         j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
 
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
 
-        return jnp.squeeze(j_bar * h**3 / (4 * jnp.pi))
+        return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
     @partial(jax.jit, static_argnums=(0,))
-    def monopole(self, halo_model, z):
+    def mean_intensity(self, halo_model, z):
         """
-        Compute the CIB monopole intensity.
+        Compute the CIB mean intensity (monopole).
 
         Parameters
         ----------
@@ -938,8 +940,9 @@ class M21CIBProfile(CIBProfile):
         Returns
         -------
         float or jnp.ndarray
-            Monopole intensity :math:`I_\\nu` as a scalar with shape
-            :math:`()`, where singleton dimensions get squeezed before return.
+            Mean intensity :math:`I_\\nu` in :math:`\\mathrm{Jy}\\,\\mathrm{sr}^{-1}`
+            as a scalar with shape :math:`()`, where singleton dimensions get
+            squeezed before return.
         """
         z = jnp.atleast_1d(z)
 

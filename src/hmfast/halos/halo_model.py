@@ -187,6 +187,83 @@ class HaloModel:
         return n_min, b1_min, b2_min
 
 
+    @partial(jax.jit, static_argnums=(1, 4))
+    def _I(self, profile, k, z, bias_order=1):
+        """
+        Generalised halo model mass integral.
+
+        .. math::
+
+            I^{(\\beta)}(k, z) = \\int \\frac{dn}{d\\ln M}\\, b_\\beta(M, z)\\,
+            u(k \\mid M, z)\\, d\\ln M
+
+        where :math:`b_\\beta` is the :math:`\\beta`-th order bias
+        (:math:`b_0 = 1`, :math:`b_1` linear bias, :math:`b_2` quadratic bias)
+        and :math:`u(k \\mid M, z)` is the Fourier-space tracer profile.
+
+        This integral is the fundamental building block for the 2h power spectrum
+        (``bias_order=1``) and all three bispectrum terms.
+
+        The halo-model consistency counterterm is included:
+        a point mass at the minimum grid mass contributes ``n_min * b_beta_min * u(k, m_min)``.
+
+        Parameters
+        ----------
+        profile : HaloProfile
+            Halo profile.
+        k : array-like
+            Wavenumber grid in :math:`\\mathrm{Mpc}^{-1}`.
+        z : array-like
+            Redshift grid.
+        bias_order : int, default 1
+            Bias order ``beta``. Accepted values: ``0`` (unweighted), ``1`` (linear bias),
+            ``2`` (quadratic bias).
+
+        Returns
+        -------
+        array
+            Integral with shape :math:`(N_k, N_z)`, where singleton dimensions are squeezed.
+        """
+        k, m, z = jnp.atleast_1d(k), self.m_grid, jnp.atleast_1d(z)
+        logm = jnp.log(m)
+        dm = jnp.diff(logm)
+        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+
+        dndlnm = jnp.reshape(
+            self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_def, self.convert_masses),
+            (len(m), len(z)),
+        )
+
+        if bias_order == 0:
+            bias_w = jnp.ones((len(m), len(z)))
+        elif bias_order == 1:
+            bias_w = jnp.reshape(
+                self.halo_bias.bias(self.cosmology, m, z, self.mass_def, self.convert_masses, order=1),
+                (len(m), len(z)),
+            )
+        elif bias_order == 2:
+            bias_w = jnp.reshape(
+                self.halo_bias.bias(self.cosmology, m, z, self.mass_def, self.convert_masses, order=2),
+                (len(m), len(z)),
+            )
+
+        total_weights = dndlnm * bias_w * w[:, None]  # (Nm, Nz)
+
+        uk = jnp.reshape(profile.fourier(self, k, m, z), (len(k), len(m), len(z)))  # (Nk, Nm, Nz)
+        integral = jnp.sum(uk * total_weights[None, :, :], axis=1)  # (Nk, Nz)
+
+        u_k_min = uk[:, 0, :]  # profile at m_grid[0] (Nk, Nz)
+        n_min, b1_min, b2_min = self._counter_terms(z)
+
+        if bias_order == 0:
+            correction = n_min[None, :] * u_k_min
+        elif bias_order == 1:
+            correction = n_min[None, :] * b1_min[None, :] * u_k_min
+        elif bias_order == 2:
+            correction = n_min[None, :] * b2_min[None, :] * u_k_min
+
+        return jnp.squeeze(integral + self.hm_consistency * correction)
+
     @partial(jax.jit, static_argnums=(1, 2))
     def pk_1h(self, profile1, profile2, k, z, k_damp=0.01):
         """

@@ -326,7 +326,7 @@ class B16DensityProfile(DensityProfile):
         u_ell_val = prefactor[None, :, :] * u_ell_native
 
         def interp_single_column(target_x, native_x, native_y):
-            return jnp.interp(target_x, native_x, native_y)
+            return jnp.interp(jnp.log(target_x), jnp.log(native_x), native_y)
 
         vmapped_interp = jax.vmap(
             jax.vmap(interp_single_column, in_axes=(None, 1, 1), out_axes=1),
@@ -522,7 +522,7 @@ class _NFWDensityProfile(DensityProfile):
         u_ell_val = prefactor[None, :, :] * u_ell_native
 
         def interp_single_column(target_x, native_x, native_y):
-            return jnp.interp(target_x, native_x, native_y)
+            return jnp.interp(jnp.log(target_x), jnp.log(native_x), native_y)
 
         vmapped_interp = jax.vmap(
             jax.vmap(interp_single_column, in_axes=(None, 1, 1), out_axes=1),
@@ -802,7 +802,7 @@ class _BCMDensityProfile(DensityProfile):
         u_ell_val = prefactor[None, :, :] * u_ell_native
 
         def interp_single_column(target_x, native_x, native_y):
-            return jnp.interp(target_x, native_x, native_y)
+            return jnp.interp(jnp.log(target_x), jnp.log(native_x), native_y)
 
         vmapped_interp = jax.vmap(
             jax.vmap(interp_single_column, in_axes=(None, 1, 1), out_axes=1),

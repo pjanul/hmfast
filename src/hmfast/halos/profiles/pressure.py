@@ -61,7 +61,7 @@ class PressureProfile(HaloProfile):
         u_k_val = jnp.concatenate([u_k_zero[None, :, :], u_k_val], axis=0)
 
         def interp_at_z(q_t, q_n, u_n):
-            return jnp.interp(q_t, q_n, u_n)
+            return jnp.interp(jnp.log(q_t), jnp.log(q_n[1:]), u_n[1:], left=u_n[0])
 
         q_target_cols = jnp.transpose(q_target, (1, 2, 0))
         q_native_cols = jnp.transpose(q_native, (1, 2, 0))

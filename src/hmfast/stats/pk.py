@@ -441,13 +441,12 @@ class Pk:
         .. math::
 
             P_{2h}(k; z_1, z_2) = P_{\\rm lin}(k, z_{\\rm fid})\\,
-            D(k, z_1)\\, D(k, z_2), \\qquad
-            D(k, z) = \\sqrt{\\frac{P_{\\rm lin}(k, z)}{P_{\\rm lin}(k, z_{\\rm fid})}}\\,
-            I_1^1(k, z),
+            D(k, z_1)\\, D(k, z_2),
 
-        which avoids the double line-of-sight integral over oscillatory
-        spherical Bessel functions an exact projection would otherwise
-        require. Only the 2-halo term is treated here, since the 1-halo
+        where :math:`D(k, z)` is the growth factor. This avoids the
+        double line-of-sight integral over oscillatory spherical Bessel
+        functions an exact projection would otherwise require. Only the
+        2-halo term is treated here, since the 1-halo
         term only matters at high :math:`\\ell`, where Limber
         (:meth:`cl_1h`) is already accurate.
 

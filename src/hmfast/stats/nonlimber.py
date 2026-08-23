@@ -76,12 +76,11 @@ def _D_kz(halo_model, profile, k, z, z_fid=0.0):
 
 # Non-Limber 2-halo term (private; use the public Pk.cl_2h_nonlimber)
 
-@partial(jax.jit, static_argnames=("n_chi", "n_interp", "bias", "window"))
+@partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window"))
 def _cl_2h_nonlimber(
     halo_model, tracer1, tracer2, l, z,
-    k=None,
     z_fid=0.0,
-    n_chi=None, n_interp=200,
+    n_fft=None, n_interp=200,
     bias=0.1,
     window=0.2,
 ):
@@ -92,8 +91,8 @@ def _cl_2h_nonlimber(
     per-ell Limber/non-Limber dispatch, independent of this function).
     ``z`` only sets the range/resolution of an internal chi
     grid (via min, max, length) and is auto-widened to cover each tracer's
-    own support. ``k`` defaults to the cosmology's native P(k) grid.
-    ``n_chi``/``n_interp`` control internal grid resolutions; ``bias``
+    own support. ``k`` is always the cosmology's own native P(k) grid.
+    ``n_fft``/``n_interp`` control internal grid resolutions; ``bias``
     (<1) is the FFTLog de-trending exponent; ``window`` is the fraction of
     FFTLog modes anti-aliased at the high-frequency end (see
     :func:`_fftlog_biased_coeffs`). ``tracer1``/``tracer2`` share one chi
@@ -107,7 +106,7 @@ def _cl_2h_nonlimber(
     z = jnp.atleast_1d(z)
     z_min = jnp.min(z)
     z_max = jnp.max(z)
-    n_chi = n_chi if n_chi is not None else len(z)
+    n_fft = n_fft if n_fft is not None else len(z)
 
     # Widen z_max (never narrow) to cover each tracer's own declared support.
     z_max = jnp.max(jnp.array([z_max, *(float(t.z_max) for t in (tracer1, tracer2) if hasattr(t, "z_max")),
@@ -125,12 +124,10 @@ def _cl_2h_nonlimber(
     chi_min = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_min) * (1.0 + z_min))
     chi_max = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_max) * (1.0 + z_max))
 
-    if k is None:
-        k, _ = cosmology._pk_grid()
-    k_fine = jnp.asarray(k)
+    k_fine, _ = cosmology._pk_grid()
     k_min, k_max = k_fine[0], k_fine[-1]
 
-    chi_nodes = jnp.geomspace(chi_min, chi_max, n_chi)
+    chi_nodes = jnp.geomspace(chi_min, chi_max, n_fft)
     # Invert chi(z) = angular_diameter_distance(z)*(1+z) via interpolation on a dense z grid extended to z=1200.
     z_bg = cosmology._z_grid_bg()
     z_dense = jnp.concatenate([z_bg, jnp.geomspace(z_bg[-1] + 1.0, 1200.0, 500)])
@@ -147,19 +144,19 @@ def _cl_2h_nonlimber(
         * _D_kz(halo_model, t.profile, k_anchors, z_nodes, z_fid=z_fid)
         for t in tracers
     ])
-    c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_min, chi_max, n_chi, bias, window=window)  # leading axis broadcasts through for free
+    c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_min, chi_max, n_fft, bias, window=window)  # leading axis broadcasts through for free
 
     interp_col = lambda col: jnp.interp(log_kf, log_ka, col)
     interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))  # outer: per tracer, inner: per chi/eta_n mode
-    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_tracers, n_k, n_chi)
+    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_tracers, n_k, n_fft)
 
     # Closed-form Hankel-transform coefficients A_n(l) = 2**(p_n-1)*sqrt(pi)*Gamma((1+l+p_n)/2)/Gamma((2+l-p_n)/2), p_n = bias + 1j*eta_n.
-    p = bias + 1j * eta_n  # (n_chi,); already gradient-free via chi_min/chi_max's own stop_gradient above
+    p = bias + 1j * eta_n  # (n_fft,); already gradient-free via chi_min/chi_max's own stop_gradient above
     log_num = jax.scipy.special.loggamma(0.5 * (1.0 + l_arr[:, None] + p[None, :]))
     log_den = jax.scipy.special.loggamma(0.5 * (2.0 + l_arr[:, None] - p[None, :]))
-    A_table = (2.0 ** (p[None, :] - 1.0)) * jnp.sqrt(jnp.pi) * jnp.exp(log_num - log_den)  # (N_ell, n_chi)
+    A_table = (2.0 ** (p[None, :] - 1.0)) * jnp.sqrt(jnp.pi) * jnp.exp(log_num - log_den)  # (N_ell, n_fft)
 
-    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_chi)
+    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_fft)
     Delta_stack = jnp.real(jnp.einsum('en,tkn->tke', A_table, c_stack * kp))  # (n_tracers, n_k, N_ell)
     Delta1, Delta2 = Delta_stack[0], Delta_stack[-1]  # Delta2 is Delta1 when n_tracers == 1
 

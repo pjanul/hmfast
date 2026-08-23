@@ -36,16 +36,14 @@ class Pk:
     :math:`I_\\mu^\\beta`.
     """
 
-    # FFTLog k grid for xi_1h/xi_2h -- set as default in __init__
-    k_grid = None
-
-    def __init__(self, k_grid=None):
-        # FFTLog k grid for xi_1h/xi_2h
-        self.k_grid = k_grid if k_grid is not None else jnp.geomspace(1e-5, 1e3, 256)
-
-        # Define the P2xi object from mcfit, as we need to instantiate it before it can be used in a jitted function
-        self._p2xi = jax.jit(functools.partial(
-            mcfit.P2xi(self.k_grid, lowring=True, backend='jax'),
+    def _p2xi(self, halo_model):
+        """Build the P2xi FFTLog transform (:class:`mcfit.P2xi`) on the halo model's
+        own cosmology's tabulated wavenumber grid (:meth:`Cosmology._pk_grid`), rather
+        than an independent FFTLog grid -- mcfit needs this instantiated before it can
+        be used in a jitted function, so this returns an already-jitted callable."""
+        k, _ = halo_model.cosmology._pk_grid()
+        return jax.jit(functools.partial(
+            mcfit.P2xi(k, lowring=True, backend='jax'),
             axis=0, extrap=False,
         ))
 
@@ -216,17 +214,18 @@ class Pk:
             P_{1h}(k, z)\\, j_0(kr)
 
         obtained by an FFTLog transform (:class:`mcfit.P2xi`) of
-        :meth:`pk_1h`, tabulated on this :class:`Pk` instance's internal
-        log-spaced ``k`` grid (:attr:`k_grid`) and interpolated onto the
-        requested ``r``.
+        :meth:`pk_1h`, tabulated on ``halo_model``'s own cosmology's native
+        log-spaced ``k`` grid (:meth:`Cosmology._pk_grid`) and interpolated
+        onto the requested ``r``.
 
         Parameters
         ----------
         halo_model : HaloModel
         r : float or jnp.ndarray
             Comoving separation grid in :math:`\\mathrm{Mpc}`. Only reliable
-            well inside the range dual to :attr:`k_grid`; values of ``r`` too
-            close to that range's edges are affected by FFTLog ringing.
+            well inside the range dual to ``halo_model``'s cosmology's own
+            ``k`` grid; values of ``r`` too close to that range's edges are
+            affected by FFTLog ringing.
         z : float or jnp.ndarray
             Redshift grid.
         profile1 : HaloProfile
@@ -246,10 +245,11 @@ class Pk:
         """
         r, z = jnp.atleast_1d(r), jnp.atleast_1d(z)
 
-        pk = self.pk_1h(halo_model, self.k_grid, z, profile1, profile2, k_damp=k_damp)
-        pk = jnp.reshape(pk, (len(self.k_grid), len(z)))
+        k, _ = halo_model.cosmology._pk_grid()
+        pk = self.pk_1h(halo_model, k, z, profile1, profile2, k_damp=k_damp)
+        pk = jnp.reshape(pk, (len(k), len(z)))
 
-        r_native, xi_native = self._p2xi(pk)
+        r_native, xi_native = self._p2xi(halo_model)(pk)
         ln_r, ln_r_native = jnp.log(r), jnp.log(r_native)
 
         # Linear in xi against ln r rather than log-log
@@ -269,17 +269,18 @@ class Pk:
             P_{2h}(k, z)\\, j_0(kr)
 
         obtained by an FFTLog transform (:class:`mcfit.P2xi`) of
-        :meth:`pk_2h`, tabulated on this :class:`Pk` instance's internal
-        log-spaced ``k`` grid (:attr:`k_grid`) and interpolated onto the
-        requested ``r``.
+        :meth:`pk_2h`, tabulated on ``halo_model``'s own cosmology's native
+        log-spaced ``k`` grid (:meth:`Cosmology._pk_grid`) and interpolated
+        onto the requested ``r``.
 
         Parameters
         ----------
         halo_model : HaloModel
         r : float or jnp.ndarray
             Comoving separation grid in :math:`\\mathrm{Mpc}`. Only reliable
-            well inside the range dual to :attr:`k_grid`; values of ``r`` too
-            close to that range's edges are affected by FFTLog ringing.
+            well inside the range dual to ``halo_model``'s cosmology's own
+            ``k`` grid; values of ``r`` too close to that range's edges are
+            affected by FFTLog ringing.
         z : float or jnp.ndarray
             Redshift grid.
         profile1 : HaloProfile
@@ -296,10 +297,11 @@ class Pk:
         """
         r, z = jnp.atleast_1d(r), jnp.atleast_1d(z)
 
-        pk = self.pk_2h(halo_model, self.k_grid, z, profile1, profile2)
-        pk = jnp.reshape(pk, (len(self.k_grid), len(z)))
+        k, _ = halo_model.cosmology._pk_grid()
+        pk = self.pk_2h(halo_model, k, z, profile1, profile2)
+        pk = jnp.reshape(pk, (len(k), len(z)))
 
-        r_native, xi_native = self._p2xi(pk)
+        r_native, xi_native = self._p2xi(halo_model)(pk)
         ln_r, ln_r_native = jnp.log(r), jnp.log(r_native)
 
         # Linear in xi against ln r rather than log-log
@@ -358,11 +360,12 @@ class Pk:
     def cl_1h(self, halo_model, tracer1, tracer2, l, z, k_damp=0.01):
         """
         Compute the 1-halo contribution to the angular power spectrum
-        :math:`C_\\ell^{1h}`.
-
-        The Limber-projected spectrum is obtained by integrating the 1-halo
-        3D power spectrum against the tracer kernels and the comoving volume
-        element. The mass integral is performed over :attr:`m_grid`.
+        :math:`C_\\ell^{1h}` via the Limber approximation, which maps each
+        multipole to a wavenumber, :math:`k = (\\ell + 1/2)/\\chi`, and
+        integrates the 1-halo 3D power spectrum against the tracer kernels
+        (the mass integral is performed over :attr:`m_grid`). No
+        non-Limber treatment is offered here, since the 1-halo term only
+        matters at high :math:`\\ell`, where Limber is already accurate.
 
         Parameters
         ----------
@@ -392,11 +395,10 @@ class Pk:
     def cl_2h(self, halo_model, tracer1, tracer2, l, z):
         """
         Compute the 2-halo contribution to the angular power spectrum
-        :math:`C_\\ell^{2h}`.
-
-        The Limber-projected spectrum is obtained by integrating the 2-halo
-        3D power spectrum against the tracer kernels and the comoving volume
-        element. The mass integral is performed over :attr:`m_grid`.
+        :math:`C_\\ell^{2h}` via the Limber approximation, which maps each
+        multipole to a wavenumber, :math:`k = (\\ell + 1/2)/\\chi`, and
+        integrates the 2-halo 3D power spectrum against the tracer kernels
+        (the mass integral is performed over :attr:`m_grid`).
 
         Parameters
         ----------
@@ -425,26 +427,29 @@ class Pk:
     # ------------------------------------------------------------------
 
     def cl_2h_nonlimber(self, halo_model, tracer1, tracer2, l, z, l_limber=0.0,
-                         k=None, z_fid=0.0, n_chi=None, n_interp=200, bias=0.1, window=0.2):
+                         z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
         Compute the 2-halo contribution to the angular power spectrum
-        :math:`C_\\ell^{2h}`, using the Limber approximation (:meth:`cl_2h`)
-        by default, with an exact non-Limber calculation available below a
-        chosen multipole.
+        :math:`C_\\ell^{2h}`. By default this uses the Limber approximation,
+        which maps each multipole to a wavenumber,
+        :math:`k = (\\ell + 1/2)/\\chi`, at each comoving distance
+        :math:`\\chi` along the tracer kernels. Below `l_limber`, it instead
+        performs an exact projection using a SwiftCl-style (`Reymond et al.
+        2025 <https://arxiv.org/abs/2505.22718>`_) FFTLog decomposition,
+        built on the exact decomposition of the 2-halo power spectrum
 
-        The Limber approximation assumes each tracer's kernel varies slowly
-        compared to the density fluctuations it's weighted against; this
-        breaks down at low multipoles, where kernels can be narrow or only
-        partially overlap in redshift. Below `l_limber`, this method
-        instead performs an exact projection using a SwiftCl-style
-        (`Reymond et al. 2025 <https://arxiv.org/abs/2505.22718>`_)
-        FFTLog decomposition of each tracer kernel, which exploits the
-        separability of the 2-halo power spectrum to avoid the double
-        line-of-sight integral over oscillatory Bessel functions that an
-        exact projection would otherwise require. At and above `l_limber`,
-        it falls back to the Limber approximation (:meth:`cl_2h`). Only the
-        2-halo contribution is computed here; add a 1-halo term separately
-        (e.g. from :meth:`cl_1h`) for the full spectrum.
+        .. math::
+
+            P_{2h}(k; z_1, z_2) = P_{\\rm lin}(k, z_{\\rm fid})\\,
+            D(k, z_1)\\, D(k, z_2), \\qquad
+            D(k, z) = \\sqrt{\\frac{P_{\\rm lin}(k, z)}{P_{\\rm lin}(k, z_{\\rm fid})}}\\,
+            I_1^1(k, z),
+
+        which avoids the double line-of-sight integral over oscillatory
+        spherical Bessel functions an exact projection would otherwise
+        require. Only the 2-halo term is treated here, since the 1-halo
+        term only matters at high :math:`\\ell`, where Limber
+        (:meth:`cl_1h`) is already accurate.
 
         Parameters
         ----------
@@ -459,47 +464,39 @@ class Pk:
             shape decision.
         z : array
             Redshift array. This must be an array because it defines the
-            integration grid over redshift; only its minimum, maximum, and
-            length are used to set up internal grids for the low-ell
-            branch, and each tracer's own redshift support is covered
-            automatically even if narrower than `z`.
+            integration grid over redshift.
         l_limber : float, default 0.0
-            Multipoles below this use the exact low-ell method; multipoles
-            at or above it use the Limber approximation. The default, 0.0,
-            uses Limber everywhere; raise it to switch to the exact method
-            at low ell, where it matters most.
-        k : array-like or None, default None
-            Wavenumber grid used internally by the exact low-ell
-            calculation. Defaults to the cosmology's own tabulated
-            power-spectrum grid.
+            Multipole threshold: below `l_limber`, the exact non-Limber
+            calculation is used; at or above it, the Limber approximation
+            is used. The default, 0.0, uses Limber everywhere.
         z_fid : float, default 0.0
-            Fiducial redshift used to normalize the exact low-ell
-            calculation's internal model of how the power spectrum evolves
-            with redshift.
-        n_chi : int or None, default None
-            Resolution of the internal comoving-distance grid used by the
-            exact low-ell calculation. Defaults to ``len(z)``.
+            Used only by the non-Limber calculation. Fiducial redshift at
+            which the power spectrum is evaluated in the decomposition
+            above.
+        n_fft : int or None, default None
+            Used only by the non-Limber calculation. Number of FFTLog
+            nodes; defaults to ``len(z)``.
         n_interp : int, default 200
-            Number of coarse wavenumber points at which the exact low-ell
-            calculation evaluates its most expensive step, before
-            interpolating onto the full resolution set by `k`.
+            Used only by the non-Limber calculation. Number of wavenumber
+            points at which its most expensive step is evaluated, before
+            interpolating onto the cosmology's own tabulated
+            power-spectrum grid.
         bias : float, default 0.1
-            Technical exponent (must be less than 1) controlling how the
-            exact low-ell calculation numerically decomposes each kernel;
-            the default works well across tracer types and rarely needs
-            changing.
+            Used only by the non-Limber calculation. FFTLog de-trending
+            exponent (must be less than 1); the default is robust across
+            tracer types and rarely needs changing.
         window : float, default 0.2
-            Fraction of FFTLog (Mellin) modes, at the high-frequency end,
-            smoothly anti-aliased to suppress edge/periodicity ringing --
-            matches the windowing SwiftCl's own FFTLog backend applies.
-            Unlike a real-space taper, this doesn't discard genuine kernel
-            amplitude near the domain edge, so it works uniformly across
-            tracer types.
+            Used only by the non-Limber calculation. Fraction of
+            high-frequency FFTLog modes smoothly anti-aliased to suppress
+            edge/periodicity ringing; the default is robust across tracer
+            types.
 
         Returns
         -------
-        cl_2h : array, shape (N_ell,)
-            The 2-halo angular power spectrum, in the same order as `l`.
+        cl_2h : array
+            Dimensionless 2-halo angular power spectrum with shape
+            :math:`(N_\\ell,)`, where singleton dimensions get squeezed
+            before return.
         """
         tracer2 = tracer1 if tracer2 is None else tracer2
 
@@ -513,7 +510,7 @@ class Pk:
             low_idx = jnp.array(idx_low)
             result = result.at[low_idx].set(jnp.atleast_1d(
                 _cl_2h_nonlimber(halo_model, tracer1, tracer2, l_arr[low_idx], z,
-                                 k=k, z_fid=z_fid, n_chi=n_chi, n_interp=n_interp, bias=bias, window=window)))
+                                 z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)))
         if idx_high:
             high_idx = jnp.array(idx_high)
             result = result.at[high_idx].set(jnp.atleast_1d(

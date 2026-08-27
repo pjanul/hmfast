@@ -16,9 +16,8 @@ generalisation and dominates only at high ell, where the existing Limber
 
 This module holds only the low-level engine (``_cl_2h_nonlimber`` and its
 ``_D_kz``/``_fftlog_biased_coeffs`` helpers); the public entry point is
-:meth:`~hmfast.stats.pk.Pk.cl_2h_nonlimber`, which dispatches per-ell
-between ``_cl_2h_nonlimber`` here and the Limber fallback also defined on
-``Pk``.
+:meth:`~hmfast.stats.pk.Pk.cl_2h`, which dispatches per-ell between
+``_cl_2h_nonlimber`` here and the Limber fallback also defined on ``Pk``.
 """
 
 from functools import partial
@@ -74,7 +73,7 @@ def _D_kz(halo_model, profile, k, z, z_fid=0.0):
     return growth_ratio[None, :] * jnp.sqrt(Plin_zeval / Plin_zfid) * I1
 
 
-# Non-Limber 2-halo term (private; use the public Pk.cl_2h_nonlimber)
+# Non-Limber 2-halo term (private; use the public Pk.cl_2h)
 
 @partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window"))
 def _cl_2h_nonlimber(
@@ -87,8 +86,8 @@ def _cl_2h_nonlimber(
     """
     Non-Limber 2-halo C_ell via an FFTLog/closed-form Hankel transform.
     Fully jax-native: ``l`` and ``z`` may both be traced/jitted here (the
-    public ``Pk.cl_2h_nonlimber`` still needs ``l`` concrete for its own
-    per-ell Limber/non-Limber dispatch, independent of this function).
+    public ``Pk.cl_2h`` still needs ``l`` concrete for its own per-ell
+    Limber/non-Limber dispatch, independent of this function).
     ``z`` only sets the range/resolution of an internal chi
     grid (via min, max, length) and is auto-widened to cover each tracer's
     own support. ``k`` is always the cosmology's own native P(k) grid.

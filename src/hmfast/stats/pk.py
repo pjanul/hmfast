@@ -319,11 +319,12 @@ class Pk:
     def _cl_limber(self, halo_model, tracer1, tracer2, l, z, include_1h=False, include_2h=True, k_damp=0.01):
         """
         Limber C_ell for either or both halo terms; shared implementation
-        behind :meth:`cl_1h` (``include_1h=True, include_2h=False``),
-        :meth:`cl_2h` (the defaults), and the high-ell branch of
-        :meth:`cl_2h_nonlimber`. ``l`` may be traced. Jitted with ``self``
-        static (``Pk`` isn't a registered JAX pytree), so repeated calls on
-        the *same* ``Pk`` instance reuse the cached compilation.
+        behind :meth:`cl_1h` (``include_1h=True, include_2h=False``) and
+        the Limber branch of :meth:`cl_2h` (its default, and its
+        ``l >= l_limber`` branch). ``l`` may be traced. Jitted with
+        ``self`` static (``Pk`` isn't a registered JAX pytree), so
+        repeated calls on the *same* ``Pk`` instance reuse the cached
+        compilation.
         """
         hm = halo_model
         cosmology = hm.cosmology
@@ -392,48 +393,19 @@ class Pk:
         return self._cl_limber(halo_model, tracer1, tracer2, l, z,
                                 include_1h=True, include_2h=False, k_damp=k_damp)
 
-    def cl_2h(self, halo_model, tracer1, tracer2, l, z):
-        """
-        Compute the 2-halo contribution to the angular power spectrum
-        :math:`C_\\ell^{2h}` via the Limber approximation, which maps each
-        multipole to a wavenumber, :math:`k = (\\ell + 1/2)/\\chi`, and
-        integrates the 2-halo 3D power spectrum against the tracer kernels
-        (the mass integral is performed over :attr:`m_grid`).
-
-        Parameters
-        ----------
-        halo_model : HaloModel
-        tracer1 : Tracer
-            First tracer object.
-        tracer2 : Tracer or None
-            Second tracer object (if None, uses tracer1).
-        l : float or jnp.ndarray
-            Multipole grid.
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift.
-
-        Returns
-        -------
-        cl_2h : array
-            Dimensionless 2-halo angular power spectrum with shape
-            :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
-            return.
-        """
-        return self._cl_limber(halo_model, tracer1, tracer2, l, z, include_2h=True)
-
     # ------------------------------------------------------------------
-    # Non-Limber angular power spectrum (2-halo term; experimental)
+    # Angular power spectrum (2-halo term; Limber, with optional non-Limber)
     # ------------------------------------------------------------------
 
-    def cl_2h_nonlimber(self, halo_model, tracer1, tracer2, l, z, l_limber=0.0,
-                         z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+    def cl_2h(self, halo_model, tracer1, tracer2, l, z, l_limber=0.0,
+              z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
         Compute the 2-halo contribution to the angular power spectrum
         :math:`C_\\ell^{2h}`. By default this uses the Limber approximation,
         which maps each multipole to a wavenumber,
         :math:`k = (\\ell + 1/2)/\\chi`, at each comoving distance
-        :math:`\\chi` along the tracer kernels. Below `l_limber`, it instead
+        :math:`\\chi` along the tracer kernels (the mass integral is
+        performed over :attr:`m_grid`). Below `l_limber`, it instead
         performs an exact projection using a SwiftCl-style (`Reymond et al.
         2025 <https://arxiv.org/abs/2505.22718>`_) FFTLog decomposition,
         built on the exact decomposition of the 2-halo power spectrum

@@ -284,8 +284,8 @@ class TestGalaxyLensingEfficiency:
     def test_zero_beyond_max_source_z(self, fixed_cosmology):
         tracer = GalaxyLensingTracer(dndz=_SYNTHETIC_DNDZ)
         z_max_source = float(_SYNTHETIC_DNDZ[0][-1])
-        I_s = tracer._I_s(
-            fixed_cosmology, jnp.array([z_max_source, z_max_source + 1.0])
+        I_s = tracer._lensing_efficiency_integral(
+            fixed_cosmology, jnp.array([z_max_source, z_max_source + 1.0]), tracer.dndz
         )
         assert jnp.all(I_s == 0.0)
 
@@ -293,8 +293,71 @@ class TestGalaxyLensingEfficiency:
     def test_monotonically_decreasing(self, fixed_cosmology):
         tracer = GalaxyLensingTracer(dndz=_SYNTHETIC_DNDZ)
         z = jnp.linspace(0.0, 1.9, 10)
-        I_s = tracer._I_s(fixed_cosmology, z)
+        I_s = tracer._lensing_efficiency_integral(fixed_cosmology, z, tracer.dndz)
         assert jnp.all(jnp.diff(I_s) <= 0.0)
+
+
+class TestMagnificationBias:
+    # Default mag_bias is s(z)=2/5, which makes the magnification-bias term vanish
+    # (CCL's (1 - 5s/2) weighting is exactly zero at s=2/5).
+    def test_default_slope_makes_term_vanish(self):
+        tracer = GalaxyTracer(dndz=_SYNTHETIC_DNDZ)
+        _, s_vals = tracer.mag_bias
+        assert jnp.all(s_vals == 0.4)
+
+    # A nontrivial magnification-bias slope changes the kernel relative to the default.
+    def test_nontrivial_slope_changes_kernel(self, fixed_cosmology):
+        z = jnp.array([0.3, 0.8, 1.5])
+        default_tracer = GalaxyTracer(dndz=_SYNTHETIC_DNDZ)
+        biased_tracer = GalaxyTracer(
+            dndz=_SYNTHETIC_DNDZ, mag_bias=(jnp.array([0.0, 2.0]), jnp.array([0.6, 0.6]))
+        )
+        assert not jnp.allclose(
+            default_tracer.kernel(fixed_cosmology, z), biased_tracer.kernel(fixed_cosmology, z)
+        )
+
+    # jax.grad of kernel() wrt the magnification-bias slope is finite and matches finite differences.
+    def test_kernel_grad_wrt_mag_bias_amplitude(self, fixed_cosmology):
+        z = jnp.array(0.5)
+
+        def f(s):
+            tracer = GalaxyTracer(
+                dndz=_SYNTHETIC_DNDZ, mag_bias=(jnp.array([0.0, 2.0]), jnp.array([s, s]))
+            )
+            return tracer.kernel(fixed_cosmology, z)
+
+        _check_grad(f, 0.6)
+
+
+class TestIntrinsicAlignment:
+    # Default ia_bias is A_IA(z)=0, which makes the intrinsic-alignment term vanish.
+    def test_default_amplitude_is_identically_zero(self):
+        tracer = GalaxyLensingTracer(dndz=_SYNTHETIC_DNDZ)
+        _, a_vals = tracer.ia_bias
+        assert jnp.all(a_vals == 0.0)
+
+    # A nontrivial IA amplitude changes the kernel relative to the default.
+    def test_nontrivial_amplitude_changes_kernel(self, fixed_cosmology):
+        z = jnp.array([0.3, 0.8, 1.5])
+        default_tracer = GalaxyLensingTracer(dndz=_SYNTHETIC_DNDZ)
+        ia_tracer = GalaxyLensingTracer(
+            dndz=_SYNTHETIC_DNDZ, ia_bias=(jnp.array([0.0, 2.0]), jnp.array([1.0, 1.0]))
+        )
+        assert not jnp.allclose(
+            default_tracer.kernel(fixed_cosmology, z), ia_tracer.kernel(fixed_cosmology, z)
+        )
+
+    # jax.grad of kernel() wrt the IA amplitude is finite and matches finite differences.
+    def test_kernel_grad_wrt_ia_amplitude(self, fixed_cosmology):
+        z = jnp.array(0.5)
+
+        def f(a):
+            tracer = GalaxyLensingTracer(
+                dndz=_SYNTHETIC_DNDZ, ia_bias=(jnp.array([0.0, 2.0]), jnp.array([a, a]))
+            )
+            return tracer.kernel(fixed_cosmology, z)
+
+        _check_grad(f, 1.0)
 
 
 class TestDefaultProfileMatchesRequiredType:

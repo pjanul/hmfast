@@ -10,8 +10,6 @@ from hmfast.download import _get_default_data_path
 
 jax.config.update("jax_enable_x64", True)
 
-C1_IA = 5e-14  # h^-2 Msun^-1 Mpc^3 (Hirata & Seljak 2004 / Joachimi et al. 2011 Eq. 6 normalization)
-
 
 class GalaxyLensingTracer(Tracer):
     """
@@ -118,7 +116,6 @@ class GalaxyLensingTracer(Tracer):
         .. math::
 
             W_{\\kappa_g}(\\chi) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,I_s(z)
-                - A_{IA}(z)\\, C_1 \\rho_{crit,ref}\\, \\frac{\\Omega_m}{D(z)} \\frac{H(z)}{c} \\frac{dN}{dz}(z)
 
         where :math:`\\Omega_m` is the matter density parameter,
         :math:`H_0` is the Hubble constant, :math:`c` is the speed of light,
@@ -129,10 +126,9 @@ class GalaxyLensingTracer(Tracer):
 
             I_s(z) = \\int_z^{\\infty} dz_s\\, \\frac{dN}{dz}(z_s) \\frac{\\chi(z_s) - \\chi(z)}{\\chi(z_s)}
 
-        where :math:`\\frac{dN}{dz}(z_s)` is the normalized source redshift distribution,
-        and the second (NLA intrinsic-alignment) term uses the tracer's own
-        :math:`dN/dz` and the linear growth factor :math:`D(z)`. With the default
-        :math:`A_{IA}(z)\\equiv 0`, this second term vanishes identically.
+        where :math:`\\frac{dN}{dz}(z_s)` is the normalized source redshift distribution.
+        The kernel also includes an intrinsic-alignment (NLA) contribution controlled
+        by ``ia_bias``.
 
         Parameters
         ----------
@@ -179,7 +175,7 @@ class GalaxyLensingTracer(Tracer):
         W_density = H_grid * jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
 
         rho_crit_h2_ref = cparams["Rho_crit_0"] / cparams["h"] ** 2  # strip the h^2 baked into Rho_crit_0 back out
-        W_IA = -A_IA_at_z * (C1_IA * rho_crit_h2_ref) * Omega_m / D_z * W_density
+        W_IA = -A_IA_at_z * (Const._C1_IA_ * rho_crit_h2_ref) * Omega_m / D_z * W_density
 
         return jnp.squeeze(W_kappa_g + W_IA)
 

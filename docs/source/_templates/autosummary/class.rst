@@ -2,8 +2,8 @@
 
 .. currentmodule:: {{ module }}
 
-{% set excluded_members = ['__init__', 'profile', 'dndz', 'x', 'has_central_contribution'] %}
-{% set excluded_attributes = ['profile', 'dndz', 'x', 'has_central_contribution'] %}
+{% set excluded_members = ['__init__', 'profile', 'dndz', 'mag_bias', 'ia_bias', 'x', 'has_central_contribution'] %}
+{% set excluded_attributes = ['profile', 'dndz', 'mag_bias', 'ia_bias', 'x', 'has_central_contribution'] %}
 {% if objname == 'MassDefinition' %}
 {% set excluded_members = excluded_members + ['delta', 'reference'] %}
 {% set excluded_attributes = excluded_attributes + ['delta', 'reference'] %}

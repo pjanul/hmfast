@@ -21,6 +21,7 @@ class Const:
     _m_e_ = 9.1093837015e-31      # Electron mass in kg
     _m_p_ = 1.67262192369e-27     # Proton mass in kg
     _L_sun_ = 3.828e26            # Solar luminosity in Watts (1 kg·m²/s³)
+    _C1_IA_ = 5e-14                # h^-2 Msun^-1 Mpc^3 (Hirata & Seljak 2004 / Joachimi et al. 2011 Eq. 6 normalization)
 
     # parameters entering in Stefan-Boltzmann constant sigma_B 
     _k_B_ = 1.3806504e-23

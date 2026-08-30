@@ -107,14 +107,11 @@ class GalaxyTracer(Tracer):
 
         .. math::
 
-            W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz} - 2 \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)
-                \\int_z^{\\infty} dz_s\\, \\left(1 - \\frac{5}{2}s(z_s)\\right) \\frac{dN}{dz}(z_s) \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}
+            W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}
 
-        where :math:`dN/dz` is the normalized redshift distribution of galaxies and
-        :math:`s(z)` is the magnification-bias log-slope of number counts (w.r.t.
-        magnitude), evaluated at the source redshift inside the integral -- matching
-        CCL's ``NumberCountsTracer(mag_bias=...)`` convention. With the default
-        :math:`s(z)\\equiv 2/5`, the second term vanishes identically.
+        where :math:`dN/dz` is the normalized redshift distribution of galaxies.
+        The kernel also includes a magnification-bias contribution controlled by
+        ``mag_bias``.
 
         Parameters
         ----------
@@ -138,7 +135,7 @@ class GalaxyTracer(Tracer):
 
         z_s, s_vals = self.mag_bias
         s_at_source = jnp.interp(z_g, z_s, s_vals)  # s(z) at the source (own dndz) grid, clamp-to-edge
-        weight = 1.0 - 2.5 * s_at_source  # CCL's (1 - 5s/2) magnification weighting
+        weight = 1.0 - 2.5 * s_at_source  # magnification weighting from the mag-bias log-slope s(z)
 
         cparams = cosmology._cosmo_params()
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z)

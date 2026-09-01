@@ -1,6 +1,6 @@
 """
-Linearly-biased angular power spectrum -- standalone, exploratory companion
-to :class:`~hmfast.stats.pk.Pk`'s ``cl_1h``/``cl_2h``.
+Private engine behind :meth:`hmfast.stats.pk.Pk.cl_linear`, the linearly-biased
+angular power spectrum -- the linear-bias analogue of ``Pk.cl_1h``/``cl_2h``.
 
 Projects ``kernel1(z) * bias1(z) * kernel2(z) * bias2(z) * P(k, z)`` over
 redshift via the Limber approximation, or exactly (beyond-Limber) via the
@@ -8,10 +8,10 @@ same SwiftCl-style FFTLog engine used by ``Pk.cl_2h``'s non-Limber branch.
 No halo-model mass integral is performed here -- this is the standard
 large-scale linear-bias approximation used e.g. in CCL and class_sz.
 
-Deliberately kept in its own module (importing only *from* ``nonlimber.py``
-and ``tracers/cmb_lensing.py``, never editing them) rather than folded into
-``stats/pk.py``/``stats/nonlimber.py``, since it is exploratory/first-pass
-code; it may be merged into ``Pk`` in the future.
+This module plays the same role for ``Pk.cl_linear`` that ``nonlimber.py``
+plays for ``Pk.cl_2h``: a private low-level engine, not a public API surface
+of its own (importing only *from* ``nonlimber.py`` and
+``tracers/cmb_lensing.py``, never editing them).
 """
 
 from functools import partial
@@ -67,7 +67,7 @@ def _D_kz_linear(cosmology, k, z, z_fid=0.0, nonlinear=False):
 
 @partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window", "nonlinear"))
 def _cl_linear_nonlimber(
-    halo_model, tracer1, tracer2, l, z,
+    cosmology, tracer1, tracer2, l, z,
     nonlinear=False,
     z_fid=0.0, n_fft=None, n_interp=200,
     bias=0.1, window=0.2,
@@ -83,13 +83,18 @@ def _cl_linear_nonlimber(
 
     ``bias`` here is the FFTLog de-trending exponent (same name/meaning as
     ``Pk.cl_2h``'s own ``bias`` kwarg) -- unrelated to a tracer's own bias.
+
+    Parameters
+    ----------
+    cosmology : Cosmology
+        No halo-model mass integral is performed here, so this takes a
+        ``Cosmology`` directly rather than a ``HaloModel``.
     """
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     bias1 = getattr(tracer1, "bias", None)
     bias2 = getattr(tracer2, "bias", None)
     biases = (bias1,) if tracer2 is tracer1 else (bias1, bias2)
-    cosmology = halo_model.cosmology
 
     l_arr = jnp.atleast_1d(jnp.asarray(l, dtype=jnp.float64))
     z = jnp.atleast_1d(z)
@@ -162,15 +167,20 @@ def _cl_linear_nonlimber(
 
 
 @partial(jax.jit, static_argnames=("nonlinear",))
-def _cl_linear_limber(halo_model, tracer1, tracer2, l, z, nonlinear=False):
+def _cl_linear_limber(cosmology, tracer1, tracer2, l, z, nonlinear=False):
     """
-    Limber branch of :func:`cl_linear`, mirroring
+    Limber branch of :meth:`hmfast.stats.pk.Pk.cl_linear`, mirroring
     :meth:`hmfast.stats.pk.Pk._cl_limber` but with a direct
     ``cosmology.pk(...)`` call in place of ``pk_1h``/``pk_2h``'s halo-model
     mass integrals, and each tracer's own bias attribute (if it has one)
     multiplied into its kernel. ``l`` may be traced.
+
+    Parameters
+    ----------
+    cosmology : Cosmology
+        No halo-model mass integral is performed here, so this takes a
+        ``Cosmology`` directly rather than a ``HaloModel``.
     """
-    cosmology = halo_model.cosmology
     tracer2 = tracer1 if tracer2 is None else tracer2
     z = jnp.atleast_1d(z)
 
@@ -189,100 +199,3 @@ def _cl_linear_limber(halo_model, tracer1, tracer2, l, z, nonlinear=False):
 
     integrand = P_grid * (limber_weight[:, None] * kernel1[:, None] * kernel2[:, None])
     return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
-
-
-def cl_linear(halo_model, tracer1, tracer2, l, z, nonlinear=False,
-              l_limber=0.0, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
-    """
-    Linearly-biased angular power spectrum (no halo-model mass integral):
-
-    .. math::
-
-        C_\\ell = \\int dz\\; \\mathrm{limber\\_weight}(z)\\,
-        [b_1(z) W_1(z)]\\, [b_2(z) W_2(z)]\\, P(k, z), \\quad
-        k = (\\ell + 1/2) / \\chi(z)
-
-    Standalone, exploratory companion to :meth:`hmfast.stats.pk.Pk.cl_1h`/
-    :meth:`hmfast.stats.pk.Pk.cl_2h` -- lives in its own module so it
-    doesn't touch ``stats/pk.py`` or ``stats/nonlimber.py``. May be merged
-    into ``Pk`` in the future.
-
-    :math:`P` is either the linear or nonlinear matter power spectrum
-    (``nonlinear``). Each tracer's own bias (e.g. a galaxy tracer's linear
-    bias) is picked up automatically if it has one; a tracer with no such
-    attribute (e.g. CMB/galaxy lensing) is treated as unbiased. Below
-    ``l_limber``, uses an exact SwiftCl-style FFTLog projection (mirroring
-    ``Pk.cl_2h``'s non-Limber branch); at or above it, uses the Limber
-    approximation (the default, ``l_limber=0.0``, uses Limber everywhere).
-
-    Note: for ``GalaxyTracer``, ``kernel()`` bundles a density term and a
-    magnification-bias term; multiplying the whole kernel by its bias is
-    exact only when magnification bias is off (the tracer's default
-    ``mag_bias`` slope ``s=0.4`` exactly zeroes that term).
-
-    Parameters
-    ----------
-    halo_model : HaloModel
-    tracer1 : Tracer
-        First tracer object.
-    tracer2 : Tracer or None
-        Second tracer object (if None, uses tracer1).
-    l : array-like
-        Multipole grid. Must be concrete (not a value being traced by JAX),
-        since the low/high `l_limber` split is a data-dependent shape
-        decision (matches `Pk.cl_2h`).
-    z : array
-        Redshift array. This must be an array because it defines the
-        integration grid over redshift (Limber branch) and the range of the
-        internal FFTLog chi grid (non-Limber branch).
-    nonlinear : bool, default False
-        If True, use the nonlinear matter power spectrum instead of linear.
-    l_limber : float, default 0.0
-        Multipole threshold: below `l_limber`, the exact non-Limber
-        calculation is used; at or above it, the Limber approximation is
-        used. The default, 0.0, uses Limber everywhere.
-    z_fid : float, default 0.0
-        Used only by the non-Limber calculation. Fiducial redshift at which
-        the power spectrum is evaluated in the separable D(k,z) ansatz.
-    n_fft : int or None, default None
-        Used only by the non-Limber calculation. Number of FFTLog nodes;
-        defaults to ``len(z)``.
-    n_interp : int, default 200
-        Used only by the non-Limber calculation. Number of wavenumber
-        points at which its most expensive step is evaluated, before
-        interpolating onto the cosmology's own tabulated power-spectrum grid.
-    bias : float, default 0.1
-        Used only by the non-Limber calculation. FFTLog de-trending
-        exponent (must be less than 1); unrelated to a tracer's own bias.
-    window : float, default 0.2
-        Used only by the non-Limber calculation. Fraction of high-frequency
-        FFTLog modes smoothly anti-aliased to suppress edge/periodicity
-        ringing.
-
-    Returns
-    -------
-    cl_linear : array
-        Dimensionless linearly-biased angular power spectrum with shape
-        :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
-        return.
-    """
-    tracer2 = tracer1 if tracer2 is None else tracer2
-
-    l_arr = jnp.atleast_1d(jnp.asarray(l, dtype=jnp.float64))
-    l_vals = [float(x) for x in l_arr]
-    idx_low = [i for i, li in enumerate(l_vals) if li < l_limber]
-    idx_high = [i for i, li in enumerate(l_vals) if li >= l_limber]
-
-    result = jnp.zeros(len(l_vals), dtype=jnp.float64)
-    if idx_low:
-        low_idx = jnp.array(idx_low)
-        result = result.at[low_idx].set(jnp.atleast_1d(
-            _cl_linear_nonlimber(halo_model, tracer1, tracer2, l_arr[low_idx], z,
-                                  nonlinear=nonlinear,
-                                  z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)))
-    if idx_high:
-        high_idx = jnp.array(idx_high)
-        result = result.at[high_idx].set(jnp.atleast_1d(
-            _cl_linear_limber(halo_model, tracer1, tracer2, l_arr[high_idx], z,
-                               nonlinear=nonlinear)))
-    return jnp.squeeze(result)

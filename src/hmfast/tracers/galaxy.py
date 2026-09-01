@@ -23,11 +23,16 @@ class GalaxyTracer(Tracer):
     mag_bias : tuple of jnp.ndarray
         Magnification-bias log-slope of number counts (w.r.t. magnitude) stored as
         :math:`(z, s(z))`. Defaults to :math:`s(z)\\equiv 2/5` (no magnification bias).
+    bias : tuple of jnp.ndarray or None
+        Linear galaxy bias stored as :math:`(z, b(z))`. Only used when this tracer is used to
+        compute a linearly-biased angular power spectrum; has no effect when this tracer is used
+        with a full halo-model calculation, where bias is instead handled through the halo
+        occupation profile. Defaults to `None` (unbiased).
     """
 
     _required_profile_type = GalaxyHODProfile
 
-    def __init__(self, profile=None, dndz=None, mag_bias=None):
+    def __init__(self, profile=None, dndz=None, mag_bias=None, bias=None):
         super().__init__(profile=profile or Z07GalaxyHODProfile())
 
         if dndz is None:
@@ -39,6 +44,8 @@ class GalaxyTracer(Tracer):
         if mag_bias is None:
             mag_bias = (jnp.array([0.0, 1.0]), jnp.array([0.4, 0.4]))
         self.mag_bias = mag_bias
+
+        self.bias = bias
 
 
     @property
@@ -57,24 +64,33 @@ class GalaxyTracer(Tracer):
     def mag_bias(self, value):
         self._mag_bias_data = self._prepare_z_function(value, normalize=False)
 
+    @property
+    def bias(self):
+        return self._bias_data
+
+    @bias.setter
+    def bias(self, value):
+        self._bias_data = None if value is None else self._prepare_z_function(value, normalize=False)
+
     # --- JAX PyTree Registration ---
 
     def _tree_flatten(self):
         # The profile IS the leaf. JAX will automatically
         # drill down into the profile's own 5 leaves.
-        leaves = (self.profile, self._dndz_data, self._mag_bias_data)
+        leaves = (self.profile, self._dndz_data, self._mag_bias_data, self._bias_data)
         return (leaves, None)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        profile, dndz_data, mag_bias_data = leaves
+        profile, dndz_data, mag_bias_data, bias_data = leaves
         obj = cls.__new__(cls)
         obj.profile = profile
         obj._dndz_data = dndz_data
         obj._mag_bias_data = mag_bias_data
+        obj._bias_data = bias_data
         return obj
 
-    def update(self, profile=None, dndz=None, mag_bias=None):
+    def update(self, profile=None, dndz=None, mag_bias=None, bias=None):
         """
         Return a new GalaxyTracer instance with updated attributes using PyTree logic.
 
@@ -86,6 +102,8 @@ class GalaxyTracer(Tracer):
             New redshift distribution (z, dN/dz). If None, the distribution is unchanged.
         mag_bias : array_like, optional
             New magnification-bias slope (z, s(z)). If None, it is unchanged.
+        bias : array_like, optional
+            New linear galaxy bias (z, b(z)). If None, it is unchanged.
 
         Returns
         -------
@@ -96,7 +114,8 @@ class GalaxyTracer(Tracer):
         new_profile = profile if profile is not None else flat[0]
         new_dndz = self._prepare_z_function(dndz) if dndz is not None else flat[1]
         new_mag_bias = self._prepare_z_function(mag_bias, normalize=False) if mag_bias is not None else flat[2]
-        return self._tree_unflatten(aux, (new_profile, new_dndz, new_mag_bias))
+        new_bias = self._prepare_z_function(bias, normalize=False) if bias is not None else flat[3]
+        return self._tree_unflatten(aux, (new_profile, new_dndz, new_mag_bias, new_bias))
 
 
     def kernel(self, cosmology, z):

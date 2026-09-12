@@ -49,6 +49,16 @@ def _ccl_cosmology(cosmology):
     )
 
 
+def _kernel_scalar(tracer, cosmology, z):
+    """Sum every term's weight from kernel() into one array, matching CCL's own
+    get_kernel() (which has no notion of a per-term breakdown)."""
+    weights = [weight for weight, _ in tracer.kernel(cosmology, z)]
+    total = weights[0]
+    for w in weights[1:]:
+        total = total + w
+    return total
+
+
 def _kernel_median_residual(K_hm, K_ccl, threshold=0.01):
     """Normalize both kernels by their own peak, mask the near-zero tail, return the median % residual."""
     K_hm = np.where(np.isfinite(K_hm), K_hm, 0.0)
@@ -87,7 +97,7 @@ class TestCMBLensingKernelCCL:
         z_grid = np.logspace(np.log10(0.001), np.log10(z_star), 200)
         chi_grid = pyccl.comoving_radial_distance(cosmo_ccl, 1.0 / (1.0 + z_grid))
 
-        K_hm = np.asarray(tracer.kernel(cosmo_ext, jnp.asarray(z_grid)))
+        K_hm = np.asarray(_kernel_scalar(tracer, cosmo_ext, jnp.asarray(z_grid)))
         K_ccl = np.asarray(tracer_ccl.get_kernel(chi_grid)).squeeze()
         assert _kernel_median_residual(K_hm, K_ccl) < 1.0
 
@@ -109,7 +119,7 @@ class TestGalaxyLensingKernelCCL:
         z_grid = np.logspace(np.log10(0.001), np.log10(3.0), 200)
         chi_grid = pyccl.comoving_radial_distance(cosmo_ccl_bg, 1.0 / (1.0 + z_grid))
 
-        K_hm = np.asarray(tracer.kernel(fixed_cosmology, jnp.asarray(z_grid)))
+        K_hm = np.asarray(_kernel_scalar(tracer, fixed_cosmology, jnp.asarray(z_grid)))
         K_ccl = np.asarray(tracer_ccl.get_kernel(chi_grid)).squeeze()
         assert _kernel_median_residual(K_hm, K_ccl) < 1.0
 
@@ -133,7 +143,7 @@ class TestGalaxyCountsKernelCCL:
         z_grid = np.logspace(np.log10(0.001), np.log10(3.0), 200)
         chi_grid = pyccl.comoving_radial_distance(cosmo_ccl_bg, 1.0 / (1.0 + z_grid))
 
-        K_hm = np.asarray(tracer.kernel(fixed_cosmology, jnp.asarray(z_grid)))
+        K_hm = np.asarray(_kernel_scalar(tracer, fixed_cosmology, jnp.asarray(z_grid)))
         K_ccl = np.asarray(tracer_ccl.get_kernel(chi_grid)).squeeze()
         assert _kernel_median_residual(K_hm, K_ccl) < 1.0
 
@@ -148,7 +158,7 @@ class TestTSZKernelCCL:
         z_grid = np.logspace(np.log10(0.001), np.log10(3.0), 200)
         chi_grid = pyccl.comoving_radial_distance(cosmo_ccl_bg, 1.0 / (1.0 + z_grid))
 
-        K_hm = np.asarray(tracer.kernel(fixed_cosmology, jnp.asarray(z_grid)))
+        K_hm = np.asarray(_kernel_scalar(tracer, fixed_cosmology, jnp.asarray(z_grid)))
         K_ccl = np.asarray(tracer_ccl.get_kernel(chi_grid)).squeeze()
         assert _kernel_median_residual(K_hm, K_ccl) < 0.01
 
@@ -163,6 +173,6 @@ class TestCIBKernelCCL:
         z_grid = np.logspace(np.log10(0.001), np.log10(3.0), 200)
         chi_grid = pyccl.comoving_radial_distance(cosmo_ccl_bg, 1.0 / (1.0 + z_grid))
 
-        K_hm = np.asarray(tracer.kernel(fixed_cosmology, jnp.asarray(z_grid)))
+        K_hm = np.asarray(_kernel_scalar(tracer, fixed_cosmology, jnp.asarray(z_grid)))
         K_ccl = np.asarray(tracer_ccl.get_kernel(chi_grid)).squeeze()
         assert _kernel_median_residual(K_hm, K_ccl) < 0.01

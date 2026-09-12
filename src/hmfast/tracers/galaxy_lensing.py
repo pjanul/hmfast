@@ -107,66 +107,47 @@ class GalaxyLensingTracer(Tracer):
     # --- End JAX PyTree Registration ---
 
 
-    def kernel(self, cosmology, z):
+    def _kernel_primary(self, cosmology, z):
         """
-        Compute the galaxy lensing kernel :math:`W_{\\kappa_g}(\\chi)` at redshift :math:`z`.
-
-        The kernel is given by:
+        Weak lensing convergence term (``der_bessel=0``) of the galaxy lensing
+        kernel:
 
         .. math::
 
             W_{\\kappa_g}(\\chi) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,I_s(z)
 
-        where :math:`\\Omega_m` is the matter density parameter,
-        :math:`H_0` is the Hubble constant, :math:`c` is the speed of light,
-        :math:`\\chi(z)` is the comoving distance to redshift :math:`z`,
-        :math:`I_s(z)` is the lensing efficiency integral defined as
-
-        .. math::
-
-            I_s(z) = \\int_z^{\\infty} dz_s\\, \\frac{dN}{dz}(z_s) \\frac{\\chi(z_s) - \\chi(z)}{\\chi(z_s)}
-
-        where :math:`\\frac{dN}{dz}(z_s)` is the normalized source redshift distribution.
-        The kernel also includes an intrinsic-alignment (NLA) contribution controlled
-        by ``ia_bias``.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology object with required methods and parameters.
-        z : float or array_like
-            Redshift(s) at which to compute the kernel.
-
-        Returns
-        -------
-        W_kappa_g : array_like
-            Galaxy lensing kernel evaluated at redshift(s) :math:`z`.
+        where :math:`I_s(z)` is the lensing efficiency integral
+        (:meth:`Tracer._lensing_efficiency_integral`) over the source
+        distribution ``dndz``.
         """
-        # Merge default parameters with input
-
         cparams = cosmology._cosmo_params()
-        z = jnp.atleast_1d(z) # Ensure z is an array
+        z = jnp.atleast_1d(z)
 
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s
-
-        # Cosmological constants
         H0 = cosmology.H0  # Hubble constant in km/s/Mpc
         Omega_m = cparams["Omega0_m"]  # Matter density parameter
 
-        # Compute comoving distance in physical Mpc.
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
-
         I_s = self._lensing_efficiency_integral(cosmology, z, self.dndz)
 
-        # Compute the galaxy lensing kernel
         W_kappa_g = (
             (3.0 / 2.0) * Omega_m *
             (H0/c_km_s)**2 *
             chi_z * (1 + z) *
             I_s
         )
+        return jnp.squeeze(W_kappa_g)
 
-        # Intrinsic alignments (NLA model)
+    def _kernel_ia(self, cosmology, z):
+        """
+        Intrinsic-alignment (NLA) term (``der_bessel=0``) of the galaxy lensing
+        kernel, controlled by ``ia_bias``.
+        """
+        cparams = cosmology._cosmo_params()
+        z = jnp.atleast_1d(z)
+        c_km_s = Const._c_ / 1e3
+        Omega_m = cparams["Omega0_m"]
+
         z_a, A_vals = self.ia_bias
         A_IA_at_z = jnp.interp(z, z_a, A_vals)  # clamp-to-edge extrapolation (A_IA is not a density)
         D_z = cosmology.growth_factor(z)  # NaN outside the trained z-grid, even where A_IA_at_z == 0
@@ -177,9 +158,13 @@ class GalaxyLensingTracer(Tracer):
         rho_crit_h2_ref = cparams["Rho_crit_0"] / cparams["h"] ** 2  # strip the h^2 baked into Rho_crit_0 back out
         W_IA = -A_IA_at_z * (Const._C1_IA_ * rho_crit_h2_ref) * Omega_m / D_z * W_density
 
-        return jnp.squeeze(W_kappa_g + W_IA)
+        return jnp.squeeze(W_IA)
 
-
+    def kernel(self, cosmology, z):
+        return [
+            (self._kernel_primary(cosmology, z), 0),
+            (self._kernel_ia(cosmology, z), 0),
+        ]
 
 
 jax.tree_util.register_pytree_node(

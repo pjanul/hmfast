@@ -5,8 +5,7 @@ angular power spectrum -- the linear-bias analogue of ``Pk.cl_1h``/``cl_2h``.
 Projects ``kernel1(z) * bias1(z) * kernel2(z) * bias2(z) * P(k, z)`` over
 redshift via the Limber approximation, or exactly (beyond-Limber) via the
 same SwiftCl-style FFTLog engine used by ``Pk.cl_2h``'s non-Limber branch.
-No halo-model mass integral is performed here -- this is the standard
-large-scale linear-bias approximation used e.g. in CCL and class_sz.
+No halo-model mass integral is performed here.
 
 This module plays the same role for ``Pk.cl_linear`` that ``nonlimber.py``
 plays for ``Pk.cl_2h``: a private low-level engine, not a public API surface
@@ -19,7 +18,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
-from hmfast.stats.nonlimber import _fftlog_biased_coeffs
+from hmfast.stats.nonlimber import _fftlog_biased_coeffs, _hankel_A_table
 from hmfast.tracers.cmb_lensing import CMBLensingTracer
 
 jax.config.update("jax_enable_x64", True)
@@ -43,14 +42,15 @@ def _resolve_bias(bias, z):
     return jnp.broadcast_to(jnp.atleast_1d(bias), z.shape)
 
 
-def _D_kz_linear(cosmology, k, z, z_fid=0.0, nonlinear=False):
+def _D_kz_linear(cosmology, k, z, z_fid=0.0, linear=True):
     """
     D(k,z) = sqrt(P(k,z)/P(k,z_fid)), the bias-free per-time factor of the
     separable P(k;z1,z2) ~= P(k,z_fid)*D(k,z1)*D(k,z2) ansatz used by the
     non-Limber branch of :func:`cl_linear`. This is the analogue of
     :func:`hmfast.stats.nonlimber._D_kz`, but without its halo-model mass
     integral (``I_1^1``) factor, since there is no halo occupation weighting
-    in the linear-bias approximation. ``nonlinear`` selects P_nl over P_lin.
+    in the linear-bias approximation. ``linear=True`` uses P_lin, ``False``
+    uses P_nl.
     """
     k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
 
@@ -59,16 +59,16 @@ def _D_kz_linear(cosmology, k, z, z_fid=0.0, nonlinear=False):
     growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
     z_eval = jnp.where(in_bounds, z, z_b)
 
-    P_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=not nonlinear), (len(k), len(z)))
-    P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=not nonlinear), (len(k), 1))
+    P_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=linear), (len(k), len(z)))
+    P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (len(k), 1))
 
     return growth_ratio[None, :] * jnp.sqrt(P_zeval / P_zfid)
 
 
-@partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window", "nonlinear"))
+@partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window", "linear"))
 def _cl_linear_nonlimber(
     cosmology, tracer1, tracer2, l, z,
-    nonlinear=False,
+    linear=True,
     z_fid=0.0, n_fft=None, n_interp=200,
     bias=0.1, window=0.2,
 ):
@@ -131,34 +131,48 @@ def _cl_linear_nonlimber(
     k_anchors = jnp.geomspace(k_min, k_max, n_interp)
     log_ka, log_kf = jnp.log(k_anchors), jnp.log(k_fine)
 
+    # Each tracer may contribute more than one kernel() entry (e.g. density + RSD); every
+    # entry gets its own row here, tagged with which tracer and which der_bessel it belongs to.
+    # A tracer's own bias only multiplies its der_bessel=0 (density) term, not e.g. an RSD term,
+    # matching CCL's/SwiftCl's convention that galaxy bias and the RSD transfer function are
+    # independent, separately-scaled components.
     # chi_star is real only when a CMBLensingTracer is present; jnp.inf makes the mask a no-op for every other tracer.
-    f_chi_stack = jnp.stack([
-        jnp.where(chi_nodes < (chi_star if isinstance(t, CMBLensingTracer) else jnp.inf),
-                  jnp.atleast_1d(t.kernel(cosmology, z_nodes)) * _resolve_bias(b, z_nodes), 0.0)[None, :]
-        * _D_kz_linear(cosmology, k_anchors, z_nodes, z_fid=z_fid, nonlinear=nonlinear)
-        for t, b in zip(tracers, biases)
-    ])
+    term_tracer_idx = []
+    term_der_bessel = []
+    f_chi_list = []
+    for t_idx, (t, b) in enumerate(zip(tracers, biases)):
+        D_kz_t = _D_kz_linear(cosmology, k_anchors, z_nodes, z_fid=z_fid, linear=linear)
+        chi_mask = chi_nodes < (chi_star if isinstance(t, CMBLensingTracer) else jnp.inf)
+        for weight, der_bessel in t.kernel(cosmology, z_nodes):
+            weight = jnp.atleast_1d(weight) * (_resolve_bias(b, z_nodes) if der_bessel == 0 else 1.0)
+            f_chi_list.append(jnp.where(chi_mask, weight, 0.0)[None, :] * D_kz_t)
+            term_tracer_idx.append(t_idx)
+            term_der_bessel.append(der_bessel)
+
+    f_chi_stack = jnp.stack(f_chi_list)  # (n_terms, n_interp, n_fft)
     c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_min, chi_max, n_fft, bias, window=window)  # leading axis broadcasts through for free
 
     interp_col = lambda col: jnp.interp(log_kf, log_ka, col)
-    interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))  # outer: per tracer, inner: per chi/eta_n mode
-    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_tracers, n_k, n_fft)
+    interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))  # outer: per term, inner: per chi/eta_n mode
+    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_terms, n_k, n_fft)
 
-    # Closed-form Hankel-transform coefficients A_n(l) = 2**(p_n-1)*sqrt(pi)*Gamma((1+l+p_n)/2)/Gamma((2+l-p_n)/2), p_n = bias + 1j*eta_n.
     p = bias + 1j * eta_n  # (n_fft,); already gradient-free via chi_min/chi_max's own stop_gradient above
-    log_num = jax.scipy.special.loggamma(0.5 * (1.0 + l_arr[:, None] + p[None, :]))
-    log_den = jax.scipy.special.loggamma(0.5 * (2.0 + l_arr[:, None] - p[None, :]))
-    A_table = (2.0 ** (p[None, :] - 1.0)) * jnp.sqrt(jnp.pi) * jnp.exp(log_num - log_den)  # (N_ell, n_fft)
+    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_fft); n-independent
 
-    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_fft)
-    Delta_stack = jnp.real(jnp.einsum('en,tkn->tke', A_table, c_stack * kp))  # (n_tracers, n_k, N_ell)
-    Delta1, Delta2 = Delta_stack[0], Delta_stack[-1]  # Delta2 is Delta1 when n_tracers == 1
+    # Sum each tracer's own terms' contributions into that tracer's Delta before cross-multiplying.
+    Delta_per_tracer = [0.0] * len(tracers)
+    for term_idx, (t_idx, der_bessel) in enumerate(zip(term_tracer_idx, term_der_bessel)):
+        A_table = _hankel_A_table(l_arr, p, der_bessel)  # (N_ell, n_fft)
+        Delta_per_tracer[t_idx] = Delta_per_tracer[t_idx] + jnp.real(
+            jnp.einsum('en,kn->ke', A_table, c_stack[term_idx] * kp)
+        )
+    Delta1, Delta2 = Delta_per_tracer[0], Delta_per_tracer[-1]  # Delta2 is Delta1 when n_tracers == 1
 
     # Delta_l(k) is only trustworthy where its Bessel turning point (l+0.5)/k falls within [chi_min, chi_max].
     resonant_chi = (l_arr[None, :] + 0.5) / k_fine[:, None]  # (n_k, N_ell)
     validity_mask = (resonant_chi >= chi_min) & (resonant_chi <= chi_max)
 
-    P_fid = jnp.reshape(cosmology.pk(k_fine, jnp.atleast_1d(z_fid), linear=not nonlinear), (k_fine.shape[0],))
+    P_fid = jnp.reshape(cosmology.pk(k_fine, jnp.atleast_1d(z_fid), linear=linear), (k_fine.shape[0],))
 
     integrand = k_fine[:, None] ** 2 * P_fid[:, None] * Delta1 * Delta2 * validity_mask
     Cl = (2.0 / jnp.pi) * jnp.trapezoid(integrand * k_fine[:, None], x=log_kf, axis=0)
@@ -166,8 +180,8 @@ def _cl_linear_nonlimber(
     return jnp.squeeze(Cl)
 
 
-@partial(jax.jit, static_argnames=("nonlinear",))
-def _cl_linear_limber(cosmology, tracer1, tracer2, l, z, nonlinear=False):
+@partial(jax.jit, static_argnames=("linear",))
+def _cl_linear_limber(cosmology, tracer1, tracer2, l, z, linear=True):
     """
     Limber branch of :meth:`hmfast.stats.pk.Pk.cl_linear`, mirroring
     :meth:`hmfast.stats.pk.Pk._cl_limber` but with a direct
@@ -187,12 +201,17 @@ def _cl_linear_limber(cosmology, tracer1, tracer2, l, z, nonlinear=False):
     def get_pk_slice(zi):
         chi_i = cosmology.angular_diameter_distance(zi) * (1.0 + zi)
         ki = (l + 0.5) / chi_i
-        return jnp.atleast_1d(cosmology.pk(ki, jnp.atleast_1d(zi), linear=not nonlinear)).flatten()
+        return jnp.atleast_1d(cosmology.pk(ki, jnp.atleast_1d(zi), linear=linear)).flatten()
 
     P_grid = jax.vmap(get_pk_slice)(z)
 
-    kernel1 = jnp.atleast_1d(tracer1.kernel(cosmology, z)) * _resolve_bias(getattr(tracer1, "bias", None), z)
-    kernel2 = jnp.atleast_1d(tracer2.kernel(cosmology, z)) * _resolve_bias(getattr(tracer2, "bias", None), z)
+    # Taking kernel()'s sole entry ([0]) is safe here specifically because this function is only
+    # ever reached after pk.py's _raise_if_rsd_in_limber has already ruled out rsd=True on either
+    # tracer, so a built-in tracer's kernel() is guaranteed to return exactly one der_bessel=0 term.
+    weight1, _ = tracer1.kernel(cosmology, z)[0]
+    weight2, _ = tracer2.kernel(cosmology, z)[0]
+    kernel1 = jnp.atleast_1d(weight1) * _resolve_bias(getattr(tracer1, "bias", None), z)
+    kernel2 = jnp.atleast_1d(weight2) * _resolve_bias(getattr(tracer2, "bias", None), z)
 
     chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
     limber_weight = cosmology.comoving_volume_element(z) / chi**4

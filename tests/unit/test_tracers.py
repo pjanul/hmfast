@@ -73,6 +73,16 @@ _ALL_TRACER_CLASSES = [
 ]
 
 
+def _kernel_scalar(tracer, cosmology, z):
+    """Sum every term's weight from kernel() into one array, for tests that only care
+    about the kernel's overall value/gradient rather than its per-term breakdown."""
+    weights = [weight for weight, _ in tracer.kernel(cosmology, z)]
+    total = weights[0]
+    for w in weights[1:]:
+        total = total + w
+    return total
+
+
 class TestTracerProfileGuardrail:
     # Constructing a tracer with a profile from the wrong family raises TypeError.
     @pytest.mark.parametrize("tracer_cls,wrong_profile", _WRONG_PROFILE_CASES)
@@ -136,7 +146,9 @@ class TestDndzNormalization:
 
 
 class TestKernelShapeAndSqueeze:
-    # kernel() follows the same broadcast-then-squeeze convention as profile real()/fourier().
+    # kernel() returns a list of (weight, der_bessel) terms; each weight follows the same
+    # broadcast-then-squeeze convention as profile real()/fourier(), and der_bessel is a
+    # plain non-negative int.
     @pytest.mark.parametrize("tracer_cls", _ALL_TRACER_CLASSES)
     @pytest.mark.parametrize(
         "z_key,expected_shape",
@@ -151,8 +163,11 @@ class TestKernelShapeAndSqueeze:
             "arrayN": jnp.array([0.1, 0.5, 1.0, 2.0]),
         }
         tracer = _build_default(tracer_cls)
-        out = tracer.kernel(fixed_cosmology, z_vals[z_key])
-        assert jnp.shape(out) == expected_shape
+        terms = tracer.kernel(fixed_cosmology, z_vals[z_key])
+        assert isinstance(terms, list) and len(terms) >= 1
+        for weight, der_bessel in terms:
+            assert jnp.shape(weight) == expected_shape
+            assert isinstance(der_bessel, int) and der_bessel >= 0
 
 
 class TestKernelZMaxTruncation:
@@ -160,8 +175,8 @@ class TestKernelZMaxTruncation:
     @pytest.mark.parametrize("tracer_cls", [CIBTracer, kSZTracer, tSZTracer])
     def test_truncates_at_z_max(self, fixed_cosmology, tracer_cls):
         tracer = tracer_cls(z_max=3.0)
-        assert tracer.kernel(fixed_cosmology, jnp.array(3.5)) == 0.0
-        inside = tracer.kernel(fixed_cosmology, jnp.array(2.5))
+        assert _kernel_scalar(tracer, fixed_cosmology, jnp.array(3.5)) == 0.0
+        inside = _kernel_scalar(tracer, fixed_cosmology, jnp.array(2.5))
         assert jnp.isfinite(inside) and inside != 0.0
 
 
@@ -212,7 +227,7 @@ class TestKernelArraySizeChange:
     @pytest.mark.parametrize("tracer_cls", _ALL_TRACER_CLASSES)
     def test_array_size_change_across_outer_jit(self, fixed_cosmology, tracer_cls):
         tracer = _build_default(tracer_cls)
-        call = jax.jit(lambda t, c, z: t.kernel(c, z))
+        call = jax.jit(lambda t, c, z: _kernel_scalar(t, c, z))
         out_scalar = call(tracer, fixed_cosmology, jnp.array(0.5))
         out_array = call(tracer, fixed_cosmology, jnp.array([0.0, 0.5, 1.0]))
         assert out_scalar.shape == ()
@@ -232,7 +247,7 @@ class TestKernelNaNPropagation:
             if tracer_cls is kSZTracer
             else _build_default(tracer_cls)
         )
-        out = tracer.kernel(out_of_bounds_cosmology, jnp.array([0.3, 1.0]))
+        out = _kernel_scalar(tracer, out_of_bounds_cosmology, jnp.array([0.3, 1.0]))
         assert jnp.all(jnp.isnan(out))
 
     # tSZ/CIB's kernels are purely analytic in z (and z_max), with no cosmology dependence at
@@ -240,7 +255,7 @@ class TestKernelNaNPropagation:
     @pytest.mark.parametrize("tracer_cls", [tSZTracer, CIBTracer])
     def test_unaffected_by_cosmology_bounds(self, out_of_bounds_cosmology, tracer_cls):
         tracer = _build_default(tracer_cls)
-        out = tracer.kernel(out_of_bounds_cosmology, jnp.array([0.3, 1.0]))
+        out = _kernel_scalar(tracer, out_of_bounds_cosmology, jnp.array([0.3, 1.0]))
         assert jnp.all(jnp.isfinite(out))
 
 
@@ -264,7 +279,7 @@ class TestKernelGradients:
         z = jnp.array(0.5)
 
         def f(H0):
-            return tracer.kernel(fixed_cosmology.update(H0=H0), z)
+            return _kernel_scalar(tracer, fixed_cosmology.update(H0=H0), z)
 
         _check_grad(f, fixed_cosmology.H0)
 
@@ -274,7 +289,7 @@ class TestKernelGradients:
         z = jnp.array(1.0)
 
         def f(H0):
-            return tracer.kernel(fixed_cosmology.update(H0=H0), z)
+            return _kernel_scalar(tracer, fixed_cosmology.update(H0=H0), z)
 
         _check_grad(f, fixed_cosmology.H0)
 
@@ -313,7 +328,8 @@ class TestMagnificationBias:
             dndz=_SYNTHETIC_DNDZ, mag_bias=(jnp.array([0.0, 2.0]), jnp.array([0.6, 0.6]))
         )
         assert not jnp.allclose(
-            default_tracer.kernel(fixed_cosmology, z), biased_tracer.kernel(fixed_cosmology, z)
+            _kernel_scalar(default_tracer, fixed_cosmology, z),
+            _kernel_scalar(biased_tracer, fixed_cosmology, z),
         )
 
     # jax.grad of kernel() wrt the magnification-bias slope is finite and matches finite differences.
@@ -324,7 +340,7 @@ class TestMagnificationBias:
             tracer = GalaxyTracer(
                 dndz=_SYNTHETIC_DNDZ, mag_bias=(jnp.array([0.0, 2.0]), jnp.array([s, s]))
             )
-            return tracer.kernel(fixed_cosmology, z)
+            return _kernel_scalar(tracer, fixed_cosmology, z)
 
         _check_grad(f, 0.6)
 
@@ -344,7 +360,8 @@ class TestIntrinsicAlignment:
             dndz=_SYNTHETIC_DNDZ, ia_bias=(jnp.array([0.0, 2.0]), jnp.array([1.0, 1.0]))
         )
         assert not jnp.allclose(
-            default_tracer.kernel(fixed_cosmology, z), ia_tracer.kernel(fixed_cosmology, z)
+            _kernel_scalar(default_tracer, fixed_cosmology, z),
+            _kernel_scalar(ia_tracer, fixed_cosmology, z),
         )
 
     # jax.grad of kernel() wrt the IA amplitude is finite and matches finite differences.
@@ -355,7 +372,7 @@ class TestIntrinsicAlignment:
             tracer = GalaxyLensingTracer(
                 dndz=_SYNTHETIC_DNDZ, ia_bias=(jnp.array([0.0, 2.0]), jnp.array([a, a]))
             )
-            return tracer.kernel(fixed_cosmology, z)
+            return _kernel_scalar(tracer, fixed_cosmology, z)
 
         _check_grad(f, 1.0)
 

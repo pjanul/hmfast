@@ -11,9 +11,9 @@ class Tracer(ABC):
     """
     Parent tracer class from which other tracer classes inherit.
 
-    Child tracers must implement :meth:`kernel`. When used in the halo model,
-    they must also define a ``profile`` attribute with an appropriate profile
-    object.
+    Child tracers must implement :meth:`kernel`, returning a list of
+    ``(weight, der_bessel)`` terms. When used in the halo model, they must
+    also define a ``profile`` attribute with an appropriate profile object.
     """
     
     _required_profile_type = HaloProfile 
@@ -136,7 +136,13 @@ class Tracer(ABC):
 
     @abstractmethod
     def kernel(self, cosmology, z):
-        """Required tracer kernel."""
-        pass 
+        """
+        Required tracer kernel. Returns a list of ``(weight(z), der_bessel)``
+        terms, where ``der_bessel`` tags the order of the spherical Bessel
+        function (or its derivative) each term projects through in an angular
+        power spectrum (``0`` for a plain density-type projection; e.g. ``2``
+        for redshift-space distortions).
+        """
+        pass
    
   

@@ -788,13 +788,27 @@ class Cosmology:
             f"{prescription!r}. Allowed values are: 'EdS', 'EdS_approx', 'NS97'."
         )
 
-    def _growth_factor_ode(self, z, z_max):
+    def _growth_ode(self, z, z_max):
         """
-        Extend the linear growth factor past the emulator's ``z_max`` by integrating the
-        growth-rate Riccati equation forward (the numerically stable
-        direction) from a deep-matter-domination seed via
+        Extend both the linear growth factor and the linear growth rate past the
+        emulator's ``z_max`` by integrating the growth-rate Riccati equation forward
+        (the numerically stable direction) from a deep-matter-domination seed via
         :func:`hmfast.utils.dopri5_integrate`, then calibrating the growth-factor branch
         to :meth:`growth_factor` at ``z_max``.
+
+        The growth-rate branch needs no analogous calibration: the growth-factor
+        calibration below is an additive shift to ``ln D``, and :math:`f = d\\ln D/d\\ln a`
+        is a derivative, so it's invariant to that shift. ``f``'s own accuracy instead
+        comes from the background dynamics (``H(z)``) already being calibrated via
+        :meth:`_hz_flrw_calibrated`.
+
+        Returns
+        -------
+        D : jnp.ndarray
+            Extrapolated growth factor at ``z``, calibrated to :meth:`growth_factor` at ``z_max``.
+        f : jnp.ndarray
+            Extrapolated growth rate at ``z``, from the same ODE trajectory (uncalibrated --
+            none is needed, see above).
         """
         Hz_fn = self._hz_flrw_calibrated(z_max)
         z_arr = jnp.atleast_1d(z)
@@ -825,7 +839,8 @@ class Cosmology:
 
         x_target = jnp.log(1.0 / (1.0 + z_arr))
         lnD_target = jnp.interp(x_target, x_traj, lnD_traj) + norm
-        return jnp.exp(lnD_target)
+        f_target = jnp.interp(x_target, x_traj, f_traj)
+        return jnp.exp(lnD_target), f_target
 
     @jax.jit
     def growth_factor(self, z):
@@ -865,7 +880,7 @@ class Cosmology:
 
         if self.extrapolate_z:
             z_max = self._z_grid_pk()[-1]
-            D_ext = self._growth_factor_ode(z, z_max)
+            D_ext, _ = self._growth_ode(z, z_max)
             D = jnp.where(z > z_max, D_ext, D)
 
         return jnp.squeeze(D)
@@ -879,8 +894,19 @@ class Cosmology:
 
             f(z) = \\frac{d \\ln D}{d \\ln a}
 
-        NaN beyond the emulator's trained z-grid regardless of ``extrapolate_z`` --
-        no extrapolation branch, by design (unlike ``growth_factor``, ``pk``, etc.).
+        Without ``extrapolate_z``, NaN beyond the emulator's trained z-grid (matches
+        ``growth_factor``'s convention). With ``extrapolate_z=True``, beyond the grid
+        this reuses the same growth-rate ODE trajectory :meth:`growth_factor`'s own
+        extrapolation branch already integrates (see :meth:`_growth_ode`) -- both a
+        growth factor and a growth rate fall out of that single integration, so this
+        doesn't integrate a second time.
+
+        .. warning::
+            When extrapolating beyond the emulator's redshift range, this assumes
+            massive neutrinos behave as fully non-relativistic matter at every ``z``,
+            and does not account for their transition to (semi-)relativistic behavior
+            at the high redshifts this extrapolation reaches (e.g. approaching
+            recombination).
 
         Parameters
         ----------
@@ -903,6 +929,11 @@ class Cosmology:
         f_grid = jnp.gradient(jnp.log(D_grid), jnp.log(a_grid))
 
         f = jnp.interp(z, z_grid_pk, f_grid, left=jnp.nan, right=jnp.nan)
+
+        if self.extrapolate_z:
+            z_max = z_grid_pk[-1]
+            _, f_ext = self._growth_ode(z, z_max)
+            f = jnp.where(z > z_max, f_ext, f)
 
         return jnp.squeeze(f)
 

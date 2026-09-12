@@ -28,11 +28,14 @@ class GalaxyTracer(Tracer):
         compute a linearly-biased angular power spectrum; has no effect when this tracer is used
         with a full halo-model calculation, where bias is instead handled through the halo
         occupation profile. Defaults to `None` (unbiased).
+    rsd : bool
+        Whether :meth:`kernel` includes a redshift-space distortion term. Defaults to
+        `False`.
     """
 
     _required_profile_type = GalaxyHODProfile
 
-    def __init__(self, profile=None, dndz=None, mag_bias=None, bias=None):
+    def __init__(self, profile=None, dndz=None, mag_bias=None, bias=None, rsd=False):
         super().__init__(profile=profile or Z07GalaxyHODProfile())
 
         if dndz is None:
@@ -46,6 +49,7 @@ class GalaxyTracer(Tracer):
         self.mag_bias = mag_bias
 
         self.bias = bias
+        self.rsd = bool(rsd)
 
 
     @property
@@ -78,19 +82,22 @@ class GalaxyTracer(Tracer):
         # The profile IS the leaf. JAX will automatically
         # drill down into the profile's own 5 leaves.
         leaves = (self.profile, self._dndz_data, self._mag_bias_data, self._bias_data)
-        return (leaves, None)
+        aux_data = (self.rsd,)
+        return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
         profile, dndz_data, mag_bias_data, bias_data = leaves
+        rsd, = aux_data
         obj = cls.__new__(cls)
         obj.profile = profile
         obj._dndz_data = dndz_data
         obj._mag_bias_data = mag_bias_data
         obj._bias_data = bias_data
+        obj.rsd = rsd
         return obj
 
-    def update(self, profile=None, dndz=None, mag_bias=None, bias=None):
+    def update(self, profile=None, dndz=None, mag_bias=None, bias=None, rsd=None):
         """
         Return a new GalaxyTracer instance with updated attributes using PyTree logic.
 
@@ -104,6 +111,8 @@ class GalaxyTracer(Tracer):
             New magnification-bias slope (z, s(z)). If None, it is unchanged.
         bias : array_like, optional
             New linear galaxy bias (z, b(z)). If None, it is unchanged.
+        rsd : bool, optional
+            Whether to include a redshift-space distortion term. If None, it is unchanged.
 
         Returns
         -------
@@ -115,42 +124,38 @@ class GalaxyTracer(Tracer):
         new_dndz = self._prepare_z_function(dndz) if dndz is not None else flat[1]
         new_mag_bias = self._prepare_z_function(mag_bias, normalize=False) if mag_bias is not None else flat[2]
         new_bias = self._prepare_z_function(bias, normalize=False) if bias is not None else flat[3]
-        return self._tree_unflatten(aux, (new_profile, new_dndz, new_mag_bias, new_bias))
+        new_rsd = bool(rsd) if rsd is not None else aux[0]
+        return self._tree_unflatten((new_rsd,), (new_profile, new_dndz, new_mag_bias, new_bias))
 
 
-    def kernel(self, cosmology, z):
+    def _density_kernel(self, cosmology, z):
         """
-        Compute the galaxy kernel :math:`W_g(\\chi)` at redshift :math:`z`.
-
-        The kernel is given by:
-
-        .. math::
-
-            W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}
-
-        where :math:`dN/dz` is the normalized redshift distribution of galaxies.
-        The kernel also includes a magnification-bias contribution controlled by
-        ``mag_bias``.
-
-        Parameters
-        ----------
-        cosmology : Cosmology
-            Cosmology object with required methods and parameters.
-        z : float or array_like
-            Redshift(s) at which to compute the kernel.
-
-        Returns
-        -------
-        W_g : array_like
-            Galaxy kernel evaluated at redshift(s) :math:`z`.
+        Compute the galaxy density kernel :math:`W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}`,
+        without the magnification-bias contribution. Shared by :meth:`_kernel_primary` and
+        :meth:`_kernel_rsd` (the redshift-space distortion term reuses this same
+        density-weighted shape).
         """
-
         z = jnp.atleast_1d(z)
         z_g, phi_prime_g = self.dndz
 
         phi_prime_g_at_z = jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
         H_grid = cosmology.hubble_parameter(z) / (Const._c_ / 1e3)
-        W_density = H_grid * phi_prime_g_at_z
+        return H_grid * phi_prime_g_at_z
+
+    def _kernel_primary(self, cosmology, z):
+        """
+        Galaxy density term :math:`W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}`
+        (``der_bessel=0``), excluding magnification bias.
+        """
+        return jnp.squeeze(self._density_kernel(cosmology, z))
+
+    def _kernel_mag_bias(self, cosmology, z):
+        """
+        Magnification-bias term (``der_bessel=0``) of the galaxy kernel, from the
+        ``mag_bias`` log-slope :math:`s(z)`.
+        """
+        z = jnp.atleast_1d(z)
+        z_g, _ = self.dndz
 
         z_s, s_vals = self.mag_bias
         s_at_source = jnp.interp(z_g, z_s, s_vals)  # s(z) at the source (own dndz) grid, clamp-to-edge
@@ -162,7 +167,25 @@ class GalaxyTracer(Tracer):
         W_mag = -2.0 * lensing_pref \
             * self._lensing_efficiency_integral(cosmology, z, self.dndz, weight=weight)
 
-        return jnp.squeeze(W_density + W_mag)
+        return jnp.squeeze(W_mag)
+
+    def _kernel_rsd(self, cosmology, z):
+        """
+        Redshift-space distortion term (``der_bessel=2``) of the galaxy kernel.
+        """
+        z = jnp.atleast_1d(z)
+        f_z = cosmology.growth_rate(z)
+        W_rsd = -f_z * self._density_kernel(cosmology, z)
+        return jnp.squeeze(W_rsd)
+
+    def kernel(self, cosmology, z):
+        terms = [
+            (self._kernel_primary(cosmology, z), 0),
+            (self._kernel_mag_bias(cosmology, z), 0),
+        ]
+        if self.rsd:
+            terms.append((self._kernel_rsd(cosmology, z), 2))
+        return terms
 
 
 

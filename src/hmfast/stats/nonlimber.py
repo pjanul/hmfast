@@ -53,6 +53,24 @@ def _fftlog_biased_coeffs(f_chi, chi_min, chi_max, n_fft, bias, window=0.2):
     return c_n, eta_n
 
 
+# Closed-form Hankel-transform coefficients for the n-th derivative of the spherical Bessel
+# function, generalizing the plain (n=0) transform used throughout this module.
+
+def _hankel_A_table(l_arr, p, der_bessel):
+    """
+    A_n(l,p) = (-1)**n * sqrt(pi)/4 * 2**(p+1-n) * Gamma(p+1)/Gamma(p+1-n)
+               * Gamma((l+p+1-n)/2) / Gamma((2+n+l-p)/2),
+    the closed-form Hankel-transform coefficient for ``\\int dx x**p j_l^(n)(x)`` (Fang, Krause,
+    Eifler & MacCrann 2020, arXiv:1911.11947, eq. A.6, in this module's own (l, p) convention).
+    ``der_bessel=0`` reduces exactly to the plain spherical-Bessel transform used elsewhere here.
+    """
+    n = float(der_bessel)
+    log_poly = jax.scipy.special.loggamma(p[None, :] + 1.0) - jax.scipy.special.loggamma(p[None, :] + 1.0 - n)
+    log_num = jax.scipy.special.loggamma(0.5 * (l_arr[:, None] + p[None, :] + 1.0 - n))
+    log_den = jax.scipy.special.loggamma(0.5 * (2.0 + n + l_arr[:, None] - p[None, :]))
+    return ((-1.0) ** n) * (jnp.sqrt(jnp.pi) / 4.0) * (2.0 ** (p[None, :] + 1.0 - n)) * jnp.exp(log_poly + log_num - log_den)
+
+
 # The D(k, z) growth/bias factor, and the per-tracer kernel*D(k,chi) product
 
 def _D_kz(halo_model, profile, k, z, z_fid=0.0):
@@ -136,28 +154,38 @@ def _cl_2h_nonlimber(
     k_anchors = jnp.geomspace(k_min, k_max, n_interp)
     log_ka, log_kf = jnp.log(k_anchors), jnp.log(k_fine)
 
+    # Each tracer may contribute more than one kernel() entry (e.g. density + RSD); every
+    # entry gets its own row here, tagged with which tracer and which der_bessel it belongs to.
     # chi_star is real only when a CMBLensingTracer is present; jnp.inf makes the mask a no-op for every other tracer.
-    f_chi_stack = jnp.stack([
-        jnp.where(chi_nodes < (chi_star if isinstance(t, CMBLensingTracer) else jnp.inf),
-                  jnp.atleast_1d(t.kernel(cosmology, z_nodes)), 0.0)[None, :]
-        * _D_kz(halo_model, t.profile, k_anchors, z_nodes, z_fid=z_fid)
-        for t in tracers
-    ])
+    term_tracer_idx = []
+    term_der_bessel = []
+    f_chi_list = []
+    for t_idx, t in enumerate(tracers):
+        D_kz_t = _D_kz(halo_model, t.profile, k_anchors, z_nodes, z_fid=z_fid)
+        chi_mask = chi_nodes < (chi_star if isinstance(t, CMBLensingTracer) else jnp.inf)
+        for weight, der_bessel in t.kernel(cosmology, z_nodes):
+            f_chi_list.append(jnp.where(chi_mask, jnp.atleast_1d(weight), 0.0)[None, :] * D_kz_t)
+            term_tracer_idx.append(t_idx)
+            term_der_bessel.append(der_bessel)
+
+    f_chi_stack = jnp.stack(f_chi_list)  # (n_terms, n_interp, n_fft)
     c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_min, chi_max, n_fft, bias, window=window)  # leading axis broadcasts through for free
 
     interp_col = lambda col: jnp.interp(log_kf, log_ka, col)
-    interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))  # outer: per tracer, inner: per chi/eta_n mode
-    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_tracers, n_k, n_fft)
+    interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))  # outer: per term, inner: per chi/eta_n mode
+    c_stack = interp_batched(jnp.real(c_n_stack)) + 1j * interp_batched(jnp.imag(c_n_stack))  # (n_terms, n_k, n_fft)
 
-    # Closed-form Hankel-transform coefficients A_n(l) = 2**(p_n-1)*sqrt(pi)*Gamma((1+l+p_n)/2)/Gamma((2+l-p_n)/2), p_n = bias + 1j*eta_n.
     p = bias + 1j * eta_n  # (n_fft,); already gradient-free via chi_min/chi_max's own stop_gradient above
-    log_num = jax.scipy.special.loggamma(0.5 * (1.0 + l_arr[:, None] + p[None, :]))
-    log_den = jax.scipy.special.loggamma(0.5 * (2.0 + l_arr[:, None] - p[None, :]))
-    A_table = (2.0 ** (p[None, :] - 1.0)) * jnp.sqrt(jnp.pi) * jnp.exp(log_num - log_den)  # (N_ell, n_fft)
+    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_fft); n-independent
 
-    kp = k_fine[:, None] ** (-1.0 - bias) * jnp.exp(-1j * eta_n[None, :] * log_kf[:, None])  # (n_k, n_fft)
-    Delta_stack = jnp.real(jnp.einsum('en,tkn->tke', A_table, c_stack * kp))  # (n_tracers, n_k, N_ell)
-    Delta1, Delta2 = Delta_stack[0], Delta_stack[-1]  # Delta2 is Delta1 when n_tracers == 1
+    # Sum each tracer's own terms' contributions into that tracer's Delta before cross-multiplying.
+    Delta_per_tracer = [0.0] * len(tracers)
+    for term_idx, (t_idx, der_bessel) in enumerate(zip(term_tracer_idx, term_der_bessel)):
+        A_table = _hankel_A_table(l_arr, p, der_bessel)  # (N_ell, n_fft)
+        Delta_per_tracer[t_idx] = Delta_per_tracer[t_idx] + jnp.real(
+            jnp.einsum('en,kn->ke', A_table, c_stack[term_idx] * kp)
+        )
+    Delta1, Delta2 = Delta_per_tracer[0], Delta_per_tracer[-1]  # Delta2 is Delta1 when n_tracers == 1
 
     # Delta_l(k) is only trustworthy where its Bessel turning point (l+0.5)/k falls within [chi_min, chi_max].
     resonant_chi = (l_arr[None, :] + 0.5) / k_fine[:, None]  # (n_k, N_ell)

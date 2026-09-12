@@ -67,7 +67,7 @@ class kSZTracer(Tracer):
 
     # ---------------- End JAX PyTree Registration ---------------- #
 
-    def kernel(self, cosmology, z):
+    def _kernel_primary(self, cosmology, z):
         """
         Compute the kSZ kernel :math:`W_{\\mathrm{kSZ}}(z)` at redshift
         :math:`z`.
@@ -105,6 +105,9 @@ class kSZTracer(Tracer):
         W = sigma_T_over_m_p * velocity_dispersion / (1.0 + z)
         # Tolerance guards against callers' z grids (e.g. jnp.geomspace) not landing bit-exactly on z_max.
         return jnp.squeeze(jnp.where(z <= self.z_max + 1e-8, W, 0.0))
+
+    def kernel(self, cosmology, z):
+        return [(self._kernel_primary(cosmology, z), 0)]
 
 
 

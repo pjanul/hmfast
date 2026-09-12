@@ -70,11 +70,11 @@ class tSZTracer(Tracer):
 
     # --- End JAX PyTree Registration ---
         
-    def kernel(self, cosmology, z):
+    def _kernel_primary(self, cosmology, z):
 
         """
         Compute the tSZ kernel as a function of redshift.
-    
+
         The kernel is given by:
 
             .. math::
@@ -106,6 +106,9 @@ class tSZTracer(Tracer):
         W = (sigma_T / m_e) * Const._Mpc_over_m_ / (1.0 + z)
         # Tolerance guards against callers' z grids (e.g. jnp.geomspace) not landing bit-exactly on z_max.
         return jnp.squeeze(jnp.where(z <= self.z_max + 1e-8, W, 0.0))
+
+    def kernel(self, cosmology, z):
+        return [(self._kernel_primary(cosmology, z), 0)]
 
 
 

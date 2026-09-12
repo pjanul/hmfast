@@ -65,7 +65,7 @@ class CIBTracer(Tracer):
             aux = (z_max,)
         return self._tree_unflatten(aux, flat)
 
-    def kernel(self, cosmology, z):
+    def _kernel_primary(self, cosmology, z):
         """
         Compute the CIB kernel :math:`W_{\\mathrm{CIB}}(\\chi)` at redshift :math:`z`.
 
@@ -93,6 +93,9 @@ class CIBTracer(Tracer):
         W = 1.0 / (1.0 + z)
         # Tolerance guards against callers' z grids (e.g. jnp.geomspace) not landing bit-exactly on z_max.
         return jnp.squeeze(jnp.where(z <= self.z_max + 1e-8, W, 0.0))
+
+    def kernel(self, cosmology, z):
+        return [(self._kernel_primary(cosmology, z), 0)]
 
 
 jax.tree_util.register_pytree_node(

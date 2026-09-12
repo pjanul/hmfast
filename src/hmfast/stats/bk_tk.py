@@ -6,6 +6,26 @@ from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
 from hmfast.halos.profiles.hod import GalaxyHODProfile
 
 
+def _kernel_density(tracer, cosmology, z):
+    """
+    The der_bessel=0 (density-type) part of a tracer's kernel: the sum of every
+    der_bessel=0 term from ``kernel()``. This module's bispectrum/trispectrum/
+    covariance integrals have no way to project an additional Bessel-order term
+    (e.g. RSD) -- raises if ``tracer`` has one, rather than silently dropping it.
+    """
+    terms = tracer.kernel(cosmology, z)
+    if any(der_bessel != 0 for _, der_bessel in terms):
+        raise NotImplementedError(
+            f"{type(tracer).__name__} has a der_bessel!=0 kernel term (e.g. RSD), which this "
+            "module has no way to project into a bispectrum/trispectrum/covariance integral; "
+            "use a tracer without that term here."
+        )
+    total = jnp.zeros_like(jnp.atleast_1d(z))
+    for weight, _ in terms:
+        total = total + jnp.atleast_1d(weight)
+    return jnp.squeeze(total)
+
+
 # -------------------------
 # Perturbation theory helpers
 # -------------------------
@@ -1185,8 +1205,8 @@ class Tk:
             )  # (N_l1, N_l2)
 
             kernels = jnp.squeeze(
-                tracer1.kernel(hm.cosmology, z_i) * tracer2.kernel(hm.cosmology, z_i)
-                * tracer3.kernel(hm.cosmology, z_i) * tracer4.kernel(hm.cosmology, z_i)
+                _kernel_density(tracer1, hm.cosmology, z_i) * _kernel_density(tracer2, hm.cosmology, z_i)
+                * _kernel_density(tracer3, hm.cosmology, z_i) * _kernel_density(tracer4, hm.cosmology, z_i)
             )
             weight = jnp.squeeze(hm.cosmology.comoving_volume_element(z_i) / chi ** 8)
 
@@ -1319,8 +1339,8 @@ class Tk:
             response_outer = response1[:, None] * response2[None, :]  # (N_l1, N_l2)
 
             kernels = jnp.squeeze(
-                tracer1.kernel(hm.cosmology, z_i) * tracer2.kernel(hm.cosmology, z_i)
-                * tracer3.kernel(hm.cosmology, z_i) * tracer4.kernel(hm.cosmology, z_i)
+                _kernel_density(tracer1, hm.cosmology, z_i) * _kernel_density(tracer2, hm.cosmology, z_i)
+                * _kernel_density(tracer3, hm.cosmology, z_i) * _kernel_density(tracer4, hm.cosmology, z_i)
             )
             sigma2_b = jnp.squeeze(hm.cosmology.sigma2_b_disc(z_i, f_sky=f_sky))
             weight = jnp.squeeze(hm.cosmology.comoving_volume_element(z_i) / chi ** 6)

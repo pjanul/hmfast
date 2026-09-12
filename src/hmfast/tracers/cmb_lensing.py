@@ -59,7 +59,7 @@ class CMBLensingTracer(Tracer):
         return self._tree_unflatten(aux, flat)
 
 
-    def kernel(self, cosmology, z):
+    def _kernel_primary(self, cosmology, z):
         """
         Compute the CMB lensing kernel :math:`W_{\\kappa_{\\mathrm{CMB}}}(\\chi)` at
         redshift :math:`z`.
@@ -109,10 +109,11 @@ class CMBLensingTracer(Tracer):
             ((chi_z_cmb - chi_z) / chi_z_cmb)
         )
 
-       
+
         return jnp.squeeze(W_kappa_cmb)
 
-
+    def kernel(self, cosmology, z):
+        return [(self._kernel_primary(cosmology, z), 0)]
 
 
 jax.tree_util.register_pytree_node(

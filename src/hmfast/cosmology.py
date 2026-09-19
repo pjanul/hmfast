@@ -1,6 +1,7 @@
 import os
 import jax
 import jax.numpy as jnp
+import numpy as np
 import jax.scipy as jscipy
 from typing import Dict, Union
 import mcfit
@@ -304,19 +305,20 @@ class Cosmology:
         return jnp.linspace(0.0, z_max, 100, dtype=jnp.float64)     # z grid for Pk(z)
 
     def _pk_grid(self):
+        # numpy, not jnp: fixed by the emulator set alone, so it stays concrete for mcfit to plan on.
         is_ede_v2 = (self.emulator_set == "ede:v2")
         k_min = 5e-4 if is_ede_v2 else 1e-4
         k_max = 10.0 if is_ede_v2 else 50.0
 
         n_downsample_k = 1 if is_ede_v2 else 10
         n_k            = 1000 if is_ede_v2 else 5000
-        _k_grid = jnp.geomspace(k_min, k_max, n_k, dtype=jnp.float64)[::n_downsample_k]
+        _k_grid = np.geomspace(k_min, k_max, n_k, dtype=np.float64)[::n_downsample_k]
 
         if is_ede_v2:
             _pk_power_fac = _k_grid ** (-3)
         else:
-            ls = jnp.arange(2,n_k+2)[::n_downsample_k] 
-            _pk_power_fac = (ls*(ls+1.)/2./jnp.pi)**-1
+            ls = np.arange(2,n_k+2)[::n_downsample_k]
+            _pk_power_fac = (ls*(ls+1.)/2./np.pi)**-1.
 
         return _k_grid, _pk_power_fac
 
@@ -354,6 +356,7 @@ class Cosmology:
         sigma_grid = jnp.exp(0.5 * jnp.log(var))
         # Mass grid, shape: (n_R,)
         rho_crit_0 = cparams["Rho_crit_0"]
+        # Halos collapse out of the cold+baryon field; neutrinos free-stream out.
         Omega0_cb = cparams['Omega0_cb']
         M_grid = 4.0 * jnp.pi / 3.0 * Omega0_cb * rho_crit_0 * (R_grid ** 3)
 
@@ -678,7 +681,8 @@ class Cosmology:
         p['Omega0_m'] = p['Omega_cdm'] + p['Omega_b'] + p['Omega0_ncdm']
         p['Omega0_r'] = p['Omega0_ur']+p['Omega0_g']
         p['Omega0_m_nonu'] = p['Omega0_m'] - p['Omega0_ncdm']
-        p['Omega0_cb'] = p['Omega0_m_nonu'] 
+        # Exposed for users; the halo model and lensing kernels both use Omega0_m.
+        p['Omega0_cb'] = p['Omega0_m_nonu']
 
         # Critical density
         H0 = p['H0'] / (c / 1e3) # Convert to H0 over c (c being in km/s)
@@ -718,12 +722,12 @@ class Cosmology:
     @jax.jit
     def omega_m(self, z):
         """
-        Matter density parameter excluding neutrinos.
-    
+        Total matter density parameter, including massive neutrinos.
+
         .. math::
-    
-            \\Omega_m(z) = \\frac{\\Omega_{m,\\mathrm{no\\nu},0}(1+z)^3}{\\Omega_{m,0}(1+z)^3 + \\Omega_{\\Lambda,0} + \\Omega_{r,0}(1+z)^4}
-    
+
+            \\Omega_m(z) = \\Omega_{m,0}(1+z)^3 \\left[\\frac{H_0}{H(z)}\\right]^2
+
         Parameters
         ----------
         z : float or jnp.ndarray
@@ -736,8 +740,9 @@ class Cosmology:
         """
        
         params = self._cosmo_params()
-        om0, om0_nonu, or0, ol0 = params['Omega0_m'], params['Omega0_m_nonu'], params['Omega0_r'], params['Omega_Lambda']
-        Omega_m_z = om0_nonu * (1. + z)**3. / (om0 * (1. + z)**3. + ol0 + or0 * (1. + z)**4.) # omega_matter without neutrinos
+        om0 = params['Omega0_m']
+        # rho_m(z)/rho_crit(z), exact for any expansion history via the emulated H(z).
+        Omega_m_z = om0 * (1. + z)**3. * (self.H0 / self.hubble_parameter(z))**2.
         
         return Omega_m_z
 

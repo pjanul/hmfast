@@ -1,4 +1,5 @@
 import functools
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -50,6 +51,7 @@ class Pk:
     # 1-halo term
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,))
     def pk_1h(self, halo_model, k, z, profile1, profile2=None, k_damp=0.01):
         """
         Compute the 1-halo contribution to the 3D power spectrum.
@@ -125,6 +127,7 @@ class Pk:
     # 2-halo term
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,))
     def pk_2h(self, halo_model, k, z, profile1, profile2=None):
         """
         Compute the 2-halo contribution to the 3D power spectrum.
@@ -314,6 +317,7 @@ class Pk:
     # Angular power spectrum (Limber projection)
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,))
     def cl_1h(self, halo_model, tracer1, tracer2, l, z, k_damp=0.01):
         """
         Compute the 1-halo contribution to the angular power spectrum
@@ -322,7 +326,7 @@ class Pk:
         integrates the 1-halo 3D power spectrum against the tracer kernels
         (the mass integral is performed over :attr:`m_grid`). A tracer with
         an RSD term (e.g. ``GalaxyTracer(rsd=True)``) is supported here via
-        CCL's extended-Limber treatment of its ``der_bessel=2`` kernel term
+        an extended-Limber treatment of its ``der_bessel=2`` kernel term
         (see :func:`hmfast.stats.cl.cl_limber`). No non-Limber treatment is
         offered here, since the 1-halo term only matters at high
         :math:`\\ell`, where Limber is already accurate.
@@ -356,6 +360,7 @@ class Pk:
     # Angular power spectrum (2-halo term; Limber, with optional non-Limber)
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,), static_argnames=("l_limber", "n_fft", "n_interp", "bias", "window"))
     def cl_2h(self, halo_model, tracer1, tracer2, l, z, l_limber=0.0,
               z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
@@ -382,9 +387,8 @@ class Pk:
         (:meth:`cl_1h`) is already accurate.
 
         A tracer with an RSD term (e.g. ``GalaxyTracer(rsd=True)``) is
-        supported in the Limber branch (unlike ``cl_linear``'s Limber
-        branch, which still requires ``rsd=False``): its ``der_bessel=2``
-        kernel term is projected via CCL's own extended-Limber recipe (see
+        supported in the Limber branch: its ``der_bessel=2`` kernel term is
+        projected via an extended-Limber recipe (see
         :func:`hmfast.stats.cl.cl_limber`), adding roughly 1.7x the cost of
         this function for a pair where at least one tracer has
         ``rsd=True``, and no added cost otherwise.
@@ -448,6 +452,7 @@ class Pk:
     # Angular power spectrum (linear bias)
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,), static_argnames=("linear", "l_limber", "n_fft", "n_interp", "bias", "window"))
     def cl_linear(self, cosmology, tracer1, tracer2, l, z, linear=True,
                   l_limber=0.0, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
@@ -465,8 +470,10 @@ class Pk:
         Limber everywhere).
 
         Every ``der_bessel=0`` kernel term (e.g. a ``GalaxyTracer``'s density and
-        magnification-bias terms) is summed before multiplying by the tracer's bias;
-        an RSD (``der_bessel=2``) term is not supported here (see ``l_limber`` below).
+        magnification-bias terms) is summed before multiplying by the tracer's bias.
+        An RSD (``der_bessel=2``) term is supported in both branches: below
+        ``l_limber`` via the exact FFTLog projection, at or above it via an
+        extended-Limber recipe (see :func:`hmfast.stats.cl._cl_linear_limber`).
 
         Parameters
         ----------
@@ -517,14 +524,10 @@ class Pk:
         """
         tracer2 = tracer1 if tracer2 is None else tracer2
 
-        def limber_fn(l_high):
-            _cl._raise_if_rsd_in_limber(tracer1, tracer2, l_limber)
-            return _cl._cl_linear_limber(cosmology, tracer1, tracer2, l_high, z, linear=linear)
-
         return _cl._dispatch_by_ell(
             l, l_limber,
             lambda l_low: _cl._cl_linear_nonlimber(cosmology, tracer1, tracer2, l_low, z, linear=linear,
                                                     z_fid=z_fid, n_fft=n_fft, n_interp=n_interp,
                                                     bias=bias, window=window),
-            limber_fn,
+            lambda l_high: _cl._cl_linear_limber(cosmology, tracer1, tracer2, l_high, z, linear=linear),
         )

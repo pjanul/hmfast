@@ -146,12 +146,13 @@ class B16DensityProfile(DensityProfile):
             self.alpha_z_beta,
             self.x_out,
         )
-        aux_data = (self._x_grid, self._hankel)
+        # Only the Hankel object: pytree aux must be hashable, which an array is not.
+        aux_data = (self._hankel,)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x_grid, hankel = aux_data
+        hankel, = aux_data
         obj = cls.__new__(cls)
 
         (
@@ -167,7 +168,7 @@ class B16DensityProfile(DensityProfile):
             obj.x_out,
         ) = leaves
 
-        obj._x_grid = x_grid
+        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -219,7 +220,7 @@ class B16DensityProfile(DensityProfile):
 
         if x_grid is not None:
             sorted_grid = jnp.sort(x_grid)
-            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -272,7 +273,7 @@ class B16DensityProfile(DensityProfile):
             )
         return self.update(**self._PRESETS[key])
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
@@ -352,7 +353,7 @@ class B16DensityProfile(DensityProfile):
 
         return jnp.squeeze(rho_gas)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
@@ -456,17 +457,17 @@ class _NFWDensityProfile(DensityProfile):
         self._hankel = HankelTransform(self._x_grid, nu=0.5)
 
     def _tree_flatten(self):
-        return ((), (self._x_grid, self._hankel))
+        return ((), (self._hankel,))
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x_grid, hankel = aux_data
+        hankel, = aux_data
         obj = cls.__new__(cls)
-        obj._x_grid = x_grid
+        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-density profile.
@@ -539,7 +540,7 @@ class _NFWDensityProfile(DensityProfile):
         c_delta = jnp.reshape(halo_model.concentration.c_delta(halo_model.cosmology, m, z, mass_def=halo_model.mass_def), (len(m), len(z)))
         return r_delta / c_delta
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space density profile for halo-model calculations.
@@ -686,12 +687,13 @@ class _BCMDensityProfile(DensityProfile):
             self.mu,
             self.nu_log10Mc,
         )
-        aux_data = (self._x_grid, self._hankel)
+        # Only the Hankel object: pytree aux must be hashable, which an array is not.
+        aux_data = (self._hankel,)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x_grid, hankel = aux_data
+        hankel, = aux_data
         obj = cls.__new__(cls)
 
         (
@@ -704,7 +706,7 @@ class _BCMDensityProfile(DensityProfile):
             obj.nu_log10Mc,
         ) = leaves
 
-        obj._x_grid = x_grid
+        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -748,11 +750,11 @@ class _BCMDensityProfile(DensityProfile):
 
         if x_grid is not None:
             sorted_grid = jnp.sort(x_grid)
-            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the gas-density profile.
@@ -819,7 +821,7 @@ class _BCMDensityProfile(DensityProfile):
     def _fourier_radius_scale(self, halo_model, m, z):
         return jnp.reshape(MassDefinition("vir", "critical").r_delta(halo_model.cosmology, m, z), (len(m), len(z)))
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the projected Fourier-space gas-density profile for halo-model calculations.

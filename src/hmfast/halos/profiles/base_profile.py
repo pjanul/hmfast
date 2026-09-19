@@ -17,6 +17,8 @@ class HankelTransform:
 
     def __init__(self, x, nu=0.5):
 
+        # Kept so a profile's pytree aux can carry this object alone, never the raw grid.
+        self.x = x
         self._hankel = mcfit.Hankel(x, nu=nu, lowring=True, backend="jax")
         self._hankel_jit = jax.jit(functools.partial(self._hankel, extrap=False))
 

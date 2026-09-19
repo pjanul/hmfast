@@ -202,10 +202,12 @@ class TestDerivedParameters:
 
 
 class TestBoundsAndNaN:
-    # hubble_parameter/angular_diameter_distance/sigma8/pk/cl are all-NaN for an out-of-bounds cosmology.
+    # hubble_parameter/angular_diameter_distance/sigma8/pk/cl/omega_m are all-NaN for an out-of-bounds cosmology.
     def test_enforce_bounds_gated_functions_all_nan(self, out_of_bounds_cosmology):
         z = jnp.array([0.0, 0.5, 1.0])
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.hubble_parameter(z)))
+        # omega_m is rho_m(z)/rho_crit(z), built from H(z), so it inherits the NaN gate.
+        assert jnp.all(jnp.isnan(out_of_bounds_cosmology.omega_m(z)))
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.angular_diameter_distance(z)))
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.sigma8(z)))
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.pk(jnp.geomspace(1e-2, 1, 5), z, linear=True)))
@@ -217,10 +219,9 @@ class TestBoundsAndNaN:
         for value in dp.values():
             assert jnp.all(jnp.isnan(jnp.asarray(value)))
 
-    # omega_m(z) and delta_c(z) are purely analytic and stay finite even for an out-of-bounds cosmology.
-    def test_omega_m_and_delta_c_stay_finite_out_of_bounds(self, out_of_bounds_cosmology):
+    # delta_c(z) is purely analytic and stays finite even for an out-of-bounds cosmology.
+    def test_delta_c_stays_finite_out_of_bounds(self, out_of_bounds_cosmology):
         z = jnp.array([0.0, 0.5, 1.0])
-        assert jnp.all(jnp.isfinite(out_of_bounds_cosmology.omega_m(z)))
         assert jnp.all(jnp.isfinite(out_of_bounds_cosmology.delta_c(z)))
 
 
@@ -266,10 +267,14 @@ class TestExtrapolateZ:
 
     # growth_rate/sigma8/velocity_dispersion have no extrapolation branch at all: still NaN
     # beyond their grid regardless of extrapolate_z.
-    def test_growth_rate_sigma8_velocity_dispersion_always_nan_beyond_grid(self, fixed_cosmology):
+    def test_growth_extrapolates_but_sigma8_velocity_dispersion_do_not(self, fixed_cosmology):
         cosmo_ext = fixed_cosmology.update(extrapolate_z=True)
         z_beyond = jnp.array(float(fixed_cosmology._z_grid_pk()[-1]) + 2.0)
-        assert jnp.isnan(cosmo_ext.growth_rate(z_beyond))
+        # growth_factor/growth_rate honour extrapolate_z; without it they stay NaN.
+        assert jnp.isnan(fixed_cosmology.growth_rate(z_beyond))
+        assert jnp.isfinite(cosmo_ext.growth_rate(z_beyond))
+        assert jnp.isfinite(cosmo_ext.growth_factor(z_beyond))
+        # velocity_dispersion has no extrapolation branch, so it is NaN either way.
         assert jnp.isnan(cosmo_ext.velocity_dispersion(z_beyond))
         z_beyond_bg = jnp.array(float(fixed_cosmology._z_grid_bg()[-1]) + 5.0)
         assert jnp.isnan(cosmo_ext.sigma8(z_beyond_bg))

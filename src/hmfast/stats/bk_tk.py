@@ -1,3 +1,5 @@
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -5,25 +7,66 @@ import numpy as np
 from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
 from hmfast.halos.profiles.hod import GalaxyHODProfile
 
+from . import cl as _cl
+from .pk import Pk as _Pk
 
-def _kernel_density(tracer, cosmology, z):
+
+def _extended_limber_grid_for_pair(hm, tracer_a, tracer_b, profile_a, profile_b, z, l, chi, k_damp=0.01):
     """
-    The der_bessel=0 (density-type) part of a tracer's kernel: the sum of every
-    der_bessel=0 term from ``kernel()``. This module's bispectrum/trispectrum/
-    covariance integrals have no way to project an additional Bessel-order term
-    (e.g. RSD) -- raises if ``tracer`` has one, rather than silently dropping it.
+    Extended-Limber shifted-grid quantities (see :func:`hmfast.stats.cl._extended_limber_kernel_grid`)
+    for one leg of a covariance -- ``tracer_a``/``tracer_b`` share a single multipole
+    ``l`` and wavenumber :math:`k=(\\ell+1/2)/\\chi`, exactly as the two tracers of a
+    single :math:`C_\\ell` would. Returns ``(None, None, None, None)`` if neither
+    tracer has a ``der_bessel!=0`` (e.g. RSD) kernel term, in which case the caller's
+    kernel product stays scalar-in-``l``, identical to the pre-extended-Limber behavior.
+
+    The reference :math:`P(k,z)` used for the correction is this leg's own halo-model
+    :math:`P_{1h}+P_{2h}` (built from ``profile_a``, ``profile_b``) -- the same
+    :math:`P(k,z)` that would enter this leg's own :math:`C_\\ell` if computed directly
+    via :meth:`~hmfast.stats.pk.Pk.cl_1h`/:meth:`~hmfast.stats.pk.Pk.cl_2h`, so that
+    RSD's projection correction is treated consistently between the trispectrum/
+    covariance code here and the two-point ``C_\\ell`` code in ``stats/cl.py``.
     """
-    terms = tracer.kernel(cosmology, z)
-    if any(der_bessel != 0 for _, der_bessel in terms):
-        raise NotImplementedError(
-            f"{type(tracer).__name__} has a der_bessel!=0 kernel term (e.g. RSD), which this "
-            "module has no way to project into a bispectrum/trispectrum/covariance integral; "
-            "use a tracer without that term here."
-        )
-    total = jnp.zeros_like(jnp.atleast_1d(z))
-    for weight, _ in terms:
-        total = total + jnp.atleast_1d(weight)
-    return jnp.squeeze(total)
+    cosmology = hm.cosmology
+    z_arr = jnp.atleast_1d(z)
+    needs_extended = (
+        any(der_bessel != 0 for _, der_bessel in tracer_a.kernel(cosmology, z_arr))
+        or any(der_bessel != 0 for _, der_bessel in tracer_b.kernel(cosmology, z_arr))
+    )
+    if not needs_extended:
+        return None, None, None, None
+
+    pk = _Pk()
+
+    def pk_fn(k, z):
+        return pk.pk_1h(hm, k, z, profile_a, profile_b, k_damp=k_damp) + pk.pk_2h(hm, k, z, profile_a, profile_b)
+
+    k_l = (l + 0.5) / chi
+    P_grid = jnp.atleast_1d(pk_fn(k_l, z_arr)).flatten()[None, :]  # (1, Nl) -- single-z slice
+    return _cl._extended_limber_kernel_grid(cosmology, l, z_arr, jnp.atleast_1d(chi), P_grid, pk_fn)
+
+
+def _kernel_pair_effective(cosmology, tracer_a, tracer_b, z, l, z_lp, lp1h, lp3h, sqell):
+    """
+    Product of two tracers' effective per-``(z,l)`` Limber kernels
+    (:func:`hmfast.stats.cl._effective_kernel_limber`), evaluated at a single ``z``
+    (called once per redshift slice inside ``covariance_cng``/``covariance_ssc``'s
+    ``vmap`` over ``z``). Every ``der_bessel=0`` term of each tracer (density,
+    magnification bias, IA, ...) is summed directly; a ``der_bessel=2`` (RSD) term is
+    projected through the extended-Limber correction (``z_lp``/``lp1h``/``lp3h``/
+    ``sqell``, or ``None`` if neither tracer needs it -- see
+    :func:`_extended_limber_grid_for_pair`).
+
+    Returns shape ``(Nl,)``: a plain per-``z`` scalar broadcastable against ``Nl`` when
+    neither tracer has an RSD term (identical to the old ``_kernel_density`` product),
+    ``l``-dependent otherwise.
+    """
+    z_arr = jnp.atleast_1d(z)
+    ka = _cl._effective_kernel_limber(tracer_a, cosmology, z_arr, l, z_lp, lp1h, lp3h, sqell)
+    kb = _cl._effective_kernel_limber(tracer_b, cosmology, z_arr, l, z_lp, lp1h, lp3h, sqell)
+    ka = ka[:, None] if ka.ndim == 1 else ka  # (1,1) or (1,Nl)
+    kb = kb[:, None] if kb.ndim == 1 else kb
+    return jnp.squeeze(ka * kb, axis=0)  # (Nl,) or (1,)
 
 
 # -------------------------
@@ -52,10 +95,18 @@ def _ksum(k1, k2, mu):
 
 
 def _check_bk_inputs(k1, k2, mu12):
-    """k1, k2 must be positive wavenumbers; mu12 must be a genuine cosine."""
-    if bool(jnp.any(jnp.asarray(k1) <= 0.0)) or bool(jnp.any(jnp.asarray(k2) <= 0.0)):
+    """k1, k2 must be positive wavenumbers; mu12 must be a genuine cosine.
+
+    Validated with numpy rather than jnp: a jnp comparison inside a jit trace is staged
+    into the jaxpr even for concrete inputs, so the bool() below would see a tracer and
+    make every caller un-jittable. Traced inputs carry no values to check and are
+    skipped.
+    """
+    if any(isinstance(x, jax.core.Tracer) for x in (k1, k2, mu12)):
+        return
+    if np.any(np.asarray(k1) <= 0.0) or np.any(np.asarray(k2) <= 0.0):
         raise ValueError("k1 and k2 must be positive.")
-    if bool(jnp.any(jnp.abs(jnp.asarray(mu12)) > 1.0)):
+    if np.any(np.abs(np.asarray(mu12)) > 1.0):
         raise ValueError("mu12 must be in [-1, 1].")
 
 
@@ -479,7 +530,12 @@ class Bk:
             1-halo bispectrum in :math:`\\mathrm{Mpc}^6`, shape :math:`(N_k, N_z)` before
             singleton dimensions get squeezed before return.
         """
+        # Validated out here, where k1/k2/mu12 are still concrete.
         _check_bk_inputs(k1, k2, mu12)
+        return self._bk_1h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3, k_damp)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _bk_1h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None, k_damp=0.01):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
@@ -559,7 +615,12 @@ class Bk:
             2-halo bispectrum in :math:`\\mathrm{Mpc}^6`, shape :math:`(N_k, N_z)` before
             singleton dimensions get squeezed before return.
         """
+        # Validated out here, where k1/k2/mu12 are still concrete.
         _check_bk_inputs(k1, k2, mu12)
+        return self._bk_2h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _bk_2h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
@@ -635,7 +696,12 @@ class Bk:
             3-halo bispectrum in :math:`\\mathrm{Mpc}^6`, shape :math:`(N_k, N_z)` before
             singleton dimensions get squeezed before return.
         """
+        # Validated out here, where k1/k2/mu12 are still concrete.
         _check_bk_inputs(k1, k2, mu12)
+        return self._bk_3h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _bk_3h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
@@ -725,6 +791,7 @@ class Tk:
     # 1-halo term
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,))
     def tk_1h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         1-halo trispectrum term.
@@ -814,6 +881,7 @@ class Tk:
         wgt = _TRISPEC_THETA_WEIGHT[None, None, :, None]
         return jnp.sum(pkr * wgt, axis=2)
 
+    @partial(jax.jit, static_argnums=(0,))
     def tk_2h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         2-halo trispectrum term (sum of the "22" and "13" diagrams).
@@ -955,6 +1023,7 @@ class Tk:
         P3_kpk = jnp.swapaxes(self._P3_kernel(hm, kp, k, z_arr), 0, 1)
         return 12.0 / 7.0 * P_k * P_kp + 2.0 * (P_k * P3_kkp + P_kp * P3_kpk)
 
+    @partial(jax.jit, static_argnums=(0,))
     def tk_3h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         3-halo trispectrum term.
@@ -1052,6 +1121,7 @@ class Tk:
         P4X = jnp.sum(pkr * (f2_kkp * f2_kpk * wgt)[..., None], axis=2)
         return P4A, P4X
 
+    @partial(jax.jit, static_argnums=(0,))
     def tk_4h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         4-halo (tree-level) trispectrum term.
@@ -1132,6 +1202,7 @@ class Tk:
     # Connected (non-Gaussian) angular power spectrum covariance
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,))
     def covariance_cng(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z, f_sky=1.0):
         """
         Connected (non-Gaussian) covariance between two Limber-projected
@@ -1155,6 +1226,16 @@ class Tk:
         kernels, and :math:`T = T_{1h} + T_{2h} + T_{3h} + T_{4h}` the full
         halo-model trispectrum (see :meth:`tk_1h`, :meth:`tk_2h`,
         :meth:`tk_3h`, :meth:`tk_4h`).
+
+        Every ``der_bessel=0`` term of a tracer's kernel (density,
+        magnification bias, intrinsic alignment, ...) enters :math:`W_i(z)`
+        directly. A ``der_bessel=2`` (RSD) term instead makes :math:`W_1(z)\\,
+        W_2(z)` (or :math:`W_3(z)\\,W_4(z)`) depend on :math:`\\ell_1` (or
+        :math:`\\ell_2`) too, via the same extended-Limber correction
+        (Chisari et al. 2019 Sec. 2.4.1) used by
+        :meth:`~hmfast.stats.pk.Pk.cl_1h`/:meth:`~hmfast.stats.pk.Pk.cl_2h`
+        (see :func:`_extended_limber_grid_for_pair`,
+        :func:`_kernel_pair_effective`).
 
         Parameters
         ----------
@@ -1204,10 +1285,21 @@ class Tk:
                 + self.tk_4h(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
             )  # (N_l1, N_l2)
 
-            kernels = jnp.squeeze(
-                _kernel_density(tracer1, hm.cosmology, z_i) * _kernel_density(tracer2, hm.cosmology, z_i)
-                * _kernel_density(tracer3, hm.cosmology, z_i) * _kernel_density(tracer4, hm.cosmology, z_i)
+            z_lp1, lp1h1, lp3h1, sqell1 = _extended_limber_grid_for_pair(
+                hm, tracer1, tracer2, tracer1.profile, tracer2.profile, z_i, l1, chi
             )
+            kernel12 = _kernel_pair_effective(
+                hm.cosmology, tracer1, tracer2, z_i, l1, z_lp1, lp1h1, lp3h1, sqell1
+            )  # (N_l1,)
+
+            z_lp2, lp1h2, lp3h2, sqell2 = _extended_limber_grid_for_pair(
+                hm, tracer3, tracer4, tracer3.profile, tracer4.profile, z_i, l2, chi
+            )
+            kernel34 = _kernel_pair_effective(
+                hm.cosmology, tracer3, tracer4, z_i, l2, z_lp2, lp1h2, lp3h2, sqell2
+            )  # (N_l2,)
+
+            kernels = kernel12[:, None] * kernel34[None, :]  # (N_l1, N_l2)
             weight = jnp.squeeze(hm.cosmology.comoving_volume_element(z_i) / chi ** 8)
 
             return T * (kernels * weight)
@@ -1221,6 +1313,7 @@ class Tk:
     # Super-sample covariance
     # ------------------------------------------------------------------
 
+    @partial(jax.jit, static_argnums=(0,), static_argnames=("needs_counterterm1", "needs_counterterm2", "needs_counterterm3", "needs_counterterm4"))
     def covariance_ssc(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z, f_sky=1.0,
                         needs_counterterm1=None, needs_counterterm2=None,
                         needs_counterterm3=None, needs_counterterm4=None):
@@ -1251,6 +1344,13 @@ class Tk:
         :math:`k_2 = (\\ell_2 + 1/2)/\\chi(z)`, :math:`W_i` the tracer
         kernels, and :math:`\\sigma_B^2(z)` the disc-footprint variance (see
         :meth:`~hmfast.cosmology.Cosmology.sigma2_b_disc`).
+
+        As in :meth:`covariance_cng`, a ``der_bessel=2`` (RSD) kernel term
+        makes :math:`W_1(z)\\,W_2(z)` (or :math:`W_3(z)\\,W_4(z)`)
+        :math:`\\ell`-dependent via the extended-Limber correction (see
+        :func:`_extended_limber_grid_for_pair`, :func:`_kernel_pair_effective`);
+        every ``der_bessel=0`` term (density, magnification bias, IA, ...)
+        enters :math:`W_i(z)` directly, unaffected.
 
         For a profile pair :math:`(u,v)`, the response (Wagner et al. 2015;
         Takada & Hu 2013) is
@@ -1338,10 +1438,21 @@ class Tk:
             )  # (N_l2,)
             response_outer = response1[:, None] * response2[None, :]  # (N_l1, N_l2)
 
-            kernels = jnp.squeeze(
-                _kernel_density(tracer1, hm.cosmology, z_i) * _kernel_density(tracer2, hm.cosmology, z_i)
-                * _kernel_density(tracer3, hm.cosmology, z_i) * _kernel_density(tracer4, hm.cosmology, z_i)
+            z_lp1, lp1h1, lp3h1, sqell1 = _extended_limber_grid_for_pair(
+                hm, tracer1, tracer2, tracer1.profile, tracer2.profile, z_i, l1, chi
             )
+            kernel12 = _kernel_pair_effective(
+                hm.cosmology, tracer1, tracer2, z_i, l1, z_lp1, lp1h1, lp3h1, sqell1
+            )  # (N_l1,)
+
+            z_lp2, lp1h2, lp3h2, sqell2 = _extended_limber_grid_for_pair(
+                hm, tracer3, tracer4, tracer3.profile, tracer4.profile, z_i, l2, chi
+            )
+            kernel34 = _kernel_pair_effective(
+                hm.cosmology, tracer3, tracer4, z_i, l2, z_lp2, lp1h2, lp3h2, sqell2
+            )  # (N_l2,)
+
+            kernels = kernel12[:, None] * kernel34[None, :]  # (N_l1, N_l2)
             sigma2_b = jnp.squeeze(hm.cosmology.sigma2_b_disc(z_i, f_sky=f_sky))
             weight = jnp.squeeze(hm.cosmology.comoving_volume_element(z_i) / chi ** 6)
 

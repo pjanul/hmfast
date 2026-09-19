@@ -196,6 +196,3 @@ class T10HaloBias(HaloBias):
             return jnp.squeeze(self._b2_nu(nu, delta_c, zz).T)
         else:
             raise ValueError("order must be either 1 or 2")
-
-
-

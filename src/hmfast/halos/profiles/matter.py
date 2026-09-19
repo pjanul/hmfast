@@ -66,7 +66,7 @@ class NFWMatterProfile(MatterProfile):
     def _tree_unflatten(cls, aux_data, leaves):
         return cls()
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the real-space mass-weighted NFW matter profile.
@@ -98,14 +98,14 @@ class NFWMatterProfile(MatterProfile):
         z = jnp.atleast_1d(z)
         #m_internal = m * cparams["h"]
 
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] #/ cparams["h"]**2
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]  # divide by the cb density
         # Normalized real-space profile (unit mass)
         u_r_norm = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
         # Mass-weighted profile
         return jnp.squeeze((m[:, None] / rho_mean_0)[None, :, :] * u_r_norm)
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the mass-weighted NFW matter profile in Fourier space.
@@ -140,7 +140,7 @@ class NFWMatterProfile(MatterProfile):
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
         
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"] #/ cparams["h"]**2
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]  # divide by the cb density
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)
 

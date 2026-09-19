@@ -408,6 +408,3 @@ class JvdB14SubHaloMassFunction(SubHaloMassFunction):
         dN_dlnmu = (self.gamma1 * mu**self.alpha1 + self.gamma2 * mu**self.alpha2) * \
                 jnp.exp(-self.beta * mu**self.zeta)
         return jnp.squeeze(dN_dlnmu)
-
-
-

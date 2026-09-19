@@ -280,7 +280,7 @@ class S12CIBProfile(CIBProfile):
         return Theta
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_gal(self, halo_model, m, z):
         """
         Compute the galaxy luminosity assigned to a halo.
@@ -309,7 +309,7 @@ class S12CIBProfile(CIBProfile):
 
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_sat(self, halo_model, m, z):
         """
         Compute the total satellite CIB luminosity.
@@ -351,7 +351,7 @@ class S12CIBProfile(CIBProfile):
 
 
      
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_cen(self, halo_model, m, z):
         """
         Compute the central-galaxy CIB luminosity.
@@ -381,7 +381,7 @@ class S12CIBProfile(CIBProfile):
 
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def mean_emissivity(self, halo_model, z):
         """
         Compute the mean emissivity.
@@ -416,7 +416,7 @@ class S12CIBProfile(CIBProfile):
         return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def mean_intensity(self, halo_model, z):
         """
         Compute the CIB mean intensity (monopole).
@@ -447,7 +447,7 @@ class S12CIBProfile(CIBProfile):
 
         return jnp.squeeze(intensity)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the CIB profile in real space.
@@ -483,7 +483,7 @@ class S12CIBProfile(CIBProfile):
         return jnp.squeeze(cen_term + sat_term)
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the CIB profile in Fourier space.
@@ -669,14 +669,15 @@ class M21CIBProfile(CIBProfile):
             self.s_nu = s_nu
 
     def _tree_flatten(self):
-        leaves = (self.nu, self.eta_max, self.z_c, self.tau, self.f_sub, 
-                  self.M_min, self.M_eff, self.sigma2_LM)
-        aux = self.s_nu
-        return (leaves, aux)
+        # s_nu is a leaf, not aux: pytree aux must be hashable, which an array is not.
+        leaves = (self.nu, self.eta_max, self.z_c, self.tau, self.f_sub,
+                  self.M_min, self.M_eff, self.sigma2_LM, self.s_nu)
+        return (leaves, None)
 
     @classmethod
     def _tree_unflatten(cls, aux, leaves):
-        return cls(*leaves, s_nu=aux)
+        *params, s_nu = leaves
+        return cls(*params, s_nu=s_nu)
 
 
     def update(self, nu=None, eta_max=None, z_c=None, tau=None, f_sub=None, 
@@ -705,8 +706,9 @@ class M21CIBProfile(CIBProfile):
             M_min if M_min is not None else self.M_min,
             M_eff if M_eff is not None else self.M_eff,
             sigma2_LM if sigma2_LM is not None else self.sigma2_LM,
+            self.s_nu,
         )
-        
+
         return self._tree_unflatten(treedef, new_leaves)
 
     
@@ -782,7 +784,7 @@ class M21CIBProfile(CIBProfile):
 
         
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_gal(self, halo_model, m, z):
         """
         Compute the galaxy luminosity assigned to a halo.
@@ -814,7 +816,7 @@ class M21CIBProfile(CIBProfile):
 
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_sat(self, halo_model, m, z):
         """
         Compute the total satellite CIB luminosity.
@@ -858,7 +860,7 @@ class M21CIBProfile(CIBProfile):
         return jnp.squeeze(jax.vmap(integrate_single_halo)(m))
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def l_cen(self, halo_model, m, z):
         """
         Compute the central-galaxy CIB luminosity.
@@ -890,7 +892,7 @@ class M21CIBProfile(CIBProfile):
 
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def mean_emissivity(self, halo_model, z):
         """
         Compute the mean emissivity.
@@ -925,7 +927,7 @@ class M21CIBProfile(CIBProfile):
         return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def mean_intensity(self, halo_model, z):
         """
         Compute the CIB mean intensity (monopole).
@@ -956,7 +958,7 @@ class M21CIBProfile(CIBProfile):
 
         return jnp.squeeze(intensity)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the CIB profile in real space.
@@ -992,7 +994,7 @@ class M21CIBProfile(CIBProfile):
         return jnp.squeeze(cen_term + sat_term)
 
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the CIB profile in Fourier space.

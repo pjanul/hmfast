@@ -19,9 +19,9 @@ Reused from tests/test_profiles.ipynb's own established conventions:
     output must be divided by ng_bar to match.
   - CCL's GNFW `real()` doesn't enforce its own x_out truncation -- masked to
     NaN for r > x_out*r_delta on the CCL side here, as in the notebook.
-  - hmfast's NFW real()/fourier() return density in units of the mean matter
-    density (rho_crit_0 * Omega0_m); multiply by that factor to match CCL's
-    physical Msun/Mpc^3 convention.
+  - hmfast's NFW real()/fourier() return density in units of the mean cb
+    density (rho_crit_0 * Omega0_cb); multiply by that factor to recover the
+    physical Msun/Mpc^3 convention used for comparison in this file.
 """
 
 import jax.numpy as jnp
@@ -97,7 +97,7 @@ class TestNFWMatterProfileCCL:
         )
         m_val, z_val, a_val = 1e14, 0.5, 1.0 / 1.5
         cparams = fixed_cosmology._cosmo_params()
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]
 
         nfw = NFWMatterProfile()
         real_hm = (
@@ -137,7 +137,7 @@ class TestNFWMatterProfileCCL:
         )
         m_val, z_val, a_val = 1e14, 0.5, 1.0 / 1.5
         cparams = fixed_cosmology._cosmo_params()
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]
 
         nfw = NFWMatterProfile()
         real_hm = (

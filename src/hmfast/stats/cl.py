@@ -18,44 +18,47 @@ jax.config.update("jax_enable_x64", True)
 # Shared primitives
 # ------------------------------------------------------------------
 
-def _clip_to_trained_grid(cosmology, z):
-    """Clip z to the cosmology's trained P(k) grid; return (z_eval, growth_ratio) for z beyond it."""
+def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn):
+    """Shifted-grid quantities (z_lp, lp1h, lp3h, sqell) for the extended-Limber RSD
+    projection (Chisari et al. 2019 Sec. 2.4.1), shared by cl_limber's and
+    cl_linear_limber's Limber engines. pk_fn(k, z) -> P(k, z) in that engine's own P(k)."""
+    z_dense = cosmology._z_grid_bg()
+    chi_dense = cosmology.angular_diameter_distance(z_dense) * (1.0 + z_dense)
+
+    lp1h, lp3h = l + 0.5, l + 1.5
+    chi_lp = chi[:, None] * (lp3h / lp1h)[None, :]  # (Nz, Nl): same k_l, shifted chi
+    z_lp_raw = jnp.interp(chi_lp.reshape(-1), chi_dense, z_dense).reshape(chi_lp.shape)
+    # Clip to the cosmology's trained P(k) grid; extrapolate_z=False cosmologies return
+    # NaN past it, so fall back to no growth correction there instead.
     z_b = cosmology._z_grid_pk()[-1]
-    in_bounds = z <= z_b
-    growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
-    return jnp.where(in_bounds, z, z_b), growth_ratio
+    in_bounds_lp = z_lp_raw <= z_b
+    growth_ratio_lp = jnp.where(in_bounds_lp, 1.0, cosmology.growth_factor(z_lp_raw) / cosmology.growth_factor(z_b))
+    z_lp = jnp.where(in_bounds_lp, z_lp_raw, z_b)
+    growth_ratio_sq_lp = jnp.nan_to_num(growth_ratio_lp**2, nan=1.0)
 
+    k_l = lp1h[None, :] / chi[:, None]  # (Nz, Nl) -- the SAME k as P_grid, at the shifted z'
+    pk_pair = lambda k_i, z_i: jnp.squeeze(pk_fn(jnp.atleast_1d(k_i), jnp.atleast_1d(z_i)))
+    P_lp = jax.vmap(pk_pair)(k_l.reshape(-1), z_lp.reshape(-1)).reshape(k_l.shape) * growth_ratio_sq_lp
 
-def _sum_der0(terms, z):
-    """Sum every der_bessel=0 kernel term into one (Nz,)-shaped array."""
-    total = jnp.zeros_like(jnp.atleast_1d(z))
-    for weight, der_bessel in terms:
-        if der_bessel == 0:
-            total = total + jnp.atleast_1d(weight)
-    return total
-
-
-def _resolve_bias(bias, z):
-    """Resolve a tracer's bias attribute (None / scalar / (z, b) tuple / array) onto z."""
-    z = jnp.atleast_1d(z)
-    if bias is None:
-        return jnp.ones_like(z)
-    if isinstance(bias, tuple):
-        z_b, b_vals = bias
-        return jnp.interp(z, z_b, b_vals)
-    return jnp.broadcast_to(jnp.atleast_1d(bias), z.shape)
-
-
-def _limber_trapz(cosmology, z, chi, P_grid, kernel1, kernel2):
-    """Limber line-of-sight integral: P(k,z) * comoving-volume weight * kernel1 * kernel2, over z."""
-    limber_weight = cosmology.comoving_volume_element(z) / chi**4
-    integrand = P_grid * limber_weight[:, None] * kernel1 * kernel2
-    return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
+    pk_ratio = jnp.abs(P_lp / P_grid)
+    sqell = jnp.sqrt(lp1h[None, :] * pk_ratio / lp3h[None, :])
+    return z_lp, lp1h, lp3h, sqell
 
 
 def _dispatch_by_ell(l, l_limber, nonlimber_fn, limber_fn):
     """Route each multipole to the non-Limber (l < l_limber) or Limber (l >= l_limber) engine."""
     l_arr = jnp.atleast_1d(jnp.asarray(l, dtype=jnp.float64))
+
+    # l_limber is a plain scalar, so this resolves at trace time and leaves l traceable.
+    if float(l_limber) <= 0.0:
+        return jnp.squeeze(jnp.atleast_1d(limber_fn(l_arr)))
+
+    if isinstance(l_arr, jax.core.Tracer):
+        # A traced grid cannot be split by value, so run both engines and select pointwise.
+        low = jnp.atleast_1d(nonlimber_fn(l_arr))
+        high = jnp.atleast_1d(limber_fn(l_arr))
+        return jnp.squeeze(jnp.where(l_arr < l_limber, low, high))
+
     l_vals = [float(x) for x in l_arr]
     idx_low = [i for i, li in enumerate(l_vals) if li < l_limber]
     idx_high = [i for i, li in enumerate(l_vals) if li >= l_limber]
@@ -68,17 +71,6 @@ def _dispatch_by_ell(l, l_limber, nonlimber_fn, limber_fn):
         high_idx = jnp.array(idx_high)
         result = result.at[high_idx].set(jnp.atleast_1d(limber_fn(l_arr[high_idx])))
     return jnp.squeeze(result)
-
-
-def _raise_if_rsd_in_limber(tracer1, tracer2, l_limber):
-    """Refuse an RSD (der_bessel=2) term under cl_linear's Limber branch instead of silently dropping it."""
-    for t in (tracer1, tracer2):
-        if getattr(t, "rsd", False):
-            raise ValueError(
-                f"{type(t).__name__} has rsd=True, but l_limber={l_limber} routes some multipoles "
-                "through cl_linear's Limber approximation, which cannot project RSD -- raise "
-                "l_limber to use the exact non-Limber branch everywhere, or set rsd=False."
-            )
 
 
 # ------------------------------------------------------------------
@@ -202,16 +194,19 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z, D_kz_fns, bias_scale_fns, P
 # Halo-model Cl (backs Pk.cl_1h / Pk.cl_2h)
 # ------------------------------------------------------------------
 
-def _D_kz(halo_model, profile, k, z, z_fid=0.0):
-    """D(k,z) = sqrt(P_lin(k,z)/P_lin(k,z_fid)) * I_1^1(k,z), the halo-model separable factor."""
-    cosmology = halo_model.cosmology
+def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
+    """D(k,z) = sqrt(P(k,z)/P(k,z_fid)) * mass_integral(k,z_eval); the separable
+    growth factor shared by the halo-model (mass_integral=I_1^1) and linear-bias
+    (mass_integral=None) engines."""
     k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
-    z_eval, growth_ratio = _clip_to_trained_grid(cosmology, z)
-
-    I1 = jnp.reshape(halo_model._I(profile, k, z_eval, bias_order=1), (len(k), len(z)))
-    Plin_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=True), (len(k), len(z)))
-    Plin_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=True), (len(k), 1))
-    return growth_ratio[None, :] * jnp.sqrt(Plin_zeval / Plin_zfid) * I1
+    z_b = cosmology._z_grid_pk()[-1]
+    in_bounds = z <= z_b
+    growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
+    z_eval = jnp.where(in_bounds, z, z_b)
+    P_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=linear), (len(k), len(z)))
+    P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (len(k), 1))
+    D = growth_ratio[None, :] * jnp.sqrt(P_zeval / P_zfid)
+    return D if mass_integral is None else D * mass_integral(k, z_eval)
 
 
 @partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window"))
@@ -221,24 +216,39 @@ def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z, z_fid=0.0, n_fft=None, 
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     cosmology = halo_model.cosmology
 
-    D_kz_fns = [lambda k, z, t=t: _D_kz(halo_model, t.profile, k, z, z_fid=z_fid) for t in tracers]
+    D_kz_fns = [
+        lambda k, z, t=t: _D_kz(
+            cosmology, k, z, z_fid=z_fid, linear=True,
+            mass_integral=lambda k, z: jnp.reshape(halo_model._I(t.profile, k, z, bias_order=1), (len(k), len(z))),
+        )
+        for t in tracers
+    ]
     P_fid = lambda k: jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=True), (k.shape[0],))
     return _nonlimber_cl(cosmology, tracer1, tracer2, l, z, D_kz_fns, None, P_fid,
                           z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)
 
 
-def _effective_kernel_limber(tracer, cosmology, z, l, z_lp, lp1h, lp3h, sqell):
+def _effective_kernel_limber(tracer, cosmology, z, l, z_lp, lp1h, lp3h, sqell, bias=None):
     """Reduce one tracer's kernel() terms to an effective per-(z,l) Limber kernel.
 
     der_bessel=0 substitutes directly; der_bessel=2 (RSD) uses CCL's extended-Limber
     recipe (Chisari et al. 2019 Sec. 2.4.1) via the shifted-grid pieces z_lp/lp1h/lp3h/
-    sqell (precomputed once in cl_limber, shared across tracer1/tracer2; None if unneeded)."""
+    sqell (precomputed once by the caller, shared across tracer1/tracer2; None if
+    unneeded). If given, bias scales only the der_bessel=0 (density) term(s), never an
+    RSD term -- matches linear Kaiser, where only the density term picks up galaxy bias."""
     terms = tracer.kernel(cosmology, z)
+    b = (jnp.ones_like(z) if bias is None else jnp.interp(z, *bias) if isinstance(bias, tuple)
+         else jnp.broadcast_to(jnp.atleast_1d(bias), z.shape))
+    terms = [(weight * b if der_bessel == 0 else weight, der_bessel) for weight, der_bessel in terms]
     if all(der_bessel == 0 for _, der_bessel in terms):
-        return _sum_der0(terms, z)
+        return sum((jnp.atleast_1d(weight) for weight, _ in terms), jnp.zeros_like(jnp.atleast_1d(z)))
 
     l = jnp.atleast_1d(l)
-    terms_lp = tracer.kernel(cosmology, z_lp.reshape(-1))
+    z_lp_flat = z_lp.reshape(-1)
+    terms_lp = tracer.kernel(cosmology, z_lp_flat)
+    b_lp = (jnp.ones_like(z_lp_flat) if bias is None else jnp.interp(z_lp_flat, *bias) if isinstance(bias, tuple)
+            else jnp.broadcast_to(jnp.atleast_1d(bias), z_lp_flat.shape))
+    terms_lp = [(weight * b_lp if der_bessel == 0 else weight, der_bessel) for weight, der_bessel in terms_lp]
 
     total = jnp.zeros((z.shape[0], l.shape[0]))
     for weight, der_bessel in terms:
@@ -263,7 +273,7 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z, include_1h=False, inc
     """Limber Cl for either/both halo terms; helper behind Pk.cl_1h and the Limber branch of Pk.cl_2h.
 
     l may be traced; jitted with pk_obj static (Pk isn't a registered pytree). An RSD
-    (der_bessel=2) term adds ~1.7x cost via CCL's extended-Limber recipe (see
+    (der_bessel=2) term adds ~1.7x cost via the extended-Limber correction (see
     _effective_kernel_limber), computed once here and shared across tracer1/tracer2."""
     hm = halo_model
     cosmology = hm.cosmology
@@ -271,50 +281,35 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z, include_1h=False, inc
     z = jnp.atleast_1d(z)
     l = jnp.atleast_1d(l)
 
-    z_eval, growth_ratio = _clip_to_trained_grid(cosmology, z)
+    z_b = cosmology._z_grid_pk()[-1]
+    in_bounds = z <= z_b
+    growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
+    z_eval = jnp.where(in_bounds, z, z_b)
     growth_ratio_sq = growth_ratio**2
+
+    def pk_fn(k, z):
+        p = 0.0
+        if include_1h:
+            p = p + pk_obj.pk_1h(hm, k, z, tracer1.profile, tracer2.profile, k_damp=k_damp)
+        if include_2h:
+            p = p + pk_obj.pk_2h(hm, k, z, tracer1.profile, tracer2.profile)
+        return p
 
     def get_pk_slice(zi, zi_eval):
         chi_i = cosmology.angular_diameter_distance(zi) * (1.0 + zi)
         ki = (l + 0.5) / chi_i
-        zi_eval = jnp.atleast_1d(zi_eval)
-        p = 0.0
-        if include_1h:
-            p = p + pk_obj.pk_1h(hm, ki, zi_eval, tracer1.profile, tracer2.profile, k_damp=k_damp)
-        if include_2h:
-            p = p + pk_obj.pk_2h(hm, ki, zi_eval, tracer1.profile, tracer2.profile)
-        return jnp.atleast_1d(p).flatten()
+        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi_eval))).flatten()
 
     P_grid = jax.vmap(get_pk_slice)(z, z_eval) * growth_ratio_sq[:, None]
     chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
 
     # Extended-Limber setup, done once here (not per-tracer) since it's tracer-independent.
-    needs_extended = getattr(tracer1, "rsd", False) or getattr(tracer2, "rsd", False)
+    needs_extended = (
+        any(der_bessel != 0 for _, der_bessel in tracer1.kernel(cosmology, z))
+        or any(der_bessel != 0 for _, der_bessel in tracer2.kernel(cosmology, z))
+    )
     if needs_extended:
-        z_dense = cosmology._z_grid_bg()
-        chi_dense = cosmology.angular_diameter_distance(z_dense) * (1.0 + z_dense)
-
-        lp1h, lp3h = l + 0.5, l + 1.5
-        chi_lp = chi[:, None] * (lp3h / lp1h)[None, :]  # (Nz, Nl): same k_l, shifted chi
-        z_lp_raw = jnp.interp(chi_lp.reshape(-1), chi_dense, z_dense).reshape(chi_lp.shape)
-        z_lp, growth_ratio_lp = _clip_to_trained_grid(cosmology, z_lp_raw)
-        # extrapolate_z=False cosmologies return NaN past z_b; fall back to no growth correction.
-        growth_ratio_sq_lp = jnp.nan_to_num(growth_ratio_lp**2, nan=1.0)
-
-        k_l = lp1h[None, :] / chi[:, None]  # (Nz, Nl) -- the SAME k as P_grid, at the shifted z'
-
-        def _pk_pair(k_i, z_i):
-            zi = jnp.atleast_1d(z_i)
-            p = 0.0
-            if include_1h:
-                p = p + pk_obj.pk_1h(hm, jnp.atleast_1d(k_i), zi, tracer1.profile, tracer2.profile, k_damp=k_damp)
-            if include_2h:
-                p = p + pk_obj.pk_2h(hm, jnp.atleast_1d(k_i), zi, tracer1.profile, tracer2.profile)
-            return jnp.squeeze(p)
-
-        P_lp = jax.vmap(_pk_pair)(k_l.reshape(-1), z_lp.reshape(-1)).reshape(k_l.shape) * growth_ratio_sq_lp
-        pk_ratio = jnp.abs(P_lp / P_grid)
-        sqell = jnp.sqrt(lp1h[None, :] * pk_ratio / lp3h[None, :])
+        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn)
     else:
         z_lp = lp1h = lp3h = sqell = None
 
@@ -323,21 +318,14 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z, include_1h=False, inc
     kernel1 = kernel1[:, None] if kernel1.ndim == 1 else kernel1
     kernel2 = kernel2[:, None] if kernel2.ndim == 1 else kernel2
 
-    return _limber_trapz(cosmology, z, chi, P_grid, kernel1, kernel2)
+    limber_weight = cosmology.comoving_volume_element(z) / chi**4
+    integrand = P_grid * limber_weight[:, None] * kernel1 * kernel2
+    return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))
 
 
 # ------------------------------------------------------------------
 # Linear-bias Cl (backs Pk.cl_linear)
 # ------------------------------------------------------------------
-
-def _D_kz_linear(cosmology, k, z, z_fid=0.0, linear=True):
-    """D(k,z) = sqrt(P(k,z)/P(k,z_fid)), the bias-free analogue of _D_kz."""
-    k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
-    z_eval, growth_ratio = _clip_to_trained_grid(cosmology, z)
-    P_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=linear), (len(k), len(z)))
-    P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (len(k), 1))
-    return growth_ratio[None, :] * jnp.sqrt(P_zeval / P_zfid)
-
 
 @partial(jax.jit, static_argnames=("n_fft", "n_interp", "bias", "window", "linear"))
 def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z, linear=True,
@@ -345,14 +333,13 @@ def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z, linear=True,
     """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind Pk.cl_linear below l_limber."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
-    biases = [getattr(t, "bias", None) for t in tracers]
-
     # A tracer's bias only scales its der_bessel=0 (density) term, never an RSD term.
-    def _scale(t_idx):
-        return lambda weight, der_bessel, z: weight * _resolve_bias(biases[t_idx], z) if der_bessel == 0 else weight
-    bias_scale_fns = [_scale(i) for i in range(len(tracers))]
+    bias_scale_fns = [lambda weight, der_bessel, z, b=getattr(t, "bias", None): (
+        weight * (jnp.ones_like(z) if b is None else jnp.interp(z, *b) if isinstance(b, tuple)
+                  else jnp.broadcast_to(jnp.atleast_1d(b), z.shape))
+        if der_bessel == 0 else weight) for t in tracers]
 
-    D_kz_fns = [lambda k, z: _D_kz_linear(cosmology, k, z, z_fid=z_fid, linear=linear) for _ in tracers]
+    D_kz_fns = [lambda k, z: _D_kz(cosmology, k, z, z_fid=z_fid, linear=linear) for _ in tracers]
     P_fid = lambda k: jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (k.shape[0],))
     return _nonlimber_cl(cosmology, tracer1, tracer2, l, z, D_kz_fns, bias_scale_fns, P_fid,
                           z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)
@@ -360,19 +347,38 @@ def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z, linear=True,
 
 @partial(jax.jit, static_argnames=("linear",))
 def _cl_linear_limber(cosmology, tracer1, tracer2, l, z, linear=True):
-    """Limber helper behind Pk.cl_linear: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer bias in place of halo occupation."""
+    """Limber helper behind Pk.cl_linear: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer
+    bias in place of halo occupation. An RSD (der_bessel=2) kernel term is projected via the
+    same extended-Limber correction as cl_limber's halo-model engine."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     z = jnp.atleast_1d(z)
+    l = jnp.atleast_1d(l)
+    pk_fn = lambda k, z: cosmology.pk(k, z, linear=linear)
 
     def get_pk_slice(zi):
         chi_i = cosmology.angular_diameter_distance(zi) * (1.0 + zi)
         ki = (l + 0.5) / chi_i
-        return jnp.atleast_1d(cosmology.pk(ki, jnp.atleast_1d(zi), linear=linear)).flatten()
+        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi))).flatten()
 
     P_grid = jax.vmap(get_pk_slice)(z)
-
-    kernel1 = _sum_der0(tracer1.kernel(cosmology, z), z) * _resolve_bias(getattr(tracer1, "bias", None), z)
-    kernel2 = _sum_der0(tracer2.kernel(cosmology, z), z) * _resolve_bias(getattr(tracer2, "bias", None), z)
-
     chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
-    return _limber_trapz(cosmology, z, chi, P_grid, kernel1[:, None], kernel2[:, None])
+
+    needs_extended = (
+        any(der_bessel != 0 for _, der_bessel in tracer1.kernel(cosmology, z))
+        or any(der_bessel != 0 for _, der_bessel in tracer2.kernel(cosmology, z))
+    )
+    if needs_extended:
+        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn)
+    else:
+        z_lp = lp1h = lp3h = sqell = None
+
+    kernel1 = _effective_kernel_limber(tracer1, cosmology, z, l, z_lp, lp1h, lp3h, sqell,
+                                        bias=getattr(tracer1, "bias", None))
+    kernel2 = _effective_kernel_limber(tracer2, cosmology, z, l, z_lp, lp1h, lp3h, sqell,
+                                        bias=getattr(tracer2, "bias", None))
+    kernel1 = kernel1[:, None] if kernel1.ndim == 1 else kernel1
+    kernel2 = kernel2[:, None] if kernel2.ndim == 1 else kernel2
+
+    limber_weight = cosmology.comoving_volume_element(z) / chi**4
+    integrand = P_grid * limber_weight[:, None] * kernel1 * kernel2
+    return jnp.squeeze(jnp.trapezoid(integrand, x=z, axis=0))

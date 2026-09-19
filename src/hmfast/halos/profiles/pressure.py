@@ -22,7 +22,7 @@ class PressureProfile(HaloProfile):
     def _fourier_radius_scale(self, halo_model, m, z):
         raise NotImplementedError()
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def fourier(self, halo_model, k, m, z):
         """
         Compute the Fourier-space pressure profile for halo-model calculations.
@@ -165,13 +165,13 @@ class GNFWPressureProfile(PressureProfile):
             self.P0_hexp,
             self.x_out,
         )
-        # Static metadata: the grid and the Hankel object
-        aux_data = (self._x_grid, self._hankel)
+        # Only the Hankel object: pytree aux must be hashable, which an array is not.
+        aux_data = (self._hankel,)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x_grid, hankel = aux_data
+        hankel, = aux_data
         # Create object without calling __init__ to avoid rebuilding Hankel
         obj = cls.__new__(cls)
         (
@@ -185,7 +185,7 @@ class GNFWPressureProfile(PressureProfile):
             obj.P0_hexp,
             obj.x_out,
         ) = leaves
-        obj._x_grid = x_grid
+        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -240,7 +240,7 @@ class GNFWPressureProfile(PressureProfile):
 
         if x_grid is not None:
             sorted_grid = jnp.sort(x_grid)
-            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -256,7 +256,7 @@ class GNFWPressureProfile(PressureProfile):
         )
         return r_tilde
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.
@@ -461,12 +461,13 @@ class B12PressureProfile(PressureProfile):
             self.alpha_z_beta,
             self.x_out,
         )
-        aux_data = (self._x_grid, self._hankel)
+        # Only the Hankel object: pytree aux must be hashable, which an array is not.
+        aux_data = (self._hankel,)
         return (leaves, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, leaves):
-        x_grid, hankel = aux_data
+        hankel, = aux_data
         obj = cls.__new__(cls)
 
         (
@@ -482,7 +483,7 @@ class B12PressureProfile(PressureProfile):
             obj.x_out,
         ) = leaves
 
-        obj._x_grid = x_grid
+        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -532,7 +533,7 @@ class B12PressureProfile(PressureProfile):
 
         if x_grid is not None:
             sorted_grid = jnp.sort(x_grid)
-            aux_data = (sorted_grid, HankelTransform(sorted_grid, nu=0.5))
+            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -589,7 +590,7 @@ class B12PressureProfile(PressureProfile):
             mass_def_200c.r_delta(halo_model.cosmology, m200c, z), (len(m), len(z))
         )
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def real(self, halo_model, r, m, z):
         """
         Compute the electron-pressure profile.

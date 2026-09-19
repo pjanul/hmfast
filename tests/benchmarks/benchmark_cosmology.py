@@ -216,10 +216,7 @@ class TestDensitiesAndMatterFractionCCL:
         a_arr = z_to_a(np.asarray(z_arr))
 
         om_hmf = np.asarray(cosmo_hmfast_ext.omega_m(z_arr))
-        om_ccl = (
-            pyccl.background.omega_x(cosmo_ccl_bg, a_arr, "matter")
-            - pyccl.background.omega_x(cosmo_ccl_bg, a_arr, "neutrinos_massive")
-        )
+        om_ccl = pyccl.background.omega_x(cosmo_ccl_bg, a_arr, "matter")
         assert np.allclose(om_hmf, om_ccl, rtol=0.003)
 
     # comoving_volume_element(z), built from the same D_A(z)/H(z) CCL calls, matches in-grid and beyond z_max_bg (rtol 0.1%, max ~0.052%); z=0 skipped (0/0).
@@ -282,11 +279,11 @@ class TestGrowthCCL:
         assert np.allclose(D_hmf, D_ccl, rtol=0.005)
 
     # growth_rate has no extrapolation branch at all: NaN beyond z_max_pk regardless of extrapolate_z.
-    def test_growth_rate_always_nan_beyond_grid(self, fixed_cosmology, cosmo_hmfast_ext):
+    def test_growth_rate_nan_beyond_grid_unless_extrapolating(self, fixed_cosmology, cosmo_hmfast_ext):
         z_max_pk = float(fixed_cosmology._z_grid_pk()[-1])
         z_beyond = jnp.array(z_max_pk + 2.0)
         assert jnp.isnan(fixed_cosmology.growth_rate(z_beyond))
-        assert jnp.isnan(cosmo_hmfast_ext.growth_rate(z_beyond))
+        assert jnp.isfinite(cosmo_hmfast_ext.growth_rate(z_beyond))
 
 
 class TestDeltaCCL:

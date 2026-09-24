@@ -8,6 +8,7 @@ from jax.scipy.special import erf
 
 from hmfast.download import _get_default_data_path
 from hmfast.halos.profiles import HaloProfile
+from hmfast.utils import gauss_legendre_nodes_weights
 
 
 class GalaxyHODProfile(HaloProfile):
@@ -214,12 +215,13 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
             :math:`\\mathrm{Mpc}^{-3}`, with shape :math:`(N_z,)`, where
             singleton dimensions get squeezed before return.
         """
-        m, z = halo_model.m_grid, jnp.atleast_1d(z)
-        logm = jnp.log(m)
+        z = jnp.atleast_1d(z)
+        logm, gl_w = gauss_legendre_nodes_weights(jnp.log(halo_model.m_range[0]), jnp.log(halo_model.m_range[1]), halo_model.n_m)
+        m = jnp.exp(logm)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
         dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def), (len(m), len(z)))
-        ng_val = jnp.trapezoid(dndlnm * Ntot[:, None], x=logm, axis=0)
+        ng_val = jnp.sum(dndlnm * Ntot[:, None] * gl_w[:, None], axis=0)
 
         # HM Consistency check
         return jnp.squeeze(jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * Ntot[0], lambda x: x, ng_val))
@@ -246,15 +248,16 @@ class Z07GalaxyHODProfile(GalaxyHODProfile):
             Dimensionless, with shape :math:`(N_z,)`, where singleton
             dimensions get squeezed before return.
         """
-        m, z = halo_model.m_grid, jnp.atleast_1d(z)
-        logm = jnp.log(m)
+        z = jnp.atleast_1d(z)
+        logm, gl_w = gauss_legendre_nodes_weights(jnp.log(halo_model.m_range[0]), jnp.log(halo_model.m_range[1]), halo_model.n_m)
+        m = jnp.exp(logm)
 
         Ntot = self.n_cen(halo_model, m) + self.n_sat(halo_model, m)
         dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def), (len(m), len(z)))
         bh = jnp.reshape(halo_model.halo_bias.bias(halo_model.cosmology, m, z, halo_model.mass_def, 1), (len(m), len(z)))
         ng = self.ng_bar(halo_model, z)
 
-        bg_num = jnp.trapezoid(dndlnm * bh * Ntot[:, None], x=logm, axis=0)
+        bg_num = jnp.sum(dndlnm * bh * Ntot[:, None] * gl_w[:, None], axis=0)
         bg_num = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[1] * Ntot[0], lambda x: x, bg_num)
         return jnp.squeeze(bg_num / ng)
 

@@ -86,7 +86,8 @@ def halo_model(fixed_cosmology, mass_def):
         cosmology=fixed_cosmology,
         mass_def=mass_def,
         concentration=conc,
-        m_grid=jnp.geomspace(1e10, 1e15, 40),
+        m_range=(1e10, 1e15),
+        n_m=40,
     )
 
 

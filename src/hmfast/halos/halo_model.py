@@ -13,6 +13,7 @@ from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
 from hmfast.halos.massdef import MassDefinition
 from hmfast.cosmology import Cosmology
+from hmfast.utils import gauss_legendre_nodes_weights
 
 jax.config.update("jax_enable_x64", True)
 
@@ -41,8 +42,11 @@ class HaloModel:
         Halo concentration relation used to map halo mass and redshift to concentration.
     hm_consistency : bool
         Flag controlling whether halo-model consistency counterterms are applied.
-    m_grid : array
-        Log-spaced halo mass grid in :math:`M_\\odot` used for all mass integrals.
+    m_range : tuple
+        ``(m_min, m_max)`` in :math:`M_\\odot` spanning all mass integrals.
+    n_m : int
+        Number of Gauss-Legendre mass-integral nodes (static: changing it
+        triggers recompilation; sweeping ``m_range`` alone does not).
     """
 
     def __init__(self,
@@ -53,7 +57,7 @@ class HaloModel:
                  subhalo_mass_function=TW10SubHaloMassFunction(),
                  concentration=D08Concentration(),
                  hm_consistency=True,
-                 m_grid=None):
+                 m_range=(1e10, 1e15), n_m=100):
         """Initialize the halo model."""
 
         # Load cosmology and make sure the required files are loaded outside of jitted functions (note that DER is needed for CMB lensing tracers)
@@ -70,36 +74,37 @@ class HaloModel:
 
         self.mass_def = mass_def
         self.hm_consistency = hm_consistency
-        self.m_grid = jnp.sort(m_grid if m_grid is not None else jnp.geomspace(1e10, 1e15, 100))
+        self.m_range = (jnp.asarray(m_range[0]), jnp.asarray(m_range[1]))
+        self.n_m = int(n_m)
 
 
     def _tree_flatten(self):
-        # Cosmology and m_grid are JAX arrays / pytrees — children.
-        # Everything else is configuration/metadata — aux_data.
-        children = (self.cosmology, self.m_grid)
+        # Cosmology and m_range are JAX arrays / pytrees — children (dynamic: sweeping
+        # them does not retrace). Everything else, including n_m, is static aux_data.
+        children = (self.cosmology, self.m_range)
         aux_data = (self.halo_mass_function, self.halo_bias, self.subhalo_mass_function, self.concentration,
-            self.mass_def, self.hm_consistency
+            self.mass_def, self.hm_consistency, self.n_m
         )
         return (children, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
-        cosmology, m_grid = children
+        cosmology, m_range = children
         obj = cls.__new__(cls)
         obj.cosmology = cosmology
-        obj.m_grid = m_grid
+        obj.m_range = m_range
         (obj.halo_mass_function, obj.halo_bias, obj.subhalo_mass_function,
-         obj.concentration, obj.mass_def, obj.hm_consistency) = aux_data
+         obj.concentration, obj.mass_def, obj.hm_consistency, obj.n_m) = aux_data
         return obj
 
     def update(self, cosmology=None, halo_mass_function=None, halo_bias=None, subhalo_mass_function=None, concentration=None, mass_def=None,
-               hm_consistency=None, m_grid=None):
+               hm_consistency=None, m_range=None, n_m=None):
         """
         Return a new HaloModel instance with updated components.
 
         Parameters
         ----------
-        cosmology, halo_mass_function, halo_bias, subhalo_mass_function, concentration, mass_def, hm_consistency, m_grid : optional
+        cosmology, halo_mass_function, halo_bias, subhalo_mass_function, concentration, mass_def, hm_consistency, m_range, n_m : optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
 
         Returns
@@ -110,15 +115,16 @@ class HaloModel:
         # Flatten current state
         children, aux_data = self._tree_flatten()
         # Unpack
-        cosmo_child, m_grid0 = children
+        cosmo_child, m_range0 = children
         (
             halo_mass_function0, halo_bias0, subhalo_mass_function0, concentration0,
-            mass_def0, hm_consistency0
+            mass_def0, hm_consistency0, n_m0
         ) = aux_data
 
         # Update only provided components
         new_cosmo = cosmology if cosmology is not None else cosmo_child
-        new_m_grid = jnp.sort(m_grid) if m_grid is not None else m_grid0
+        new_m_range = (jnp.asarray(m_range[0]), jnp.asarray(m_range[1])) if m_range is not None else m_range0
+        new_n_m = int(n_m) if n_m is not None else n_m0
         new_halo_mass_function = halo_mass_function if halo_mass_function is not None else halo_mass_function0
         new_halo_bias = halo_bias if halo_bias is not None else halo_bias0
         new_subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else subhalo_mass_function0
@@ -128,10 +134,10 @@ class HaloModel:
 
         new_aux_data = (
             new_halo_mass_function, new_halo_bias, new_subhalo_mass_function, new_concentration,
-            new_mass_def, new_hm_consistency
+            new_mass_def, new_hm_consistency, new_n_m
         )
         # Use _tree_unflatten to create the new instance efficiently
-        return self._tree_unflatten(new_aux_data, (new_cosmo, new_m_grid))
+        return self._tree_unflatten(new_aux_data, (new_cosmo, new_m_range))
        
     @jax.jit
     def _counter_terms(self, z):
@@ -153,10 +159,10 @@ class HaloModel:
             Minimum quadratic bias.
         """
 
-        m = self.m_grid
+        logm, gl_w = gauss_legendre_nodes_weights(jnp.log(self.m_range[0]), jnp.log(self.m_range[1]), self.n_m)
+        m = jnp.exp(logm)
         z = jnp.atleast_1d(z)
         cparams = self.cosmology._cosmo_params()
-        logm = jnp.log(m)
         rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_cb"]
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
@@ -166,10 +172,10 @@ class HaloModel:
         b1 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_def, order=1), (len(m), len(z)))
         b2 = jnp.reshape(self.halo_bias.bias(self.cosmology, m, z, self.mass_def, order=2), (len(m), len(z)))
     
-        # Compute integrals I0, I1, I2
-        I0 = jnp.trapezoid(dn_dlnm * m_over_rho_mean, x=logm, axis=0)  # (Nz,)
-        I1 = jnp.trapezoid(b1 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
-        I2 = jnp.trapezoid(b2 * dn_dlnm * m_over_rho_mean, x=logm, axis=0)
+        # Compute integrals I0, I1, I2 via Gauss-Legendre quadrature in ln(M)
+        I0 = jnp.sum(dn_dlnm * m_over_rho_mean * gl_w[:, None], axis=0)  # (Nz,)
+        I1 = jnp.sum(b1 * dn_dlnm * m_over_rho_mean * gl_w[:, None], axis=0)
+        I2 = jnp.sum(b2 * dn_dlnm * m_over_rho_mean * gl_w[:, None], axis=0)
     
         # Apply formulas
         m_min =  m[0]
@@ -217,10 +223,9 @@ class HaloModel:
         array
             Integral with shape :math:`(N_k, N_z)`, where singleton dimensions are squeezed.
         """
-        k, m, z = jnp.atleast_1d(k), self.m_grid, jnp.atleast_1d(z)
-        logm = jnp.log(m)
-        dm = jnp.diff(logm)
-        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
+        logm, w = gauss_legendre_nodes_weights(jnp.log(self.m_range[0]), jnp.log(self.m_range[1]), self.n_m)
+        m = jnp.exp(logm)
 
         dndlnm = jnp.reshape(
             self.halo_mass_function.dndlnm(self.cosmology, m, z, self.mass_def),

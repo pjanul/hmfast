@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 from jax import lax
 from functools import partial
 
@@ -263,3 +264,33 @@ def log_interp1d_extrap(x, xp, fp):
         jnp.where(x > xp[-1], log_f_right, log_f_interp),
     )
     return jnp.exp(log_f)
+
+
+def gauss_legendre_nodes_weights(a, b, n):
+    """
+    Gauss-Legendre quadrature nodes and weights on ``[a, b]``.
+
+    The reference nodes/weights on ``[-1, 1]`` are a fixed, ``n``-dependent
+    table (as with the Dormand-Prince tableau above), computed once via
+    NumPy and then affinely mapped onto ``[a, b]``; this keeps the mapping
+    differentiable with respect to ``a`` and ``b`` even though the reference
+    table itself is not JAX-native.
+
+    Parameters
+    ----------
+    a, b : float
+        Integration bounds.
+    n : int
+        Number of quadrature nodes.
+
+    Returns
+    -------
+    nodes : jnp.ndarray
+        Quadrature nodes on ``[a, b]``, shape ``(n,)``.
+    weights : jnp.ndarray
+        Quadrature weights corresponding to ``nodes``, shape ``(n,)``.
+    """
+    x_ref, w_ref = np.polynomial.legendre.leggauss(n)
+    x_ref, w_ref = jnp.asarray(x_ref), jnp.asarray(w_ref)
+    scale = 0.5 * (b - a)
+    return scale * x_ref + 0.5 * (a + b), scale * w_ref

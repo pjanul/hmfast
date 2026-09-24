@@ -93,8 +93,10 @@ class GNFWPressureProfile(PressureProfile):
 
     Attributes
     ----------
-    x_grid : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
+    x_range : tuple
+        ``(x_min, x_max)`` spanning the dimensionless radial grid :math:`x = r / r_\\Delta`, log-spaced internally to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
+    n_x : int
+        Number of log-spaced points in the transform grid.
     P0 : float
         Dimensionless gNFW normalization :math:`P_0`.
     c500 : float
@@ -115,7 +117,8 @@ class GNFWPressureProfile(PressureProfile):
 
     def __init__(
         self,
-        x_grid=None,
+        x_range=(1e-5, 4.0),
+        n_x=100,
         P0=8.130,
         c500=1.156,
         alpha=1.0620,
@@ -137,20 +140,20 @@ class GNFWPressureProfile(PressureProfile):
         self.P0_hexp = P0_hexp
         self.x_out = x_out
 
-        self.x_grid = (
-            x_grid
-            if x_grid is not None
-            else jnp.logspace(jnp.log10(1e-5), jnp.log10(4.0), 256)
-        )
+        x_grid = jnp.logspace(jnp.log10(x_range[0]), jnp.log10(x_range[1]), int(n_x))
+        self._hankel = HankelTransform(x_grid, nu=0.5)
 
     @property
     def x_grid(self):
-        return self._x_grid
+        return self._hankel.x
 
-    @x_grid.setter
-    def x_grid(self, value):
-        self._x_grid = jnp.sort(value)
-        self._hankel = HankelTransform(self._x_grid, nu=0.5)
+    @property
+    def x_range(self):
+        return (self._hankel.x[0], self._hankel.x[-1])
+
+    @property
+    def n_x(self):
+        return self._hankel.x.shape[0]
 
     def _tree_flatten(self):
         # The dynamic parameters JAX should track
@@ -185,7 +188,6 @@ class GNFWPressureProfile(PressureProfile):
             obj.P0_hexp,
             obj.x_out,
         ) = leaves
-        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -200,7 +202,8 @@ class GNFWPressureProfile(PressureProfile):
         alpha_P=None,
         P0_hexp=None,
         x_out=None,
-        x_grid=None,
+        x_range=None,
+        n_x=None,
     ):
         """
         Return a new profile instance with updated GNFW pressure profile parameters. Any argument left as ``None`` keeps its current value.
@@ -216,8 +219,10 @@ class GNFWPressureProfile(PressureProfile):
         alpha_P : float, optional
         P0_hexp : float, optional
         x_out : float, optional
-        x_grid : jnp.ndarray, optional
-            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
+        x_range : tuple, optional
+            New ``(x_min, x_max)`` for the dimensionless radial grid. Rebuilds the Hankel transform on a fresh log-spaced grid.
+        n_x : int, optional
+            New number of log-spaced grid points. Rebuilds the Hankel transform.
 
         Returns
         -------
@@ -238,9 +243,11 @@ class GNFWPressureProfile(PressureProfile):
             x_out if x_out is not None else self.x_out,
         )
 
-        if x_grid is not None:
-            sorted_grid = jnp.sort(x_grid)
-            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
+        if x_range is not None or n_x is not None:
+            new_x_range = x_range if x_range is not None else self.x_range
+            new_n_x = n_x if n_x is not None else self.n_x
+            x_grid = jnp.logspace(jnp.log10(new_x_range[0]), jnp.log10(new_x_range[1]), int(new_n_x))
+            aux_data = (HankelTransform(x_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -385,8 +392,10 @@ class B12PressureProfile(PressureProfile):
 
     Attributes
     ----------
-    x_grid : jnp.ndarray
-        Dimensionless radial grid :math:`x = r / r_\\Delta` used to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
+    x_range : tuple
+        ``(x_min, x_max)`` spanning the dimensionless radial grid :math:`x = r / r_\\Delta`, log-spaced internally to tabulate the profile and define the Hankel transform, with :math:`r_\\Delta` expressed in the same units as :math:`r`.
+    n_x : int
+        Number of log-spaced points in the transform grid.
     A_P0 : float
         Amplitude :math:`A_{P_0}` of the pressure normalization scaling.
     A_xc : float
@@ -409,7 +418,8 @@ class B12PressureProfile(PressureProfile):
 
     def __init__(
         self,
-        x_grid=None,
+        x_range=(1e-4, 1e1),
+        n_x=100,
         A_P0=18.1,
         A_xc=0.497,
         A_beta=4.35,
@@ -436,17 +446,20 @@ class B12PressureProfile(PressureProfile):
         )
         self.x_out = x_out
 
-        # Grid initialization
-        self.x_grid = x_grid if x_grid is not None else jnp.logspace(-4, 1, 256)
+        x_grid = jnp.logspace(jnp.log10(x_range[0]), jnp.log10(x_range[1]), int(n_x))
+        self._hankel = HankelTransform(x_grid, nu=0.5)
 
     @property
     def x_grid(self):
-        return self._x_grid
+        return self._hankel.x
 
-    @x_grid.setter
-    def x_grid(self, value):
-        self._x_grid = jnp.sort(value)
-        self._hankel = HankelTransform(self._x_grid, nu=0.5)
+    @property
+    def x_range(self):
+        return (self._hankel.x[0], self._hankel.x[-1])
+
+    @property
+    def n_x(self):
+        return self._hankel.x.shape[0]
 
     def _tree_flatten(self):
         leaves = (
@@ -483,7 +496,6 @@ class B12PressureProfile(PressureProfile):
             obj.x_out,
         ) = leaves
 
-        obj._x_grid = hankel.x
         obj._hankel = hankel
         return obj
 
@@ -499,7 +511,8 @@ class B12PressureProfile(PressureProfile):
         alpha_z_xc=None,
         alpha_z_beta=None,
         x_out=None,
-        x_grid=None,
+        x_range=None,
+        n_x=None,
     ):
         """
         Return a new profile instance with updated B12 parameters.
@@ -508,8 +521,10 @@ class B12PressureProfile(PressureProfile):
         ----------
         A_P0, A_xc, A_beta, alpha_m_P0, alpha_m_xc, alpha_m_beta, alpha_z_P0, alpha_z_xc, alpha_z_beta, x_out : float, optional
             Replacement values for the corresponding class attributes. Any argument left as ``None`` keeps its current value.
-        x_grid : jnp.ndarray, optional
-            New dimensionless radial grid. Will be sorted and used to rebuild the Hankel transform.
+        x_range : tuple, optional
+            New ``(x_min, x_max)`` for the dimensionless radial grid. Rebuilds the Hankel transform on a fresh log-spaced grid.
+        n_x : int, optional
+            New number of log-spaced grid points. Rebuilds the Hankel transform.
 
         Returns
         -------
@@ -531,9 +546,11 @@ class B12PressureProfile(PressureProfile):
             x_out if x_out is not None else self.x_out,
         )
 
-        if x_grid is not None:
-            sorted_grid = jnp.sort(x_grid)
-            aux_data = (HankelTransform(sorted_grid, nu=0.5),)
+        if x_range is not None or n_x is not None:
+            new_x_range = x_range if x_range is not None else self.x_range
+            new_n_x = n_x if n_x is not None else self.n_x
+            x_grid = jnp.logspace(jnp.log10(new_x_range[0]), jnp.log10(new_x_range[1]), int(new_n_x))
+            aux_data = (HankelTransform(x_grid, nu=0.5),)
 
         return self._tree_unflatten(aux_data, new_leaves)
 
@@ -565,7 +582,7 @@ class B12PressureProfile(PressureProfile):
         -------
         B12PressureProfile
             New profile instance with all nine shape parameters replaced. The radial
-            grid ``x_grid`` and truncation radius ``x_out`` are preserved unchanged.
+            grid (``x_range``/``n_x``) and truncation radius ``x_out`` are preserved unchanged.
 
         """
         key = model_key.lower()

@@ -72,6 +72,7 @@ R_GRID = jnp.geomspace(1e-2, 5.0, N_R)
 # sigma(R) below ~0.1 Mpc runs off the tabulated P(k) grid and returns NaN, by design.
 R_GRID_SIGMA = jnp.geomspace(1.0, 20.0, N_R)
 Z_GRID = jnp.geomspace(0.05, 2.0, N_Z)
+Z_RANGE = (Z_GRID[0], Z_GRID[-1])
 L_GRID = jnp.geomspace(20.0, 1000.0, N_L)
 K_GRID_BT = jnp.geomspace(1e-2, 2.0, N_KBT)
 Z_SINGLE = jnp.array([0.5])
@@ -95,11 +96,11 @@ BIAS = T10HaloBias()
 
 NFW = NFWMatterProfile()
 GNFW = GNFWPressureProfile(
-    x_grid=jnp.geomspace(1e-5, 1e5, 32), P0=6.41, c500=1.177, alpha=1.33,
+    x_range=(1e-5, 1e5), n_x=32, P0=6.41, c500=1.177, alpha=1.33,
     beta=4.13, gamma=0.31, B=1.4, alpha_P=0.12, P0_hexp=-1, x_out=4,
 )
-B12 = B12PressureProfile(x_grid=jnp.geomspace(1e-5, 1e5, 32))
-B16 = B16DensityProfile(x_grid=jnp.geomspace(1e-5, 1e5, 32))
+B12 = B12PressureProfile(x_range=(1e-5, 1e5), n_x=32)
+B16 = B16DensityProfile(x_range=(1e-5, 1e5), n_x=32)
 HOD = Z07GalaxyHODProfile(sigma_log10M=0.2, alpha_s=1.0, M1_prime=1e13, M_min=1e12, M0=1e12)
 CIB = S12CIBProfile(nu=100.0)
 M21 = M21CIBProfile(nu=100.0)
@@ -126,7 +127,7 @@ def cosmo(p):
 def halo_model(p, mass_def=MD_200M):
     return HaloModel(
         cosmology=cosmo(p), mass_def=mass_def, concentration=CONC,
-        halo_mass_function=HMF, halo_bias=BIAS, m_grid=M_GRID,
+        halo_mass_function=HMF, halo_bias=BIAS, m_range=(M_GRID[0], M_GRID[-1]), n_m=N_M,
     )
 
 
@@ -222,7 +223,7 @@ case("S12CIBProfile.l_gal", lambda p: CIB.l_gal(halo_model(p), M_GRID, Z_GRID))
 case("S12CIBProfile.l_sat", lambda p: CIB.l_sat(halo_model(p), M_GRID, Z_GRID))
 case("S12CIBProfile.l_cen", lambda p: CIB.l_cen(halo_model(p), M_GRID, Z_GRID))
 case("S12CIBProfile.mean_emissivity", lambda p: CIB.mean_emissivity(halo_model(p), Z_GRID))
-case("S12CIBProfile.mean_intensity", lambda p: CIB.mean_intensity(halo_model(p), Z_GRID))
+case("S12CIBProfile.mean_intensity", lambda p: CIB.mean_intensity(halo_model(p), Z_RANGE, N_Z))
 
 # --- tracers ---------------------------------------------------------------------
 for _name, _tracer in [
@@ -244,14 +245,14 @@ broken("Pk.xi_1h", lambda p: PK.xi_1h(halo_model(p), R_GRID, Z_SINGLE, NFW, k_da
        _P2XI_BUILT_UNDER_TRACE)
 broken("Pk.xi_2h", lambda p: PK.xi_2h(halo_model(p), R_GRID, Z_SINGLE, NFW),
        _P2XI_BUILT_UNDER_TRACE)
-case("Pk.cl_1h", lambda p: PK.cl_1h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_GRID, k_damp=0.0))
+case("Pk.cl_1h", lambda p: PK.cl_1h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, k_damp=0.0))
 case("Pk.cl_2h[limber]",
-     lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_GRID))
+     lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
 CASES.append(pytest.param(
-    lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_GRID, l_limber=100.0),
+    lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, l_limber=100.0),
     id="Pk.cl_2h[non-limber]", marks=_NEEDS_LOGGAMMA))
 case("Pk.cl_linear",
-     lambda p: PK.cl_linear(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_GRID))
+     lambda p: PK.cl_linear(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_RANGE, N_Z))
 
 # --- higher-order statistics and covariances -------------------------------------
 case("Bk.bk_1h",
@@ -265,10 +266,10 @@ for _order in (1, 2, 3, 4):
          (lambda o: lambda p: getattr(TK, f"tk_{o}h")(halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))(_order))
 case("Tk.covariance_cng",
      lambda p: TK.covariance_cng(halo_model(p), GAL_TRACER, None, None, None,
-                                 L_GRID[:3], L_GRID[:3], Z_GRID))
+                                 L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z))
 case("Tk.covariance_ssc",
      lambda p: TK.covariance_ssc(halo_model(p), GAL_TRACER, None, None, None,
-                                 L_GRID[:3], L_GRID[:3], Z_GRID, f_sky=0.4))
+                                 L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z, f_sky=0.4))
 
 
 def _leaves(out):

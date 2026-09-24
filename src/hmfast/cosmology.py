@@ -969,7 +969,7 @@ class Cosmology:
         
         z = jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
-        k_grid = jnp.geomspace(1e-5, 1e1, 1000)
+        k_grid, _ = self._pk_grid()
         z_grid_pk = self._z_grid_pk()
 
         P_grid = self.pk(k_grid, z_grid_pk, linear=True).T

@@ -7,7 +7,7 @@ import mcfit
 from functools import partial
 
 from hmfast.download import _get_default_data_path
-from hmfast.utils import lambertw, Const
+from hmfast.utils import lambertw, Const, gauss_legendre_nodes_weights
 from hmfast.halos.profiles import HaloProfile
 
 
@@ -335,17 +335,16 @@ class S12CIBProfile(CIBProfile):
         def integrate_single_halo(m_single):
             ms_min = self.M_min
             ms_max = m_single
-            ngrid = 200
-            
-            ms_grid = jnp.logspace(jnp.log10(ms_min), jnp.log10(ms_max), ngrid)
-            dlnms = jnp.log(ms_grid[1] / ms_grid[0])
-            
+
+            logms, gl_w = gauss_legendre_nodes_weights(jnp.log(ms_min), jnp.log(ms_max), halo_model.n_m)
+            ms_grid = jnp.exp(logms)
+
             # Subhalo mass function
             dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model.cosmology, m_single, ms_grid)
             # Standard Shang luminosity
             l_gal_grid = jnp.reshape(self.l_gal(halo_model, ms_grid, z), (len(ms_grid), len(z)))
-            
-            return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
+
+            return jnp.sum(dn_dlnms[:, None] * l_gal_grid * gl_w[:, None], axis=0)
 
         return jnp.squeeze(jax.vmap(integrate_single_halo)(m))
 
@@ -401,7 +400,9 @@ class S12CIBProfile(CIBProfile):
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        m, z = halo_model.m_grid, jnp.atleast_1d(z)
+        z = jnp.atleast_1d(z)
+        logm, gl_w = gauss_legendre_nodes_weights(jnp.log(halo_model.m_range[0]), jnp.log(halo_model.m_range[1]), halo_model.n_m)
+        m = jnp.exp(logm)
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
@@ -409,15 +410,15 @@ class S12CIBProfile(CIBProfile):
         dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def), (len(m), len(z)))
 
         integrand = dndlnm * (lc + ls)
-        j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
+        j_bar = jnp.sum(integrand * gl_w[:, None], axis=0)
 
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
 
         return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
-    @jax.jit
-    def mean_intensity(self, halo_model, z):
+    @partial(jax.jit, static_argnums=(3,))
+    def mean_intensity(self, halo_model, z_range, n_z):
         """
         Compute the CIB mean intensity (monopole).
 
@@ -425,8 +426,11 @@ class S12CIBProfile(CIBProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
-        z : float or jnp.ndarray
-            Redshift grid.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the Gauss-Legendre redshift integration grid.
+        n_z : int
+            Number of redshift-integration nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
 
         Returns
         -------
@@ -435,7 +439,9 @@ class S12CIBProfile(CIBProfile):
             as a scalar with shape :math:`()`, where singleton dimensions get
             squeezed before return.
         """
-        z = jnp.atleast_1d(z)
+        logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
+        z = jnp.exp(logz)
+        z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude
 
         j_bar = self.mean_emissivity(halo_model, z)
 
@@ -443,7 +449,7 @@ class S12CIBProfile(CIBProfile):
         a = 1.0 / (1.0 + z)
 
         integrand = dchi_dz * a * j_bar
-        intensity = jnp.trapezoid(integrand, x=z)
+        intensity = jnp.sum(integrand * z_gl_w)
 
         return jnp.squeeze(intensity)
 
@@ -843,19 +849,18 @@ class M21CIBProfile(CIBProfile):
             ms_min = self.M_min
             # Host efficiency scaling uses mass corrected by fsub
             ms_max = m_single * (1 - self.f_sub)
-            ngrid = len(halo_model.m_grid)
 
-            ms_grid = jnp.logspace(jnp.log10(ms_min), jnp.log10(ms_max), ngrid)
-            dlnms = jnp.log(ms_grid[1] / ms_grid[0])
-            
+            logms, gl_w = gauss_legendre_nodes_weights(jnp.log(ms_min), jnp.log(ms_max), halo_model.n_m)
+            ms_grid = jnp.exp(logms)
+
             dn_dlnms = halo_model.subhalo_mass_function.dndlnmu(halo_model.cosmology, m_single, ms_grid)
-            
+
             # Maniyar Clamping Logic
             sfr_i = jnp.reshape(self.l_gal(halo_model, ms_grid, z), (len(ms_grid), len(z)))
             sfr_ii = jnp.reshape(self.l_gal(halo_model, ms_max, z), (len(z),)) * ms_grid[:, None] / ms_max
             l_gal_grid = jnp.minimum(sfr_i, sfr_ii)
-            
-            return jnp.sum(dn_dlnms[:, None] * l_gal_grid * dlnms, axis=0)
+
+            return jnp.sum(dn_dlnms[:, None] * l_gal_grid * gl_w[:, None], axis=0)
 
         return jnp.squeeze(jax.vmap(integrate_single_halo)(m))
 
@@ -912,7 +917,9 @@ class M21CIBProfile(CIBProfile):
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        m, z = halo_model.m_grid, jnp.atleast_1d(z)
+        z = jnp.atleast_1d(z)
+        logm, gl_w = gauss_legendre_nodes_weights(jnp.log(halo_model.m_range[0]), jnp.log(halo_model.m_range[1]), halo_model.n_m)
+        m = jnp.exp(logm)
 
         lc = jnp.reshape(self.l_cen(halo_model, m, z), (len(m), len(z)))
         ls = jnp.reshape(self.l_sat(halo_model, m, z), (len(m), len(z)))
@@ -920,15 +927,15 @@ class M21CIBProfile(CIBProfile):
         dndlnm = jnp.reshape(halo_model.halo_mass_function.dndlnm(halo_model.cosmology, m, z, halo_model.mass_def), (len(m), len(z)))
 
         integrand = dndlnm * (lc + ls)
-        j_bar = jnp.trapezoid(integrand, x=jnp.log(m), axis=0)
+        j_bar = jnp.sum(integrand * gl_w[:, None], axis=0)
 
         j_bar = jax.lax.cond(halo_model.hm_consistency, lambda x: x + halo_model._counter_terms(z)[0] * lc[0], lambda x: x, j_bar)
 
         return jnp.squeeze(j_bar / (4 * jnp.pi))
 
 
-    @jax.jit
-    def mean_intensity(self, halo_model, z):
+    @partial(jax.jit, static_argnums=(3,))
+    def mean_intensity(self, halo_model, z_range, n_z):
         """
         Compute the CIB mean intensity (monopole).
 
@@ -936,8 +943,11 @@ class M21CIBProfile(CIBProfile):
         ----------
         halo_model : HaloModel
             Halo model providing the cosmology.
-        z : float or jnp.ndarray
-            Redshift grid.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the Gauss-Legendre redshift integration grid.
+        n_z : int
+            Number of redshift-integration nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
 
         Returns
         -------
@@ -946,7 +956,9 @@ class M21CIBProfile(CIBProfile):
             as a scalar with shape :math:`()`, where singleton dimensions get
             squeezed before return.
         """
-        z = jnp.atleast_1d(z)
+        logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
+        z = jnp.exp(logz)
+        z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude
 
         j_bar = self.mean_emissivity(halo_model, z)
 
@@ -954,7 +966,7 @@ class M21CIBProfile(CIBProfile):
         a = 1.0 / (1.0 + z)
 
         integrand = dchi_dz * a * j_bar
-        intensity = jnp.trapezoid(integrand, x=z)
+        intensity = jnp.sum(integrand * z_gl_w)
 
         return jnp.squeeze(intensity)
 

@@ -27,8 +27,15 @@ from hmfast.halos.profiles import (
 )
 from hmfast.halos.profiles.base_profile import HankelTransform
 from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
+from hmfast.utils import gauss_legendre_nodes_weights
 
 M_GRID = jnp.geomspace(1e10, 1e15, 40)
+
+
+def _m_grid(hm):
+    """Reconstruct a halo model's internal Gauss-Legendre mass-integral nodes."""
+    logm, _ = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+    return jnp.exp(logm)
 
 
 @pytest.fixture
@@ -38,7 +45,8 @@ def hm200c(fixed_cosmology):
         cosmology=fixed_cosmology,
         mass_def=MassDefinition(200, "critical"),
         concentration=D08Concentration(),
-        m_grid=M_GRID,
+        m_range=(M_GRID[0], M_GRID[-1]),
+        n_m=M_GRID.shape[0],
     )
 
 
@@ -49,7 +57,8 @@ def hm200c_oob(out_of_bounds_cosmology):
         cosmology=out_of_bounds_cosmology,
         mass_def=MassDefinition(200, "critical"),
         concentration=D08Concentration(),
-        m_grid=M_GRID,
+        m_range=(M_GRID[0], M_GRID[-1]),
+        n_m=M_GRID.shape[0],
     )
 
 
@@ -288,7 +297,8 @@ class TestNFWMatterProfile:
         self, fixed_cosmology, md_a, md_b, conc
     ):
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         nfw = NFWMatterProfile()
@@ -368,8 +378,8 @@ class TestZ07GalaxyHODProfile:
         out = hod.fourier(hm200c, R_VALS[r_key], M_VALS[m_key], Z_VALS[z_key])
         assert jnp.shape(out) == expected_shape
 
-    # ng_bar/galaxy_bias take no mass argument at all -- they always integrate over halo_model.m_grid.
-    def test_ng_bar_ignores_m_grid_arg_not_exposed(self, hm200c):
+    # ng_bar/galaxy_bias take no mass argument at all -- they always integrate over halo_model.m_range/n_m.
+    def test_ng_bar_ignores_m_range_arg_not_exposed(self, hm200c):
         import inspect
 
         hod = Z07GalaxyHODProfile()
@@ -378,27 +388,28 @@ class TestZ07GalaxyHODProfile:
             "halo_model",
             "z",
         ]
-        hm_coarse = hm200c.update(m_grid=jnp.geomspace(1e10, 1e15, 10))
+        hm_coarse = hm200c.update(m_range=(1e10, 1e15), n_m=10)
         assert not jnp.isclose(
             hod.ng_bar(hm200c, jnp.array(0.5)),
             hod.ng_bar(hm_coarse, jnp.array(0.5)),
             rtol=1e-6,
         )
 
-    # real()'s implicit 1/ng_bar normalization is derived from halo_model.m_grid, not from
+    # real()'s implicit 1/ng_bar normalization is derived from halo_model.m_range/n_m, not from
     # whatever `m` array is passed for the output's own mass axis -- callers should pass
-    # m = halo_model.m_grid for a self-consistent normalized profile.
-    def test_real_normalization_uses_halo_model_m_grid_not_passed_m(self, hm200c):
+    # m = the halo model's own Gauss-Legendre mass grid for a self-consistent normalized profile.
+    def test_real_normalization_uses_halo_model_m_range_not_passed_m(self, hm200c):
         hod = Z07GalaxyHODProfile()
         r, z = jnp.array(0.1), jnp.array(0.5)
         ng_from_hm_grid = hod.ng_bar(hm200c, z)
         other_m = jnp.geomspace(1e11, 1e14, 6)
-        real_default_m = hod.real(hm200c, r, hm200c.m_grid, z)
+        default_m = _m_grid(hm200c)
+        real_default_m = hod.real(hm200c, r, default_m, z)
         real_other_m = hod.real(hm200c, r, other_m, z)
-        ns_default, nc_default = hod.n_sat(hm200c, hm200c.m_grid), hod.n_cen(
-            hm200c, hm200c.m_grid
+        ns_default, nc_default = hod.n_sat(hm200c, default_m), hod.n_cen(
+            hm200c, default_m
         )
-        u_default = hod._u_r_nfw(hm200c, r, hm200c.m_grid, z)
+        u_default = hod._u_r_nfw(hm200c, r, default_m, z)
         implied_ng_default = (nc_default + ns_default * u_default) / real_default_m
         ns_other, nc_other = hod.n_sat(hm200c, other_m), hod.n_cen(hm200c, other_m)
         u_other = hod._u_r_nfw(hm200c, r, other_m, z)
@@ -468,7 +479,8 @@ class TestZ07GalaxyHODProfile:
         self, fixed_cosmology, md_a, md_b, conc
     ):
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         hod = Z07GalaxyHODProfile()
@@ -532,8 +544,10 @@ class TestZ07GalaxyHODProfile:
             hod = Z07GalaxyHODProfile()
             r, z = jnp.array(0.1), jnp.array(0.5)
 
+            m = _m_grid(hm200c)
+
             def f(x):
-                return hod.update(**{param: x}).real(hm200c, r, hm200c.m_grid, z).sum()
+                return hod.update(**{param: x}).real(hm200c, r, m, z).sum()
 
             _check_grad(f, x0)
 
@@ -557,7 +571,7 @@ class TestS12CIBProfile:
     # mean_intensity always collapses to a scalar.
     def test_mean_intensity_is_scalar(self, hm200c):
         cib = S12CIBProfile(nu=100)
-        out = cib.mean_intensity(hm200c, jnp.array([0.1, 0.5, 1.0]))
+        out = cib.mean_intensity(hm200c, (0.1, 1.0), 5)
         assert jnp.shape(out) == ()
 
     # real()'s output shape follows the (r, m, z) broadcast-then-squeeze convention.
@@ -585,21 +599,22 @@ class TestS12CIBProfile:
         assert jnp.isclose(sat_only[0], real_r[0] - lc / (4 * jnp.pi), atol=1e-8)
         assert real_r[1] < real_r[0]
 
-    # l_sat's subhalo integral uses a hardcoded ngrid=200 -- unlike M21CIB, it does not
-    # respond to halo_model.m_grid's resolution at all.
-    def test_l_sat_ngrid_independent_of_halo_model_m_grid(self, fixed_cosmology):
+    # l_sat's subhalo integral uses ngrid=halo_model.n_m (Gauss-Legendre in ln(m_sub)) --
+    # a smooth integrand, so it converges much faster with n_m than M21CIB's clamped one below.
+    def test_l_sat_ngrid_tracks_halo_model_n_m(self, fixed_cosmology):
         cib = S12CIBProfile(nu=100)
         hm_fine = HaloModel(
             cosmology=fixed_cosmology,
             mass_def=MassDefinition(200, "critical"),
             concentration=D08Concentration(),
-            m_grid=jnp.geomspace(1e10, 1e15, 100),
+            m_range=(1e10, 1e15),
+            n_m=100,
         )
-        hm_coarse = hm_fine.update(m_grid=jnp.geomspace(1e10, 1e15, 8))
+        hm_coarse = hm_fine.update(n_m=8)
         m, z = jnp.array(5e13), jnp.array(0.5)
-        assert jnp.allclose(
-            cib.l_sat(hm_fine, m, z), cib.l_sat(hm_coarse, m, z), rtol=1e-10
-        )
+        l_fine, l_coarse = cib.l_sat(hm_fine, m, z), cib.l_sat(hm_coarse, m, z)
+        assert not jnp.array_equal(l_fine, l_coarse)
+        assert jnp.isclose(l_fine, l_coarse, rtol=1e-3)
 
     # update() replaces only the requested leaves, leaving the rest untouched.
     def test_update_rebuilds_leaves(self):
@@ -632,7 +647,7 @@ class TestS12CIBProfile:
         assert jnp.all(jnp.isnan(cib.real(hm200c_oob, r, m, z)))
         assert jnp.all(jnp.isnan(cib.fourier(hm200c_oob, r, m, z)))
         assert jnp.all(jnp.isnan(cib.mean_emissivity(hm200c_oob, z)))
-        assert jnp.isnan(cib.mean_intensity(hm200c_oob, z))
+        assert jnp.isnan(cib.mean_intensity(hm200c_oob, (float(z[0]), float(z[-1])), 5))
 
     # real() at mass_def A vs. mass_def B (mass properly converted) agree within a loose
     # tolerance -- the satellite term traces the same generic NFW kernel as NFW/HOD above.
@@ -660,7 +675,8 @@ class TestS12CIBProfile:
         self, fixed_cosmology, md_a, md_b, conc
     ):
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         cib = S12CIBProfile(nu=100)
@@ -768,17 +784,20 @@ class TestM21CIBProfile:
         z, nu = jnp.array([0.5, 1.5]), 150.0
         assert jnp.allclose(cib._s_nu_interp(z, nu), cib._s_nu_interp(z, nu))
 
-    # l_sat's subhalo integral uses ngrid=len(halo_model.m_grid) -- unlike S12CIB, its result
-    # shifts (though converges) with the host halo_model's mass-grid resolution.
-    def test_l_sat_ngrid_tracks_halo_model_m_grid(self, fixed_cosmology):
+    # l_sat's subhalo integral also uses ngrid=halo_model.n_m, but the Maniyar clamping
+    # (jnp.minimum of two branches) kinks the integrand, so Gauss-Legendre converges
+    # more slowly here than for S12CIB's smooth one above -- shifts more with n_m, though
+    # it still converges.
+    def test_l_sat_ngrid_tracks_halo_model_n_m(self, fixed_cosmology):
         cib = M21CIBProfile(nu=100)
         hm_fine = HaloModel(
             cosmology=fixed_cosmology,
             mass_def=MassDefinition(200, "critical"),
             concentration=D08Concentration(),
-            m_grid=jnp.geomspace(1e10, 1e15, 200),
+            m_range=(1e10, 1e15),
+            n_m=200,
         )
-        hm_coarse = hm_fine.update(m_grid=jnp.geomspace(1e10, 1e15, 8))
+        hm_coarse = hm_fine.update(n_m=8)
         m, z = jnp.array(5e13), jnp.array(0.5)
         l_fine, l_coarse = cib.l_sat(hm_fine, m, z), cib.l_sat(hm_coarse, m, z)
         assert not jnp.array_equal(l_fine, l_coarse)
@@ -856,7 +875,8 @@ class TestM21CIBProfile:
         self, fixed_cosmology, md_a, md_b, conc
     ):
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         cib = M21CIBProfile(nu=100)
@@ -906,18 +926,16 @@ class TestB16DensityProfile:
         out = b16.fourier(hm200c, R_VALS[r_key], M_VALS[m_key], Z_VALS[z_key])
         assert jnp.shape(out) == expected_shape
 
-    # The x_grid property setter sorts an unsorted grid given at construction.
-    def test_x_grid_property_sorts_on_construction(self):
-        unsorted = jnp.array([1.0, 0.1, 10.0, 0.5])
-        b16 = B16DensityProfile(x_grid=unsorted)
-        assert jnp.array_equal(b16.x_grid, jnp.sort(unsorted))
+    # x_range/n_x are always turned into a log-spaced grid, regardless of the requested bounds.
+    def test_x_grid_is_log_spaced_from_range(self):
+        b16 = B16DensityProfile(x_range=(0.1, 10.0), n_x=4)
+        assert jnp.array_equal(b16.x_grid, jnp.logspace(jnp.log10(0.1), jnp.log10(10.0), 4))
 
-    # update(x_grid=...) re-sorts the grid and rebuilds a fresh HankelTransform.
-    def test_update_x_grid_resorts_and_rebuilds_hankel(self):
+    # update(x_range=..., n_x=...) rebuilds a fresh HankelTransform on the new log-spaced grid.
+    def test_update_x_range_rebuilds_hankel(self):
         b16 = B16DensityProfile()
-        unsorted = jnp.array([2.0, 0.01, 5.0, 0.1])
-        b16_2 = b16.update(x_grid=unsorted)
-        assert jnp.array_equal(b16_2.x_grid, jnp.sort(unsorted))
+        b16_2 = b16.update(x_range=(0.01, 5.0), n_x=8)
+        assert jnp.array_equal(b16_2.x_grid, jnp.logspace(jnp.log10(0.01), jnp.log10(5.0), 8))
         assert b16_2._hankel is not b16._hankel
 
     # _tree_unflatten bypasses the x_grid setter and trusts aux_data as-is -- no re-sort/rebuild.
@@ -963,7 +981,8 @@ class TestB16DensityProfile:
     ):
         md_a, conc = MassDefinition(200, "critical"), ConstantConcentration(c=5)
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         b16 = B16DensityProfile(**shape_kwargs)
@@ -1042,18 +1061,16 @@ class TestGNFWPressureProfile:
         out = gnfw.fourier(hm200c, R_VALS[r_key], M_VALS[m_key], Z_VALS[z_key])
         assert jnp.shape(out) == expected_shape
 
-    # The x_grid property setter sorts an unsorted grid given at construction.
-    def test_x_grid_property_sorts_on_construction(self):
-        unsorted = jnp.array([1.0, 0.1, 10.0, 0.5])
-        gnfw = GNFWPressureProfile(x_grid=unsorted)
-        assert jnp.array_equal(gnfw.x_grid, jnp.sort(unsorted))
+    # x_range/n_x are always turned into a log-spaced grid, regardless of the requested bounds.
+    def test_x_grid_is_log_spaced_from_range(self):
+        gnfw = GNFWPressureProfile(x_range=(0.1, 10.0), n_x=4)
+        assert jnp.array_equal(gnfw.x_grid, jnp.logspace(jnp.log10(0.1), jnp.log10(10.0), 4))
 
-    # update(x_grid=...) re-sorts the grid and rebuilds a fresh HankelTransform.
-    def test_update_x_grid_resorts_and_rebuilds_hankel(self):
+    # update(x_range=..., n_x=...) rebuilds a fresh HankelTransform on the new log-spaced grid.
+    def test_update_x_range_rebuilds_hankel(self):
         gnfw = GNFWPressureProfile()
-        unsorted = jnp.array([2.0, 0.01, 5.0, 0.1])
-        gnfw_2 = gnfw.update(x_grid=unsorted)
-        assert jnp.array_equal(gnfw_2.x_grid, jnp.sort(unsorted))
+        gnfw_2 = gnfw.update(x_range=(0.01, 5.0), n_x=8)
+        assert jnp.array_equal(gnfw_2.x_grid, jnp.logspace(jnp.log10(0.01), jnp.log10(5.0), 8))
         assert gnfw_2._hankel is not gnfw._hankel
 
     # real() is deliberately mass-def SENSITIVE (no internal renormalization) -- given a
@@ -1071,7 +1088,8 @@ class TestGNFWPressureProfile:
     ):
         md_a, conc = MassDefinition(200, "critical"), ConstantConcentration(c=5)
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         gnfw = GNFWPressureProfile(**shape_kwargs)
@@ -1161,18 +1179,16 @@ class TestB12PressureProfile:
         out = b12.fourier(hm200c, R_VALS[r_key], M_VALS[m_key], Z_VALS[z_key])
         assert jnp.shape(out) == expected_shape
 
-    # The x_grid property setter sorts an unsorted grid given at construction.
-    def test_x_grid_property_sorts_on_construction(self):
-        unsorted = jnp.array([1.0, 0.1, 10.0, 0.5])
-        b12 = B12PressureProfile(x_grid=unsorted)
-        assert jnp.array_equal(b12.x_grid, jnp.sort(unsorted))
+    # x_range/n_x are always turned into a log-spaced grid, regardless of the requested bounds.
+    def test_x_grid_is_log_spaced_from_range(self):
+        b12 = B12PressureProfile(x_range=(0.1, 10.0), n_x=4)
+        assert jnp.array_equal(b12.x_grid, jnp.logspace(jnp.log10(0.1), jnp.log10(10.0), 4))
 
-    # update(x_grid=...) re-sorts the grid and rebuilds a fresh HankelTransform.
-    def test_update_x_grid_resorts_and_rebuilds_hankel(self):
+    # update(x_range=..., n_x=...) rebuilds a fresh HankelTransform on the new log-spaced grid.
+    def test_update_x_range_rebuilds_hankel(self):
         b12 = B12PressureProfile()
-        unsorted = jnp.array([2.0, 0.01, 5.0, 0.1])
-        b12_2 = b12.update(x_grid=unsorted)
-        assert jnp.array_equal(b12_2.x_grid, jnp.sort(unsorted))
+        b12_2 = b12.update(x_range=(0.01, 5.0), n_x=8)
+        assert jnp.array_equal(b12_2.x_grid, jnp.logspace(jnp.log10(0.01), jnp.log10(5.0), 8))
         assert b12_2._hankel is not b12._hankel
 
     # calibrate("agn") matches an explicit update() call with the same kwargs.
@@ -1202,7 +1218,8 @@ class TestB12PressureProfile:
     ):
         md_a, conc = MassDefinition(200, "critical"), ConstantConcentration(c=5)
         hm_a = HaloModel(
-            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc, m_grid=M_GRID
+            cosmology=fixed_cosmology, mass_def=md_a, concentration=conc,
+            m_range=(M_GRID[0], M_GRID[-1]), n_m=M_GRID.shape[0],
         )
         hm_b = hm_a.update(mass_def=md_b)
         b12 = B12PressureProfile(**shape_kwargs)

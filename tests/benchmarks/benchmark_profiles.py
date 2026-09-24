@@ -85,7 +85,8 @@ class TestNFWMatterProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         conc_ccl = pyccl.halos.concentration.ConcentrationDuffy08(mass_def=md_ccl)
@@ -125,7 +126,8 @@ class TestNFWMatterProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         conc_ccl = pyccl.halos.concentration.ConcentrationDuffy08(mass_def=md_ccl)
@@ -157,7 +159,8 @@ class TestGNFWPressureProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=ConstantConcentration(c=5),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         B, x_out = 1.4, 4.0
@@ -209,7 +212,8 @@ class TestGNFWPressureProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=ConstantConcentration(c=5),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         gnfw = GNFWPressureProfile()
@@ -247,7 +251,8 @@ class TestHODProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         conc_ccl = pyccl.halos.concentration.ConcentrationDuffy08(mass_def=md_ccl)
@@ -283,7 +288,8 @@ class TestHODProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         conc_ccl = pyccl.halos.concentration.ConcentrationDuffy08(mass_def=md_ccl)
@@ -322,7 +328,8 @@ class TestS12CIBProfileCCL:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         md_ccl = to_ccl_massdef(md)
         conc_ccl = pyccl.halos.concentration.ConcentrationDuffy08(mass_def=md_ccl)
@@ -379,7 +386,8 @@ class TestB16DensityProfileClassSZ:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         b16 = B16DensityProfile(
             A_rho0=4000.0,
@@ -442,7 +450,8 @@ class TestB12PressureProfileClassSZ:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         b12 = B12PressureProfile(
             A_P0=18.1,
@@ -527,7 +536,8 @@ class TestManiyarMdotSFR:
             cosmology=fixed_cosmology,
             mass_def=md,
             concentration=D08Concentration(),
-            m_grid=M_GRID,
+            m_range=(M_GRID[0], M_GRID[-1]),
+            n_m=M_GRID.shape[0],
         )
         m21 = M21CIBProfile(nu=100)
         m_grid_np = np.geomspace(1e11, 1e15, 6)

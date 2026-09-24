@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import mcfit
 
 from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
+from hmfast.utils import gauss_legendre_nodes_weights
 from . import cl as _cl
 
 # -------------------------
@@ -63,7 +64,7 @@ class Pk:
         where :math:`I_2^0` is the unweighted (:math:`\\beta=0`) pair
         mass integral :math:`I_\\mu^\\beta` with :math:`\\mu=2`,
         evaluated with both profiles at the same wavenumber :math:`k`.
-        The mass integral is performed over :attr:`m_grid`.
+        The mass integral is performed over :attr:`m_range`/:attr:`n_m`.
 
         Parameters
         ----------
@@ -87,13 +88,12 @@ class Pk:
             return.
         """
         hm = halo_model
-        k, m, z = jnp.atleast_1d(k), hm.m_grid, jnp.atleast_1d(z)
+        k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
         profile2 = profile2 if profile2 is not None else profile1
 
         # Weights and Setup
-        logm = jnp.log(m)
-        dm = jnp.diff(logm)
-        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+        m = jnp.exp(logm)
 
         dndlnm = jnp.reshape(hm.halo_mass_function.dndlnm(hm.cosmology, m, z, hm.mass_def), (len(m), len(z)))
         total_weights = dndlnm * w[:, None]  # (Nm, Nz)
@@ -139,7 +139,7 @@ class Pk:
         where :math:`I_1^1` is the linearly-biased (:math:`\\beta=1`)
         single-profile mass integral :math:`I_\\mu^\\beta` with
         :math:`\\mu=1`, evaluated once per profile at wavenumber
-        :math:`k`. The mass integral is performed over :attr:`m_grid`.
+        :math:`k`. The mass integral is performed over :attr:`m_range`/:attr:`n_m`.
 
         Parameters
         ----------
@@ -161,14 +161,13 @@ class Pk:
             return.
         """
         hm = halo_model
-        k, m, z = jnp.atleast_1d(k), hm.m_grid, jnp.atleast_1d(z)
+        k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
 
         profile2 = profile2 if profile2 is not None else profile1
 
         # Weights and Ingredients
-        logm = jnp.log(m)
-        dm = jnp.diff(logm)
-        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+        m = jnp.exp(logm)
 
         # Combine hmf, bias, and weights into a single (Nm, Nz) weight grid
         dndlnm = jnp.reshape(hm.halo_mass_function.dndlnm(hm.cosmology, m, z, hm.mass_def), (len(m), len(z)))
@@ -317,14 +316,14 @@ class Pk:
     # Angular power spectrum (Limber projection)
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,))
-    def cl_1h(self, halo_model, tracer1, tracer2, l, z, k_damp=0.01):
+    @partial(jax.jit, static_argnums=(0, 6))
+    def cl_1h(self, halo_model, tracer1, tracer2, l, z_range, n_z, k_damp=0.01):
         """
         Compute the 1-halo contribution to the angular power spectrum
         :math:`C_\\ell^{1h}` via the Limber approximation, which maps each
         multipole to a wavenumber, :math:`k = (\\ell + 1/2)/\\chi`, and
         integrates the 1-halo 3D power spectrum against the tracer kernels
-        (the mass integral is performed over :attr:`m_grid`). A tracer with
+        (the mass integral is performed over :attr:`m_range`/:attr:`n_m`). A tracer with
         an RSD term (e.g. ``GalaxyTracer(rsd=True)``) is supported here via
         an extended-Limber treatment of its ``der_bessel=2`` kernel term
         (see :func:`hmfast.stats.cl.cl_limber`). No non-Limber treatment is
@@ -340,9 +339,11 @@ class Pk:
             Second tracer object (if None, uses tracer1).
         l : float or jnp.ndarray
             Multipole grid.
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the Gauss-Legendre redshift integration grid.
+        n_z : int
+            Number of redshift-integration nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
         k_damp : float, default 0.01
             Damping wavenumber in :math:`\\mathrm{Mpc}^{-1}` passed through to :meth:`pk_1h`.
 
@@ -353,15 +354,15 @@ class Pk:
             :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
             return.
         """
-        return _cl._cl_limber(self, halo_model, tracer1, tracer2, l, z,
+        return _cl._cl_limber(self, halo_model, tracer1, tracer2, l, z_range, n_z,
                                include_1h=True, include_2h=False, k_damp=k_damp)
 
     # ------------------------------------------------------------------
     # Angular power spectrum (2-halo term; Limber, with optional non-Limber)
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,), static_argnames=("l_limber", "n_fft", "n_interp", "bias", "window"))
-    def cl_2h(self, halo_model, tracer1, tracer2, l, z, l_limber=0.0,
+    @partial(jax.jit, static_argnums=(0, 6), static_argnames=("l_limber", "n_fft", "n_interp", "bias", "window"))
+    def cl_2h(self, halo_model, tracer1, tracer2, l, z_range, n_z, l_limber=0.0,
               z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
         Compute the 2-halo contribution to the angular power spectrum
@@ -369,7 +370,7 @@ class Pk:
         which maps each multipole to a wavenumber,
         :math:`k = (\\ell + 1/2)/\\chi`, at each comoving distance
         :math:`\\chi` along the tracer kernels (the mass integral is
-        performed over :attr:`m_grid`). Below `l_limber`, it instead
+        performed over :attr:`m_range`/:attr:`n_m`). Below `l_limber`, it instead
         performs an exact projection using a SwiftCl-style (`Reymond et al.
         2025 <https://arxiv.org/abs/2505.22718>`_) FFTLog decomposition,
         built on the exact decomposition of the 2-halo power spectrum
@@ -404,9 +405,12 @@ class Pk:
             Multipole grid. Must be concrete (not a value being traced by
             JAX), since the low/high `l_limber` split is a data-dependent
             shape decision.
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the redshift integration grid (Limber
+            branch) and the internal FFTLog chi grid (non-Limber branch).
+        n_z : int
+            Number of redshift nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
         l_limber : float, default 0.0
             Multipole threshold: below `l_limber`, the exact non-Limber
             calculation is used; at or above it, the Limber approximation
@@ -417,7 +421,7 @@ class Pk:
             above.
         n_fft : int or None, default None
             Used only by the non-Limber calculation. Number of FFTLog
-            nodes; defaults to ``len(z)``.
+            nodes; defaults to ``n_z``.
         n_interp : int, default 200
             Used only by the non-Limber calculation. Number of wavenumber
             points at which its most expensive step is evaluated, before
@@ -443,17 +447,17 @@ class Pk:
         tracer2 = tracer1 if tracer2 is None else tracer2
         return _cl._dispatch_by_ell(
             l, l_limber,
-            lambda l_low: _cl._cl_2h_nonlimber(halo_model, tracer1, tracer2, l_low, z, z_fid=z_fid,
+            lambda l_low: _cl._cl_2h_nonlimber(halo_model, tracer1, tracer2, l_low, z_range, n_z, z_fid=z_fid,
                                                 n_fft=n_fft, n_interp=n_interp, bias=bias, window=window),
-            lambda l_high: _cl._cl_limber(self, halo_model, tracer1, tracer2, l_high, z, include_2h=True),
+            lambda l_high: _cl._cl_limber(self, halo_model, tracer1, tracer2, l_high, z_range, n_z, include_2h=True),
         )
 
     # ------------------------------------------------------------------
     # Angular power spectrum (linear bias)
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,), static_argnames=("linear", "l_limber", "n_fft", "n_interp", "bias", "window"))
-    def cl_linear(self, cosmology, tracer1, tracer2, l, z, linear=True,
+    @partial(jax.jit, static_argnums=(0, 6), static_argnames=("linear", "l_limber", "n_fft", "n_interp", "bias", "window"))
+    def cl_linear(self, cosmology, tracer1, tracer2, l, z_range, n_z, linear=True,
                   l_limber=0.0, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
         """
         Angular power spectrum for linearly-biased or unbiased tracers, with
@@ -486,10 +490,12 @@ class Pk:
             Multipole grid. Must be concrete (not a value being traced by JAX),
             since the low/high `l_limber` split is a data-dependent shape
             decision (matches `cl_2h`).
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift (Limber branch) and the range of the
-            internal FFTLog chi grid (non-Limber branch).
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the redshift integration grid (Limber
+            branch) and the internal FFTLog chi grid (non-Limber branch).
+        n_z : int
+            Number of redshift nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
         linear : bool, default True
             If True, use the linear matter power spectrum; if False, use the
             nonlinear power spectrum.
@@ -526,8 +532,8 @@ class Pk:
 
         return _cl._dispatch_by_ell(
             l, l_limber,
-            lambda l_low: _cl._cl_linear_nonlimber(cosmology, tracer1, tracer2, l_low, z, linear=linear,
+            lambda l_low: _cl._cl_linear_nonlimber(cosmology, tracer1, tracer2, l_low, z_range, n_z, linear=linear,
                                                     z_fid=z_fid, n_fft=n_fft, n_interp=n_interp,
                                                     bias=bias, window=window),
-            lambda l_high: _cl._cl_linear_limber(cosmology, tracer1, tracer2, l_high, z, linear=linear),
+            lambda l_high: _cl._cl_linear_limber(cosmology, tracer1, tracer2, l_high, z_range, n_z, linear=linear),
         )

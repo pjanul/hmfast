@@ -6,6 +6,7 @@ import numpy as np
 
 from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
 from hmfast.halos.profiles.hod import GalaxyHODProfile
+from hmfast.utils import gauss_legendre_nodes_weights
 
 from . import cl as _cl
 from .pk import Pk as _Pk
@@ -187,10 +188,9 @@ def _pair_integral(halo_model, p1, p2, k1, k2, z, outer=False, bias_order=1):
         ``Tk.tk_3h``.
     """
     hm = halo_model
-    m, z_arr = hm.m_grid, jnp.atleast_1d(z)
-    logm = jnp.log(m)
-    dm = jnp.diff(logm)
-    w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+    z_arr = jnp.atleast_1d(z)
+    logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+    m = jnp.exp(logm)
 
     dndlnm = jnp.reshape(
         hm.halo_mass_function.dndlnm(hm.cosmology, m, z_arr, hm.mass_def),
@@ -248,10 +248,9 @@ def _pair_integral_2pt(halo_model, p1, p2, k, z):
         Shape (Nk, Nz), singleton dimensions squeezed.
     """
     hm = halo_model
-    m, z_arr = hm.m_grid, jnp.atleast_1d(z)
-    logm = jnp.log(m)
-    dm = jnp.diff(logm)
-    w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+    z_arr = jnp.atleast_1d(z)
+    logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+    m = jnp.exp(logm)
 
     dndlnm = jnp.reshape(
         hm.halo_mass_function.dndlnm(hm.cosmology, m, z_arr, hm.mass_def),
@@ -387,10 +386,9 @@ def _triple_integral(halo_model, p_single, p_pair1, p_pair2, k_single, k_pair, z
         ``Tk.tk_2h``.
     """
     hm = halo_model
-    m, z_arr = hm.m_grid, jnp.atleast_1d(z)
-    logm = jnp.log(m)
-    dm = jnp.diff(logm)
-    w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+    z_arr = jnp.atleast_1d(z)
+    logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+    m = jnp.exp(logm)
 
     dndlnm = jnp.reshape(
         hm.halo_mass_function.dndlnm(hm.cosmology, m, z_arr, hm.mass_def),
@@ -539,10 +537,9 @@ class Bk:
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
-        m, z_arr = hm.m_grid, jnp.atleast_1d(z)
-        logm = jnp.log(m)
-        dm = jnp.diff(logm)
-        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        z_arr = jnp.atleast_1d(z)
+        logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+        m = jnp.exp(logm)
 
         dndlnm = jnp.reshape(
             hm.halo_mass_function.dndlnm(hm.cosmology, m, z_arr, hm.mass_def),
@@ -833,10 +830,9 @@ class Tk:
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
         profile4 = profile4 if profile4 is not None else profile2
-        m, z_arr = hm.m_grid, jnp.atleast_1d(z)
-        logm = jnp.log(m)
-        dm = jnp.diff(logm)
-        w = jnp.concatenate([jnp.array([dm[0]]), dm[:-1] + dm[1:], jnp.array([dm[-1]])]) * 0.5
+        z_arr = jnp.atleast_1d(z)
+        logm, w = gauss_legendre_nodes_weights(jnp.log(hm.m_range[0]), jnp.log(hm.m_range[1]), hm.n_m)
+        m = jnp.exp(logm)
 
         dndlnm = jnp.reshape(
             hm.halo_mass_function.dndlnm(hm.cosmology, m, z_arr, hm.mass_def),
@@ -1202,8 +1198,8 @@ class Tk:
     # Connected (non-Gaussian) angular power spectrum covariance
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,))
-    def covariance_cng(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z, f_sky=1.0):
+    @partial(jax.jit, static_argnums=(0, 9))
+    def covariance_cng(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z_range, n_z, f_sky=1.0):
         """
         Connected (non-Gaussian) covariance between two Limber-projected
         angular power spectra :math:`C_{\\ell_1}^{12}` and
@@ -1255,9 +1251,11 @@ class Tk:
             Multipole grids for the first and second angular power
             spectrum, respectively. Need not be the same length; the two
             are broadcast into an :math:`(N_{\\ell_1}, N_{\\ell_2})` grid.
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the Gauss-Legendre redshift integration grid.
+        n_z : int
+            Number of redshift-integration nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
         f_sky : float, default 1.0
             Observed sky fraction.
 
@@ -1269,6 +1267,9 @@ class Tk:
             return.
         """
         hm = halo_model
+        logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
+        z = jnp.exp(logz)
+        z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude
         tracer2 = tracer2 if tracer2 is not None else tracer1
         tracer3 = tracer3 if tracer3 is not None else tracer1
         tracer4 = tracer4 if tracer4 is not None else tracer3
@@ -1305,7 +1306,7 @@ class Tk:
             return T * (kernels * weight)
 
         integrand = jax.vmap(get_cov_slice)(z)  # (Nz, N_l1, N_l2)
-        cov = jnp.trapezoid(integrand, x=z, axis=0) / (4.0 * jnp.pi * f_sky)
+        cov = jnp.sum(integrand * z_gl_w[:, None, None], axis=0) / (4.0 * jnp.pi * f_sky)
 
         return jnp.squeeze(cov)
 
@@ -1313,8 +1314,8 @@ class Tk:
     # Super-sample covariance
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,), static_argnames=("needs_counterterm1", "needs_counterterm2", "needs_counterterm3", "needs_counterterm4"))
-    def covariance_ssc(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z, f_sky=1.0,
+    @partial(jax.jit, static_argnums=(0, 9), static_argnames=("needs_counterterm1", "needs_counterterm2", "needs_counterterm3", "needs_counterterm4"))
+    def covariance_ssc(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z_range, n_z, f_sky=1.0,
                         needs_counterterm1=None, needs_counterterm2=None,
                         needs_counterterm3=None, needs_counterterm4=None):
         """
@@ -1398,9 +1399,11 @@ class Tk:
             Multipole grids for the first and second angular power
             spectrum, respectively. Need not be the same length; the two
             are broadcast into an :math:`(N_{\\ell_1}, N_{\\ell_2})` grid.
-        z : array
-            Redshift array. This must be an array because it defines the
-            integration grid over redshift.
+        z_range : tuple
+            ``(z_min, z_max)`` spanning the Gauss-Legendre redshift integration grid.
+        n_z : int
+            Number of redshift-integration nodes (static: changing it triggers
+            recompilation; sweeping ``z_range`` alone does not).
         f_sky : float, default 1.0
             Observed sky fraction. Also sets the disc footprint used for
             :math:`\\sigma_B^2(z)`.
@@ -1419,6 +1422,9 @@ class Tk:
             return.
         """
         hm = halo_model
+        logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
+        z = jnp.exp(logz)
+        z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude
         tracer2 = tracer2 if tracer2 is not None else tracer1
         tracer3 = tracer3 if tracer3 is not None else tracer1
         tracer4 = tracer4 if tracer4 is not None else tracer3
@@ -1460,6 +1466,6 @@ class Tk:
 
         # No 1/(4*pi*f_sky) prefactor here -- f_sky's effect is already fully carried by sigma2_b_disc(z, f_sky).
         integrand = jax.vmap(get_cov_slice)(z)  # (Nz, N_l1, N_l2)
-        cov = jnp.trapezoid(integrand, x=z, axis=0)
+        cov = jnp.sum(integrand * z_gl_w[:, None, None], axis=0)
 
         return jnp.squeeze(cov)

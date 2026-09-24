@@ -247,7 +247,7 @@ class TestSubHaloMassFunction:
 
 
 class TestHaloModelCore:
-    # HaloModel()'s default mass_def, component models, m_grid, and hm_consistency match the documented defaults.
+    # HaloModel()'s default mass_def, component models, m_range/n_m, and hm_consistency match the documented defaults.
     def test_constructor_defaults(self, fixed_cosmology):
         hm = HaloModel(cosmology=fixed_cosmology)
         assert hm.mass_def.delta == 200 and hm.mass_def.reference == "critical"
@@ -256,8 +256,8 @@ class TestHaloModelCore:
         assert isinstance(hm.subhalo_mass_function, TW10SubHaloMassFunction)
         assert isinstance(hm.concentration, D08Concentration)
         assert hm.hm_consistency is True
-        assert len(hm.m_grid) == 100
-        assert jnp.all(jnp.diff(hm.m_grid) >= 0)
+        assert hm.n_m == 100
+        assert (float(hm.m_range[0]), float(hm.m_range[1])) == (1e10, 1e15)
 
     # update() returns a new HaloModel, changing only the field passed and leaving all others identical.
     def test_update_returns_new_object_preserving_untouched_fields(self, fixed_cosmology):
@@ -279,12 +279,12 @@ class TestHaloModelCore:
         assert hm.update(halo_mass_function=new_hmf).halo_mass_function is new_hmf
         assert hm.update(concentration=new_conc).concentration is new_conc
 
-    # update(m_grid=...) sorts the new grid before storing it.
-    def test_update_sorts_m_grid(self, fixed_cosmology):
+    # update(m_range=..., n_m=...) replaces the mass-integral bounds and node count.
+    def test_update_replaces_m_range_and_n_m(self, fixed_cosmology):
         hm = HaloModel(cosmology=fixed_cosmology)
-        unsorted = jnp.array([1e14, 1e10, 1e12])
-        hm2 = hm.update(m_grid=unsorted)
-        assert jnp.array_equal(hm2.m_grid, jnp.sort(unsorted))
+        hm2 = hm.update(m_range=(1e11, 1e14), n_m=50)
+        assert (float(hm2.m_range[0]), float(hm2.m_range[1])) == (1e11, 1e14)
+        assert hm2.n_m == 50
 
     # HaloModel survives a JAX pytree flatten/unflatten round trip unchanged.
     def test_pytree_roundtrip(self, fixed_cosmology):
@@ -293,7 +293,9 @@ class TestHaloModelCore:
         hm_rt = jax.tree_util.tree_unflatten(treedef, leaves)
         assert hm_rt.mass_def.delta == hm.mass_def.delta
         assert hm_rt.mass_def.reference == hm.mass_def.reference
-        assert jnp.allclose(hm_rt.m_grid, hm.m_grid)
+        assert jnp.allclose(hm_rt.m_range[0], hm.m_range[0])
+        assert jnp.allclose(hm_rt.m_range[1], hm.m_range[1])
+        assert hm_rt.n_m == hm.n_m
 
     # _counter_terms returns shape-(Nz,) arrays (even for scalar z, which never gets squeezed away) with n_min > 0.
     def test_counter_terms_shape_and_sign(self, fixed_cosmology):

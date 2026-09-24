@@ -456,7 +456,7 @@ class Cosmology:
         Variance of the projected linear density field over a circular
         disc covering a sky fraction :math:`f_{\\rm sky}`, as a function of
         redshift -- the super-sample variance entering
-        :meth:`hmfast.stats.Tk.covariance_ssc`.
+        :func:`hmfast.stats.covariance.covariance_ssc`.
 
         .. math::
 

@@ -1,7 +1,7 @@
 """
-Angular power spectrum (C_ell) helpers: Limber and non-Limber, halo-model and
-linear-bias engines. Private -- every name here is a helper used by Pk.cl_hm/
-cl_lin (stats/pk.py), the only public C_ell entry points.
+Angular power spectrum (C_ell): Limber and non-Limber, halo-model and
+linear-bias engines. Every name except the public cl_hm/cl_lin functions at
+the bottom of this module is a private helper.
 """
 
 from functools import partial
@@ -191,7 +191,7 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
 
 
 # ------------------------------------------------------------------
-# Halo-model Cl (backs Pk.cl_hm)
+# Halo-model Cl (backs cl_hm below)
 # ------------------------------------------------------------------
 
 def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
@@ -211,7 +211,7 @@ def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window"))
 def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z_range, n_z, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
-    """Non-Limber 2-halo Cl via _nonlimber_cl; backs Pk.cl_hm below l_limber. l/z_range may both be traced."""
+    """Non-Limber 2-halo Cl via _nonlimber_cl; backs cl_hm below l_limber. l/z_range may both be traced."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     cosmology = halo_model.cosmology
@@ -270,7 +270,7 @@ def _effective_kernel_limber(tracer, cosmology, z, l, z_lp, lp1h, lp3h, sqell, b
 
 @partial(jax.jit, static_argnums=(6,), static_argnames=("include_1h", "include_2h"))
 def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h=False, include_2h=True):
-    """Limber Cl for either/both halo terms; helper behind the Limber branch of Pk.cl_hm.
+    """Limber Cl for either/both halo terms; helper behind the Limber branch of cl_hm.
 
     l may be traced; pk_obj is a registered Pk pytree (its k_damp attribute is a dynamic
     leaf), so it is no longer marked static. An RSD (der_bessel=2) term adds ~1.7x cost
@@ -327,13 +327,13 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
 
 
 # ------------------------------------------------------------------
-# Linear-bias Cl (backs Pk.cl_lin)
+# Linear-bias Cl (backs cl_lin below)
 # ------------------------------------------------------------------
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "linear"))
 def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True,
                           z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
-    """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind Pk.cl_lin below l_limber."""
+    """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind cl_lin below l_limber."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     # A tracer's bias only scales its der_bessel=0 (density) term, never an RSD term.
@@ -350,7 +350,7 @@ def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=Tr
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("linear",))
 def _cl_linear_limber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True):
-    """Limber helper behind Pk.cl_lin: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer
+    """Limber helper behind cl_lin: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer
     bias in place of halo occupation. An RSD (der_bessel=2) kernel term is projected via the
     same extended-Limber correction as cl_limber's halo-model engine."""
     tracer2 = tracer1 if tracer2 is None else tracer2
@@ -387,3 +387,193 @@ def _cl_linear_limber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True)
     limber_weight = cosmology.comoving_volume_element(z) / chi**4
     integrand = P_grid * limber_weight[:, None] * kernel1 * kernel2
     return jnp.squeeze(jnp.sum(integrand * z_gl_w[:, None], axis=0))
+
+
+# ------------------------------------------------------------------
+# Public entry points
+# ------------------------------------------------------------------
+
+@partial(jax.jit, static_argnums=(6,), static_argnames=("l_limber", "n_fft", "n_interp", "bias", "window"))
+def cl_hm(pk, halo_model, tracer1, tracer2, l, z_range, n_z, l_limber=0.0,
+          z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+    """
+    Halo-model angular power spectrum :math:`C_\\ell`, combining the
+    1-halo and 2-halo contributions according to ``pk.include_1h``/
+    ``pk.include_2h``.
+
+    By default (``l_limber=0.0``) this uses the Limber approximation
+    everywhere, which maps each multipole to a wavenumber,
+    :math:`k = (\\ell + 1/2)/\\chi`, and sums whichever of the 1-halo/
+    2-halo 3D power spectra are selected (the mass integral is performed
+    over ``halo_model.m_range``/``n_m``). Below `l_limber`, the 2-halo term
+    instead uses an exact projection using a SwiftCl-style (`Reymond et
+    al. 2025 <https://arxiv.org/abs/2505.22718>`_) FFTLog decomposition,
+    built on the exact decomposition of the 2-halo power spectrum
+
+    .. math::
+
+        P_{2h}(k; z_1, z_2) = P_{\\rm lin}(k, z_{\\rm fid})\\,
+        D(k, z_1)\\, D(k, z_2),
+
+    where :math:`D(k, z)` is the growth factor. This avoids the double
+    line-of-sight integral over oscillatory spherical Bessel functions
+    an exact projection would otherwise require. The 1-halo term has no
+    non-Limber treatment (it only matters at high :math:`\\ell`, where
+    Limber is already accurate), so below `l_limber` only the 2-halo
+    term (if ``pk.include_2h``) contributes; a 1-halo-only ``Pk``
+    (``include_2h=False``) therefore returns zero below `l_limber`.
+
+    A tracer with an RSD term (e.g. ``GalaxyTracer(rsd=True)``) is
+    supported in the Limber branch: its ``der_bessel=2`` kernel term is
+    projected via an extended-Limber recipe (see :func:`_cl_limber`), adding
+    roughly 1.7x the cost of this function for a pair where at least one
+    tracer has ``rsd=True``, and no added cost otherwise.
+
+    Parameters
+    ----------
+    pk : Pk
+        Power spectrum object; ``pk.include_1h``/``include_2h`` select which
+        terms this function sums.
+    halo_model : HaloModel
+    tracer1 : Tracer
+        First tracer object.
+    tracer2 : Tracer or None
+        Second tracer object (if None, uses tracer1).
+    l : array-like
+        Multipole grid. Must be concrete (not a value being traced by
+        JAX), since the low/high `l_limber` split is a data-dependent
+        shape decision.
+    z_range : tuple
+        ``(z_min, z_max)`` spanning the redshift integration grid (Limber
+        branch) and the internal FFTLog chi grid (non-Limber branch).
+    n_z : int
+        Number of redshift nodes (static: changing it triggers
+        recompilation; sweeping ``z_range`` alone does not).
+    l_limber : float, default 0.0
+        Multipole threshold: below `l_limber`, the exact non-Limber
+        calculation is used for the 2-halo term; at or above it, the
+        Limber approximation is used. The default, 0.0, uses Limber
+        everywhere.
+    z_fid : float, default 0.0
+        Used only by the non-Limber calculation. Fiducial redshift at
+        which the power spectrum is evaluated in the decomposition
+        above.
+    n_fft : int or None, default None
+        Used only by the non-Limber calculation. Number of FFTLog
+        nodes; defaults to ``n_z``.
+    n_interp : int, default 200
+        Used only by the non-Limber calculation. Number of wavenumber
+        points at which its most expensive step is evaluated, before
+        interpolating onto the cosmology's own tabulated
+        power-spectrum grid.
+    bias : float, default 0.1
+        Used only by the non-Limber calculation. FFTLog de-trending
+        exponent (must be less than 1); the default is robust across
+        tracer types and rarely needs changing.
+    window : float, default 0.2
+        Used only by the non-Limber calculation. Fraction of
+        high-frequency FFTLog modes smoothly anti-aliased to suppress
+        edge/periodicity ringing; the default is robust across tracer
+        types.
+
+    Returns
+    -------
+    cl_hm : array
+        Dimensionless halo-model angular power spectrum with shape
+        :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
+        return.
+    """
+    tracer2 = tracer1 if tracer2 is None else tracer2
+    return _dispatch_by_ell(
+        l, l_limber,
+        lambda l_low: (
+            _cl_2h_nonlimber(halo_model, tracer1, tracer2, l_low, z_range, n_z, z_fid=z_fid,
+                              n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)
+            if pk.include_2h else jnp.zeros_like(jnp.atleast_1d(l_low))
+        ),
+        lambda l_high: _cl_limber(pk, halo_model, tracer1, tracer2, l_high, z_range, n_z,
+                                   include_1h=pk.include_1h, include_2h=pk.include_2h),
+    )
+
+
+@partial(jax.jit, static_argnums=(5,), static_argnames=("linear", "l_limber", "n_fft", "n_interp", "bias", "window"))
+def cl_lin(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True,
+           l_limber=0.0, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+    """
+    Angular power spectrum for linearly-biased or unbiased tracers, with
+    no halo-model mass integral. Companion to
+    :func:`cl_hm`: uses each tracer's own scalar/array bias
+    (from a ``bias`` attribute, e.g. ``GalaxyTracer``; tracers without
+    one, e.g. CMB/galaxy lensing, are treated as unbiased) in place of
+    the halo-model mass integral, and the raw matter power spectrum in
+    place of ``Pk.pk_1h``/``Pk.pk_2h``. Takes a ``Cosmology`` directly,
+    unlike :func:`cl_hm`, since no halo-model mass integral
+    is performed. Below ``l_limber``, uses an exact SwiftCl-style FFTLog
+    projection (mirroring ``cl_hm``'s non-Limber 2-halo branch); at or above it,
+    uses the Limber approximation (the default, ``l_limber=0.0``, uses
+    Limber everywhere).
+
+    Every ``der_bessel=0`` kernel term (e.g. a ``GalaxyTracer``'s density and
+    magnification-bias terms) is summed before multiplying by the tracer's bias.
+    An RSD (``der_bessel=2``) term is supported in both branches: below
+    ``l_limber`` via the exact FFTLog projection, at or above it via an
+    extended-Limber recipe (see :func:`_cl_linear_limber`).
+
+    Parameters
+    ----------
+    cosmology : Cosmology
+    tracer1 : Tracer
+        First tracer object.
+    tracer2 : Tracer or None
+        Second tracer object (if None, uses tracer1).
+    l : array-like
+        Multipole grid. Must be concrete (not a value being traced by JAX),
+        since the low/high `l_limber` split is a data-dependent shape
+        decision (matches `cl_hm`).
+    z_range : tuple
+        ``(z_min, z_max)`` spanning the redshift integration grid (Limber
+        branch) and the internal FFTLog chi grid (non-Limber branch).
+    n_z : int
+        Number of redshift nodes (static: changing it triggers
+        recompilation; sweeping ``z_range`` alone does not).
+    linear : bool, default True
+        If True, use the linear matter power spectrum; if False, use the
+        nonlinear power spectrum.
+    l_limber : float, default 0.0
+        Multipole threshold: below `l_limber`, the exact non-Limber
+        calculation is used; at or above it, the Limber approximation is
+        used. The default, 0.0, uses Limber everywhere.
+    z_fid : float, default 0.0
+        Used only by the non-Limber calculation. Fiducial redshift at which
+        the power spectrum is evaluated in the separable D(k,z) ansatz.
+    n_fft : int or None, default None
+        Used only by the non-Limber calculation. Number of FFTLog nodes;
+        defaults to ``len(z)``.
+    n_interp : int, default 200
+        Used only by the non-Limber calculation. Number of wavenumber
+        points at which its most expensive step is evaluated, before
+        interpolating onto the cosmology's own tabulated power-spectrum grid.
+    bias : float, default 0.1
+        Used only by the non-Limber calculation. FFTLog de-trending
+        exponent (must be less than 1); unrelated to a tracer's own bias.
+    window : float, default 0.2
+        Used only by the non-Limber calculation. Fraction of high-frequency
+        FFTLog modes smoothly anti-aliased to suppress edge/periodicity
+        ringing.
+
+    Returns
+    -------
+    cl_lin : array
+        Dimensionless linearly-biased angular power spectrum with shape
+        :math:`(N_\\ell,)`, where singleton dimensions get squeezed before
+        return.
+    """
+    tracer2 = tracer1 if tracer2 is None else tracer2
+
+    return _dispatch_by_ell(
+        l, l_limber,
+        lambda l_low: _cl_linear_nonlimber(cosmology, tracer1, tracer2, l_low, z_range, n_z, linear=linear,
+                                            z_fid=z_fid, n_fft=n_fft, n_interp=n_interp,
+                                            bias=bias, window=window),
+        lambda l_high: _cl_linear_limber(cosmology, tracer1, tracer2, l_high, z_range, n_z, linear=linear),
+    )

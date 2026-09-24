@@ -53,7 +53,9 @@ from hmfast.halos.profiles import (
     S12CIBProfile,
     Z07GalaxyHODProfile,
 )
-from hmfast.stats import Bk, Pk, Tk
+from hmfast.stats import Bk, Pk, Tk, cl_hm, cl_lin, xi_hm, covariance_cng, covariance_ssc
+from hmfast.stats import cl as _cl_module
+from hmfast.stats import covariance as _covariance_module
 from hmfast.tracers import (
     CIBTracer,
     CMBLensingTracer,
@@ -246,17 +248,17 @@ case("Pk.pk_2h", lambda p: PK.pk_2h(halo_model(p), K_GRID, Z_SINGLE, NFW))
 case("Pk.pk_tot", lambda p: PK0.pk_tot(halo_model(p), K_GRID, Z_SINGLE, NFW))
 case("Pk.pk_tot[1h only]",
      lambda p: Pk(k_damp=0.0, include_2h=False).pk_tot(halo_model(p), K_GRID, Z_SINGLE, NFW))
-broken("Pk.xi_hm", lambda p: PK.xi_hm(halo_model(p), R_GRID, Z_SINGLE, NFW),
+broken("xi_hm", lambda p: xi_hm(PK, halo_model(p), R_GRID, Z_SINGLE, NFW),
        _P2XI_BUILT_UNDER_TRACE)
-case("Pk.cl_hm[limber]",
-     lambda p: PK.cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
+case("cl_hm[limber]",
+     lambda p: cl_hm(PK, halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
 CASES.append(pytest.param(
-    lambda p: PK.cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, l_limber=100.0),
-    id="Pk.cl_hm[non-limber]", marks=_NEEDS_LOGGAMMA))
-case("Pk.cl_hm[1h only]",
-     lambda p: Pk(k_damp=0.0, include_2h=False).cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
-case("Pk.cl_lin",
-     lambda p: PK.cl_lin(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_RANGE, N_Z))
+    lambda p: cl_hm(PK, halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, l_limber=100.0),
+    id="cl_hm[non-limber]", marks=_NEEDS_LOGGAMMA))
+case("cl_hm[1h only]",
+     lambda p: cl_hm(Pk(k_damp=0.0, include_2h=False), halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
+case("cl_lin",
+     lambda p: cl_lin(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_RANGE, N_Z))
 
 # --- higher-order statistics and covariances -------------------------------------
 case("Bk.bk_1h",
@@ -278,12 +280,12 @@ case("Tk.tk_tot",
 case("Tk.tk_tot[2h only]",
      lambda p: Tk(include_1h=False, include_3h=False, include_4h=False).tk_tot(
          halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))
-case("Tk.covariance_cng",
-     lambda p: TK.covariance_cng(halo_model(p), GAL_TRACER, None, None, None,
-                                 L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z))
-case("Tk.covariance_ssc",
-     lambda p: TK.covariance_ssc(halo_model(p), GAL_TRACER, None, None, None,
-                                 L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z, f_sky=0.4))
+case("covariance_cng",
+     lambda p: covariance_cng(TK, halo_model(p), GAL_TRACER, None, None, None,
+                              L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z))
+case("covariance_ssc",
+     lambda p: covariance_ssc(halo_model(p), GAL_TRACER, None, None, None,
+                              L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z, f_sky=0.4))
 
 
 def _leaves(out):
@@ -396,10 +398,11 @@ JITTED_API = [
     (Z07GalaxyHODProfile, "real"), (Z07GalaxyHODProfile, "fourier"),
     (Z07GalaxyHODProfile, "ng_bar"), (Z07GalaxyHODProfile, "galaxy_bias"),
     (S12CIBProfile, "real"), (S12CIBProfile, "fourier"), (S12CIBProfile, "mean_emissivity"),
-    (Pk, "pk_1h"), (Pk, "pk_2h"), (Pk, "pk_tot"), (Pk, "cl_hm"), (Pk, "cl_lin"),
+    (Pk, "pk_1h"), (Pk, "pk_2h"), (Pk, "pk_tot"),
+    (_cl_module, "cl_hm"), (_cl_module, "cl_lin"),
     (Bk, "_bk_1h"), (Bk, "_bk_2h"), (Bk, "_bk_3h"), (Bk, "_bk_tot"),
     (Tk, "tk_1h"), (Tk, "tk_2h"), (Tk, "tk_3h"), (Tk, "tk_4h"), (Tk, "tk_tot"),
-    (Tk, "covariance_cng"), (Tk, "covariance_ssc"),
+    (_covariance_module, "covariance_cng"), (_covariance_module, "covariance_ssc"),
 ]
 
 

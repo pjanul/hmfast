@@ -36,7 +36,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   from hmfast.halos.concentration import Concentration
   from hmfast.halos.profiles.matter import MatterProfile
   from hmfast.tracers.base_tracer import Tracer
-  from hmfast.stats import Pk
+  from hmfast.stats import Pk, cl_hm
 
   # Grids used for the example (mass, multipole; z is passed as a (min, max) range)
   m_grid = jnp.geomspace(1e10, 1e15, 105)
@@ -47,7 +47,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   # --- Toy implementations of halo-model building blocks ---
   #
   # Each is registered as a (trivial, stateless) JAX pytree so it can be passed
-  # into a jitted method such as Pk.cl_hm; see "Pytrees & differentiability"
+  # into a jitted function such as cl_hm; see "Pytrees & differentiability"
   # below for a version that carries a differentiable parameter.
 
   @register_pytree_node_class
@@ -147,7 +147,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   pk_calc = Pk()
 
   # Compute a tiny toy halo-model cl (1-halo + 2-halo). Second tracer None => autocorrelation of tracer1.
-  cl = pk_calc.cl_hm(hm, tracer1, None, l_grid, z_range, n_z)
+  cl = cl_hm(pk_calc, hm, tracer1, None, l_grid, z_range, n_z)
 
   print("cl shape:", cl.shape)   # should be (N_ell,)
   print("cl (toy values):", cl)

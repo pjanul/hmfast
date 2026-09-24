@@ -115,6 +115,8 @@ CMBLENS_TRACER = CMBLensingTracer(profile=NFW)
 CIB_TRACER = CIBTracer(profile=CIB)
 
 PK, BK, TK = Pk(), Bk(), Tk()
+PK0 = Pk(k_damp=0.0)  # damping disabled, for cases that used to pass k_damp=0.0 as a call-time kwarg
+BK0 = Bk(k_damp=0.0)  # damping disabled, for cases that used to pass k_damp=0.0 as a call-time kwarg
 
 MASS_TRANSLATOR_200M_500C = mass_translator(MD_200M, MD_500C, CONC)
 
@@ -148,7 +150,7 @@ _P2XI_BUILT_UNDER_TRACE = (
     "stats/pk.py::_p2xi constructs mcfit.P2xi(k, ...) on every call, so inside a jit it "
     "is built under the trace; mcfit plans on concrete values. Cosmology._pk_grid() now "
     "hands it a real numpy grid, but the plan itself still has to be built once, outside "
-    "any trace, for xi_1h/xi_2h to be traceable."
+    "any trace, for xi_hm to be traceable."
 )
 
 # _hankel_A_table needs a complex log-gamma, which jax.scipy.special only grew in 0.10.
@@ -173,7 +175,7 @@ case("Cosmology.velocity_dispersion", lambda p: cosmo(p).velocity_dispersion(Z_G
 case("Cosmology.comoving_volume_element", lambda p: cosmo(p).comoving_volume_element(Z_GRID))
 case("Cosmology.pk[linear]", lambda p: cosmo(p).pk(K_GRID, Z_GRID, linear=True))
 case("Cosmology.pk[nonlinear]", lambda p: cosmo(p).pk(K_GRID, Z_GRID, linear=False))
-case("Cosmology.cl[tt]", lambda p: cosmo(p).cl("tt", jnp.arange(2, 50)))
+case("Cosmology.cl[tt]", lambda p: cosmo(p).cl_cmb("tt", jnp.arange(2, 50)))
 case("Cosmology.derived_parameters", lambda p: cosmo(p).derived_parameters())
 
 # --- mass definitions ------------------------------------------------------------
@@ -239,31 +241,43 @@ for _name, _tracer in [
          (lambda t: lambda p: [w for w, _ in t.kernel(cosmo(p), Z_GRID)])(_tracer))
 
 # --- 2-point statistics ----------------------------------------------------------
-case("Pk.pk_1h", lambda p: PK.pk_1h(halo_model(p), K_GRID, Z_SINGLE, NFW, k_damp=0.0))
+case("Pk.pk_1h", lambda p: PK0.pk_1h(halo_model(p), K_GRID, Z_SINGLE, NFW))
 case("Pk.pk_2h", lambda p: PK.pk_2h(halo_model(p), K_GRID, Z_SINGLE, NFW))
-broken("Pk.xi_1h", lambda p: PK.xi_1h(halo_model(p), R_GRID, Z_SINGLE, NFW, k_damp=0.0),
+case("Pk.pk_tot", lambda p: PK0.pk_tot(halo_model(p), K_GRID, Z_SINGLE, NFW))
+case("Pk.pk_tot[1h only]",
+     lambda p: Pk(k_damp=0.0, include_2h=False).pk_tot(halo_model(p), K_GRID, Z_SINGLE, NFW))
+broken("Pk.xi_hm", lambda p: PK.xi_hm(halo_model(p), R_GRID, Z_SINGLE, NFW),
        _P2XI_BUILT_UNDER_TRACE)
-broken("Pk.xi_2h", lambda p: PK.xi_2h(halo_model(p), R_GRID, Z_SINGLE, NFW),
-       _P2XI_BUILT_UNDER_TRACE)
-case("Pk.cl_1h", lambda p: PK.cl_1h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, k_damp=0.0))
-case("Pk.cl_2h[limber]",
-     lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
+case("Pk.cl_hm[limber]",
+     lambda p: PK.cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
 CASES.append(pytest.param(
-    lambda p: PK.cl_2h(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, l_limber=100.0),
-    id="Pk.cl_2h[non-limber]", marks=_NEEDS_LOGGAMMA))
-case("Pk.cl_linear",
-     lambda p: PK.cl_linear(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_RANGE, N_Z))
+    lambda p: PK.cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z, l_limber=100.0),
+    id="Pk.cl_hm[non-limber]", marks=_NEEDS_LOGGAMMA))
+case("Pk.cl_hm[1h only]",
+     lambda p: Pk(k_damp=0.0, include_2h=False).cl_hm(halo_model(p), GAL_TRACER, GAL_TRACER, L_GRID, Z_RANGE, N_Z))
+case("Pk.cl_lin",
+     lambda p: PK.cl_lin(cosmo(p), GAL_TRACER_BIASED, GAL_TRACER_BIASED, L_GRID, Z_RANGE, N_Z))
 
 # --- higher-order statistics and covariances -------------------------------------
 case("Bk.bk_1h",
-     lambda p: BK.bk_1h(halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW, k_damp=0.0))
+     lambda p: BK0.bk_1h(halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
 case("Bk.bk_2h",
      lambda p: BK.bk_2h(halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
 case("Bk.bk_3h",
      lambda p: BK.bk_3h(halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
+case("Bk.bk_tot",
+     lambda p: BK0.bk_tot(halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
+case("Bk.bk_tot[1h only]",
+     lambda p: Bk(k_damp=0.0, include_2h=False, include_3h=False).bk_tot(
+         halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
 for _order in (1, 2, 3, 4):
     case(f"Tk.tk_{_order}h",
          (lambda o: lambda p: getattr(TK, f"tk_{o}h")(halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))(_order))
+case("Tk.tk_tot",
+     lambda p: TK.tk_tot(halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))
+case("Tk.tk_tot[2h only]",
+     lambda p: Tk(include_1h=False, include_3h=False, include_4h=False).tk_tot(
+         halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))
 case("Tk.covariance_cng",
      lambda p: TK.covariance_cng(halo_model(p), GAL_TRACER, None, None, None,
                                  L_GRID[:3], L_GRID[:3], Z_RANGE, N_Z))
@@ -301,12 +315,41 @@ def test_no_retrace_on_new_parameters():
     sampler would hit if a cosmological parameter leaked into a pytree's aux data
     instead of staying a leaf.
     """
-    fn = jax.jit(lambda p: PK.pk_1h(halo_model(p), K_GRID, Z_SINGLE, NFW, k_damp=0.0))
+    fn = jax.jit(lambda p: PK0.pk_1h(halo_model(p), K_GRID, Z_SINGLE, NFW))
     jax.block_until_ready(fn(PARAMS))
     n_compiles = fn._cache_size()
 
     jax.block_until_ready(fn(PARAMS * jnp.array([1.01, 0.99, 1.02, 0.98, 1.0])))
     assert fn._cache_size() == n_compiles, "changing parameter values triggered a retrace"
+
+
+def test_pk_k_damp_sweep_does_not_recompile():
+    """Varying Pk.k_damp must reuse the compiled kernel, not just cosmological parameters.
+
+    Pk.pk_1h pins `self` static if Pk isn't a registered pytree, which hashes it by
+    identity and pays a full compile every time k_damp changes (the same failure mode
+    test_profile_parameter_sweep_does_not_recompile guards against for profiles).
+    """
+    hm = halo_model(PARAMS)
+    fn = jax.jit(lambda pk_obj: pk_obj.pk_1h(hm, K_GRID, Z_SINGLE, NFW))
+
+    jax.block_until_ready(fn(Pk(k_damp=0.01)))
+    n_compiles = fn._cache_size()
+
+    jax.block_until_ready(fn(Pk(k_damp=0.05)))
+    assert fn._cache_size() == n_compiles, "changing k_damp triggered a retrace"
+
+
+def test_bk_k_damp_sweep_does_not_recompile():
+    """Varying Bk.k_damp must reuse the compiled kernel (mirrors the Pk.k_damp case)."""
+    hm = halo_model(PARAMS)
+    fn = jax.jit(lambda bk_obj: bk_obj._bk_1h(hm, K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW))
+
+    jax.block_until_ready(fn(Bk(k_damp=0.01)))
+    n_compiles = fn._cache_size()
+
+    jax.block_until_ready(fn(Bk(k_damp=0.05)))
+    assert fn._cache_size() == n_compiles, "changing k_damp triggered a retrace"
 
 
 @pytest.mark.xfail(
@@ -327,7 +370,7 @@ def test_cl_survives_jit_before_eager():
         A_s=2.1005e-9, n_s=0.9665,
     )
     ell = jnp.arange(2, 200)
-    fn = lambda p: obj.update(H0=p[0], omega_cdm=p[1], omega_b=p[2], A_s=p[3], n_s=p[4]).cl("tt", ell)
+    fn = lambda p: obj.update(H0=p[0], omega_cdm=p[1], omega_b=p[2], A_s=p[3], n_s=p[4]).cl_cmb("tt", ell)
 
     jax.block_until_ready(jax.jit(fn)(PARAMS))
     jax.block_until_ready(fn(PARAMS))
@@ -353,9 +396,9 @@ JITTED_API = [
     (Z07GalaxyHODProfile, "real"), (Z07GalaxyHODProfile, "fourier"),
     (Z07GalaxyHODProfile, "ng_bar"), (Z07GalaxyHODProfile, "galaxy_bias"),
     (S12CIBProfile, "real"), (S12CIBProfile, "fourier"), (S12CIBProfile, "mean_emissivity"),
-    (Pk, "pk_1h"), (Pk, "pk_2h"), (Pk, "cl_1h"), (Pk, "cl_2h"), (Pk, "cl_linear"),
-    (Bk, "_bk_1h"), (Bk, "_bk_2h"), (Bk, "_bk_3h"),
-    (Tk, "tk_1h"), (Tk, "tk_2h"), (Tk, "tk_3h"), (Tk, "tk_4h"),
+    (Pk, "pk_1h"), (Pk, "pk_2h"), (Pk, "pk_tot"), (Pk, "cl_hm"), (Pk, "cl_lin"),
+    (Bk, "_bk_1h"), (Bk, "_bk_2h"), (Bk, "_bk_3h"), (Bk, "_bk_tot"),
+    (Tk, "tk_1h"), (Tk, "tk_2h"), (Tk, "tk_3h"), (Tk, "tk_4h"), (Tk, "tk_tot"),
     (Tk, "covariance_cng"), (Tk, "covariance_ssc"),
 ]
 

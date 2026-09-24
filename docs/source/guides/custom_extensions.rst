@@ -29,6 +29,7 @@ Minimal working example showing how to supply toy halo-model ingredients.
 Not physical — only intended as a tiny runnable example users can adapt::
 
   import jax.numpy as jnp
+  from jax.tree_util import register_pytree_node_class
   from hmfast.halos import HaloModel
   from hmfast.halos.massfunc import HaloMassFunction, SubHaloMassFunction
   from hmfast.halos.bias import HaloBias
@@ -37,36 +38,66 @@ Not physical — only intended as a tiny runnable example users can adapt::
   from hmfast.tracers.base_tracer import Tracer
   from hmfast.stats import Pk
 
-  # Grids used for the example (mass, redshift, multipole)
+  # Grids used for the example (mass, multipole; z is passed as a (min, max) range)
   m_grid = jnp.geomspace(1e10, 1e15, 105)
-  z_grid = jnp.geomspace(0.05, 2, 95)
   l_grid = jnp.geomspace(1, 1e3, 100)
+  z_range = (0.05, 2.0)
+  n_z = 32
 
   # --- Toy implementations of halo-model building blocks ---
+  #
+  # Each is registered as a (trivial, stateless) JAX pytree so it can be passed
+  # into a jitted method such as Pk.cl_hm; see "Pytrees & differentiability"
+  # below for a version that carries a differentiable parameter.
 
+  @register_pytree_node_class
   class NewHaloMassFunction(HaloMassFunction):
     """Toy halo mass function: returns ones on (Nm, Nz) grid."""
-    def dndlnm(self, cosmology, m, z, mass_definition=None, convert_masses=False):
+    def dndlnm(self, cosmology, m, z, mass_def=None):
       m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
       return jnp.ones((len(m), len(z)))
+    def tree_flatten(self):
+      return (), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      return cls()
 
+  @register_pytree_node_class
   class NewSubHaloMassFunction(SubHaloMassFunction):
     """Toy subhalo mass function: shape matches m_sub input."""
     def dndlnmu(self, cosmology, m_host, m_sub):
       return jnp.ones_like(m_sub)
+    def tree_flatten(self):
+      return (), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      return cls()
 
+  @register_pytree_node_class
   class NewHaloBias(HaloBias):
     """Toy halo bias: returns ones on (Nm, Nz) grid (supports order arg)."""
-    def halo_bias(self, cosmology, m, z, mass_definition=None, convert_masses=False, order=1):
+    def bias(self, cosmology, m, z, mass_def=None, order=1):
       m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
       return jnp.ones((len(m), len(z)))
+    def tree_flatten(self):
+      return (), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      return cls()
 
+  @register_pytree_node_class
   class NewConcentration(Concentration):
     """Toy concentration: constant ones on (Nm, Nz)."""
-    def c_delta(self, cosmology, m, z, mass_definition=None):
+    def c_delta(self, cosmology, m, z, mass_def=None):
       m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
       return jnp.ones((len(m), len(z)))
+    def tree_flatten(self):
+      return (), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      return cls()
 
+  @register_pytree_node_class
   class NewMatterProfile(MatterProfile):
     """Toy matter profile: minimal broadcasting implementations. Note that we arbitrarily select a MatterProfile for this example, but it could be any type of profile.
 
@@ -81,13 +112,26 @@ Not physical — only intended as a tiny runnable example users can adapt::
       k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
       return jnp.squeeze(jnp.broadcast_to(1.0, (len(k), len(m), len(z))))
 
+    def tree_flatten(self):
+      return (), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      return cls()
+
+  @register_pytree_node_class
   class NewTracer(Tracer):
     """Simple tracer carrying a profile and a trivial kernel."""
     def __init__(self, profile):
       super().__init__(profile=profile)
     def kernel(self, cosmology, z):
-      # trivial kernel (ones) matching z shape
-      return jnp.ones_like(z)
+      # trivial der_bessel=0 (density-type) kernel term, weight of 1 at every z
+      return [(jnp.ones_like(z), 0)]
+    def tree_flatten(self):
+      return (self.profile,), None
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+      (profile,) = children
+      return cls(profile=profile)
 
   # --- Instantiate toy ingredients and run a halo-model call ---
 
@@ -102,8 +146,8 @@ Not physical — only intended as a tiny runnable example users can adapt::
 
   pk_calc = Pk()
 
-  # Compute a tiny toy 1-halo + 2-halo cl. Second tracer None => autocorrelation of tracer1.
-  cl = pk_calc.cl_1h(hm, tracer1, None, l_grid, m_grid, z_grid) + pk_calc.cl_2h(hm, tracer1, None, l_grid, m_grid, z_grid)
+  # Compute a tiny toy halo-model cl (1-halo + 2-halo). Second tracer None => autocorrelation of tracer1.
+  cl = pk_calc.cl_hm(hm, tracer1, None, l_grid, z_range, n_z)
 
   print("cl shape:", cl.shape)   # should be (N_ell,)
   print("cl (toy values):", cl)
@@ -142,7 +186,7 @@ gradient immediately after the class).
       (amplitude,) = children
       return cls(amplitude)
 
-    def dndlnm(self, cosmology, m_in, z_in, mass_definition=None, convert_masses=False):
+    def dndlnm(self, cosmology, m_in, z_in, mass_def=None):
       m_in, z_in = jnp.atleast_1d(m_in), jnp.atleast_1d(z_in)
       return jnp.broadcast_to(self.amplitude, (len(m_in), len(z_in)))
 

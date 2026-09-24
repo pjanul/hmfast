@@ -1,7 +1,7 @@
 """
 Angular power spectrum (C_ell) helpers: Limber and non-Limber, halo-model and
-linear-bias engines. Private -- every name here is a helper used by Pk.cl_1h/cl_2h/
-cl_linear (stats/pk.py), the only public C_ell entry points.
+linear-bias engines. Private -- every name here is a helper used by Pk.cl_hm/
+cl_lin (stats/pk.py), the only public C_ell entry points.
 """
 
 from functools import partial
@@ -191,7 +191,7 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
 
 
 # ------------------------------------------------------------------
-# Halo-model Cl (backs Pk.cl_1h / Pk.cl_2h)
+# Halo-model Cl (backs Pk.cl_hm)
 # ------------------------------------------------------------------
 
 def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
@@ -211,7 +211,7 @@ def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window"))
 def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z_range, n_z, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
-    """Non-Limber 2-halo Cl via _nonlimber_cl; backs Pk.cl_2h below l_limber. l/z_range may both be traced."""
+    """Non-Limber 2-halo Cl via _nonlimber_cl; backs Pk.cl_hm below l_limber. l/z_range may both be traced."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     cosmology = halo_model.cosmology
@@ -268,13 +268,14 @@ def _effective_kernel_limber(tracer, cosmology, z, l, z_lp, lp1h, lp3h, sqell, b
     return total
 
 
-@partial(jax.jit, static_argnums=(0, 6), static_argnames=("include_1h", "include_2h"))
-def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h=False, include_2h=True, k_damp=0.01):
-    """Limber Cl for either/both halo terms; helper behind Pk.cl_1h and the Limber branch of Pk.cl_2h.
+@partial(jax.jit, static_argnums=(6,), static_argnames=("include_1h", "include_2h"))
+def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h=False, include_2h=True):
+    """Limber Cl for either/both halo terms; helper behind the Limber branch of Pk.cl_hm.
 
-    l may be traced; jitted with pk_obj static (Pk isn't a registered pytree). An RSD
-    (der_bessel=2) term adds ~1.7x cost via the extended-Limber correction (see
-    _effective_kernel_limber), computed once here and shared across tracer1/tracer2."""
+    l may be traced; pk_obj is a registered Pk pytree (its k_damp attribute is a dynamic
+    leaf), so it is no longer marked static. An RSD (der_bessel=2) term adds ~1.7x cost
+    via the extended-Limber correction (see _effective_kernel_limber), computed once here
+    and shared across tracer1/tracer2."""
     hm = halo_model
     cosmology = hm.cosmology
     tracer2 = tracer1 if tracer2 is None else tracer2
@@ -292,7 +293,7 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
     def pk_fn(k, z):
         p = 0.0
         if include_1h:
-            p = p + pk_obj.pk_1h(hm, k, z, tracer1.profile, tracer2.profile, k_damp=k_damp)
+            p = p + pk_obj.pk_1h(hm, k, z, tracer1.profile, tracer2.profile)
         if include_2h:
             p = p + pk_obj.pk_2h(hm, k, z, tracer1.profile, tracer2.profile)
         return p
@@ -326,13 +327,13 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
 
 
 # ------------------------------------------------------------------
-# Linear-bias Cl (backs Pk.cl_linear)
+# Linear-bias Cl (backs Pk.cl_lin)
 # ------------------------------------------------------------------
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "linear"))
 def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True,
                           z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
-    """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind Pk.cl_linear below l_limber."""
+    """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind Pk.cl_lin below l_limber."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
     # A tracer's bias only scales its der_bessel=0 (density) term, never an RSD term.
@@ -349,7 +350,7 @@ def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=Tr
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("linear",))
 def _cl_linear_limber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True):
-    """Limber helper behind Pk.cl_linear: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer
+    """Limber helper behind Pk.cl_lin: raw cosmology.pk(...) in place of pk_1h/pk_2h, tracer
     bias in place of halo occupation. An RSD (der_bessel=2) kernel term is projected via the
     same extended-Limber correction as cl_limber's halo-model engine."""
     tracer2 = tracer1 if tracer2 is None else tracer2

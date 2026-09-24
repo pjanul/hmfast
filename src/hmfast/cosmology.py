@@ -1077,7 +1077,7 @@ class Cosmology:
     # CMB angular power spectra
     # ------------------------------------------------------------------
 
-    def cl(self, type, l):
+    def cl_cmb(self, type, l):
         """
         Evaluate the CMB power spectrum of the specified type at requested multipoles `l` using the emulator.
         This method can be used to evaluate :math:`C_\\ell^{TT}`, :math:`C_\\ell^{EE}`, :math:`C_\\ell^{TE}`, and :math:`C_\\ell^{\\phi\\phi}` by passing the appropriate `type` argument.

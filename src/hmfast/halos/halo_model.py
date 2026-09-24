@@ -30,35 +30,52 @@ class HaloModel:
     ----------
     cosmology : Cosmology
         Cosmology object supplying background, growth, and matter power spectra quantities.
+        Defaults to ``Cosmology(emulator_set="lcdm:v1")``.
     mass_def : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
+        Defaults to 200c, ``MassDefinition(delta=200, reference="critical")``.
     halo_mass_function : HaloMassFunction
         Halo mass function model used to compute :math:`dn / d\\ln M`.
+        Defaults to ``T08HaloMassFunction()``.
     halo_bias : HaloBias
         Halo bias model used for large-scale halo bias predictions.
+        Defaults to ``T10HaloBias()``.
     subhalo_mass_function : SubHaloMassFunction
         Subhalo mass function model used in observables with satellite or subhalo contributions.
+        Defaults to ``TW10SubHaloMassFunction()``.
     concentration : Concentration
         Halo concentration relation used to map halo mass and redshift to concentration.
+        Defaults to ``D08Concentration()``.
     hm_consistency : bool
         Flag controlling whether halo-model consistency counterterms are applied.
+        Defaults to ``True``.
     m_range : tuple
         ``(m_min, m_max)`` in :math:`M_\\odot` spanning all mass integrals.
+        Defaults to ``(1e10, 1e15)``.
     n_m : int
         Number of Gauss-Legendre mass-integral nodes (static: changing it
         triggers recompilation; sweeping ``m_range`` alone does not).
+        Defaults to ``100``.
     """
 
     def __init__(self,
-                 cosmology=Cosmology(emulator_set="lcdm:v1"),
-                 mass_def=MassDefinition(delta=200, reference="critical"),
-                 halo_mass_function=T08HaloMassFunction(),
-                 halo_bias=T10HaloBias(),
-                 subhalo_mass_function=TW10SubHaloMassFunction(),
-                 concentration=D08Concentration(),
+                 cosmology=None,
+                 mass_def=None,
+                 halo_mass_function=None,
+                 halo_bias=None,
+                 subhalo_mass_function=None,
+                 concentration=None,
                  hm_consistency=True,
                  m_range=(1e10, 1e15), n_m=100):
         """Initialize the halo model."""
+
+        # None-sentinel: avoids building these (some expensive, some cache-holding) at import time.
+        cosmology = cosmology if cosmology is not None else Cosmology(emulator_set="lcdm:v1")
+        mass_def = mass_def if mass_def is not None else MassDefinition(delta=200, reference="critical")
+        halo_mass_function = halo_mass_function if halo_mass_function is not None else T08HaloMassFunction()
+        halo_bias = halo_bias if halo_bias is not None else T10HaloBias()
+        subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else TW10SubHaloMassFunction()
+        concentration = concentration if concentration is not None else D08Concentration()
 
         # Load cosmology and make sure the required files are loaded outside of jitted functions (note that DER is needed for CMB lensing tracers)
         self.cosmology = cosmology

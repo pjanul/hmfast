@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.abspath("../../src"))
@@ -45,3 +46,23 @@ intersphinx_mapping = {
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
+
+
+def _sci_notation(match):
+    """Reformat one long-decimal float literal (e.g. '10000000000.0') as scientific
+    notation (e.g. '1e10'), preserving its value exactly (no rounding-driven change)."""
+    mantissa, exp = f"{float(match.group(0)):e}".split("e")
+    return f"{mantissa.rstrip('0').rstrip('.')}e{int(exp)}"
+
+
+def _shorten_large_float_defaults(app, what, name, obj, options, signature, return_annotation):
+    """Rendered signatures show default floats via Python's repr, which spells out large
+    round numbers (mass ranges, HOD masses, ...) digit by digit instead of using
+    scientific notation; reformat any float literal with 5+ integer digits."""
+    if signature:
+        signature = re.sub(r"\d{5,}\.\d+", _sci_notation, signature)
+    return signature, return_annotation
+
+
+def setup(app):
+    app.connect("autodoc-process-signature", _shorten_large_float_defaults)

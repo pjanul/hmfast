@@ -154,32 +154,32 @@ class TestCMB:
     ])
     def test_shape_and_sign(self, fixed_cosmology, spectrum_type, allow_negative):
         l = jnp.array([10.0, 100.0, 1000.0])
-        cl = fixed_cosmology.cl(spectrum_type, l)
+        cl = fixed_cosmology.cl_cmb(spectrum_type, l)
         assert cl.shape == (3,)
         if not allow_negative:
             assert jnp.all(cl > 0)
 
-    # cl()'s type argument is case-insensitive.
+    # cl_cmb()'s type argument is case-insensitive.
     def test_case_insensitive_type(self, fixed_cosmology):
         l = jnp.array([10.0, 100.0])
-        assert jnp.allclose(fixed_cosmology.cl("tt", l), fixed_cosmology.cl("TT", l))
+        assert jnp.allclose(fixed_cosmology.cl_cmb("tt", l), fixed_cosmology.cl_cmb("TT", l))
 
     # l values outside the emulator's valid multipole range return NaN (both below and above).
     def test_out_of_range_l_returns_nan(self, fixed_cosmology):
-        assert jnp.isnan(fixed_cosmology.cl("TT", jnp.array(1.0)))
-        assert jnp.isnan(fixed_cosmology.cl("TT", jnp.array(1e7)))
+        assert jnp.isnan(fixed_cosmology.cl_cmb("TT", jnp.array(1.0)))
+        assert jnp.isnan(fixed_cosmology.cl_cmb("TT", jnp.array(1e7)))
 
     # An unsupported spectrum type (including "BB", which has no working code path) raises ValueError.
     @pytest.mark.parametrize("bad_type", ["BB", "XX"])
     def test_unsupported_type_raises(self, fixed_cosmology, bad_type):
         with pytest.raises(ValueError):
-            fixed_cosmology.cl(bad_type, jnp.array([10.0]))
+            fixed_cosmology.cl_cmb(bad_type, jnp.array([10.0]))
 
-    # TT is genuinely lazy: absent from _emu before the first cl("TT",...) call, present after.
+    # TT is genuinely lazy: absent from _emu before the first cl_cmb("TT",...) call, present after.
     def test_lazy_loading(self):
         cosmo = Cosmology(emulator_set="lcdm:v1", H0=67.5, omega_cdm=0.12, omega_b=0.022, A_s=2.1e-9, n_s=0.965)
         assert "TT" not in cosmo._emu
-        cosmo.cl("TT", jnp.array([10.0]))
+        cosmo.cl_cmb("TT", jnp.array([10.0]))
         assert "TT" in cosmo._emu
 
 
@@ -202,7 +202,7 @@ class TestDerivedParameters:
 
 
 class TestBoundsAndNaN:
-    # hubble_parameter/angular_diameter_distance/sigma8/pk/cl/omega_m are all-NaN for an out-of-bounds cosmology.
+    # hubble_parameter/angular_diameter_distance/sigma8/pk/cl_cmb/omega_m are all-NaN for an out-of-bounds cosmology.
     def test_enforce_bounds_gated_functions_all_nan(self, out_of_bounds_cosmology):
         z = jnp.array([0.0, 0.5, 1.0])
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.hubble_parameter(z)))
@@ -211,7 +211,7 @@ class TestBoundsAndNaN:
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.angular_diameter_distance(z)))
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.sigma8(z)))
         assert jnp.all(jnp.isnan(out_of_bounds_cosmology.pk(jnp.geomspace(1e-2, 1, 5), z, linear=True)))
-        assert jnp.all(jnp.isnan(out_of_bounds_cosmology.cl("TT", jnp.array([10.0, 100.0]))))
+        assert jnp.all(jnp.isnan(out_of_bounds_cosmology.cl_cmb("TT", jnp.array([10.0, 100.0]))))
 
     # derived_parameters() is all-NaN for an out-of-bounds cosmology too (masked inline, not via _enforce_bounds).
     def test_derived_parameters_all_nan_out_of_bounds(self, out_of_bounds_cosmology):

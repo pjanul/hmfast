@@ -24,7 +24,7 @@ def _extended_limber_grid_for_pair(hm, tracer_a, tracer_b, profile_a, profile_b,
     The reference :math:`P(k,z)` used for the correction is this leg's own halo-model
     :math:`P_{1h}+P_{2h}` (built from ``profile_a``, ``profile_b``) -- the same
     :math:`P(k,z)` that would enter this leg's own :math:`C_\\ell` if computed directly
-    via :meth:`~hmfast.stats.pk.Pk.cl_1h`/:meth:`~hmfast.stats.pk.Pk.cl_2h`, so that
+    via :meth:`~hmfast.stats.pk.Pk.cl_hm`, so that
     RSD's projection correction is treated consistently between the trispectrum/
     covariance code here and the two-point ``C_\\ell`` code in ``stats/cl.py``.
     """
@@ -37,10 +37,10 @@ def _extended_limber_grid_for_pair(hm, tracer_a, tracer_b, profile_a, profile_b,
     if not needs_extended:
         return None, None, None, None
 
-    pk = _Pk()
+    pk = _Pk(k_damp=k_damp)
 
     def pk_fn(k, z):
-        return pk.pk_1h(hm, k, z, profile_a, profile_b, k_damp=k_damp) + pk.pk_2h(hm, k, z, profile_a, profile_b)
+        return pk.pk_1h(hm, k, z, profile_a, profile_b) + pk.pk_2h(hm, k, z, profile_a, profile_b)
 
     k_l = (l + 0.5) / chi
     P_grid = jnp.atleast_1d(pk_fn(k_l, z_arr)).flatten()[None, :]  # (1, Nl) -- single-z slice
@@ -482,13 +482,54 @@ class Bk:
         for matter density and electron pressure/density profiles, but
         not in general for profiles with non-trivial intra-halo occupancy
         statistics such as HOD or CIB.
+
+    Attributes
+    ----------
+    include_1h : bool
+        Whether :meth:`bk_tot` includes the 1-halo term.
+    include_2h : bool
+        Whether :meth:`bk_tot` includes the 2-halo term.
+    include_3h : bool
+        Whether :meth:`bk_tot` includes the 3-halo term.
+    k_damp : float
+        Damping wavenumber in :math:`\\mathrm{Mpc}^{-1}` for :meth:`bk_1h`'s
+        low-k suppression factor.
     """
+
+    def __init__(self, include_1h=True, include_2h=True, include_3h=True, k_damp=0.01):
+        """
+        Parameters
+        ----------
+        include_1h : bool, default True
+            Whether :meth:`bk_tot` includes the 1-halo term.
+        include_2h : bool, default True
+            Whether :meth:`bk_tot` includes the 2-halo term.
+        include_3h : bool, default True
+            Whether :meth:`bk_tot` includes the 3-halo term.
+        k_damp : float, default 0.01
+            Damping wavenumber in :math:`\\mathrm{Mpc}^{-1}` for :meth:`bk_1h`'s
+            low-k suppression factor.
+        """
+        self.include_1h = include_1h
+        self.include_2h = include_2h
+        self.include_3h = include_3h
+        self.k_damp = jnp.asarray(k_damp)
+
+    def _tree_flatten(self):
+        return (self.k_damp,), (self.include_1h, self.include_2h, self.include_3h)
+
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        obj = cls.__new__(cls)
+        (obj.k_damp,) = children
+        obj.include_1h, obj.include_2h, obj.include_3h = aux_data
+        return obj
 
     # ------------------------------------------------------------------
     # 1-halo term
     # ------------------------------------------------------------------
 
-    def bk_1h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None, k_damp=0.01):
+    def bk_1h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         """
         1-halo bispectrum term.
 
@@ -519,8 +560,6 @@ class Bk:
         profile2, profile3 : HaloProfile or None, default None
             Halo profiles at wavenumbers k2, k3 respectively. Each defaults
             to profile1 if None.
-        k_damp : float, default 0.01
-            Damping wavenumber for the low-k suppression.
 
         Returns
         -------
@@ -530,10 +569,10 @@ class Bk:
         """
         # Validated out here, where k1/k2/mu12 are still concrete.
         _check_bk_inputs(k1, k2, mu12)
-        return self._bk_1h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3, k_damp)
+        return self._bk_1h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
 
-    @partial(jax.jit, static_argnums=(0,))
-    def _bk_1h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None, k_damp=0.01):
+    @jax.jit
+    def _bk_1h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
         profile3 = profile3 if profile3 is not None else profile1
@@ -563,8 +602,8 @@ class Bk:
         bk1h = bk1h + hm.hm_consistency * correction
 
         k_min = jnp.minimum(jnp.minimum(k1a, k2a), k3)
-        mask = k_damp > 0
-        damping = jnp.where(mask, 1.0 - jnp.exp(-(k_min / jnp.where(mask, k_damp, 1.0))**2), 1.0)
+        mask = self.k_damp > 0
+        damping = jnp.where(mask, 1.0 - jnp.exp(-(k_min / jnp.where(mask, self.k_damp, 1.0))**2), 1.0)
 
         # Reshape damping to (N_k, 1) so it broadcasts correctly over (N_k, N_z)
         damping_bc = jnp.reshape(damping, jnp.shape(damping) + (1,))
@@ -616,7 +655,7 @@ class Bk:
         _check_bk_inputs(k1, k2, mu12)
         return self._bk_2h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def _bk_2h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
@@ -697,7 +736,7 @@ class Bk:
         _check_bk_inputs(k1, k2, mu12)
         return self._bk_3h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def _bk_3h(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
         hm = halo_model
         profile2 = profile2 if profile2 is not None else profile1
@@ -739,6 +778,62 @@ class Bk:
         )
 
         return jnp.squeeze(tree_term + b2_term)
+
+    # ------------------------------------------------------------------
+    # Combined 1-halo + 2-halo + 3-halo term
+    # ------------------------------------------------------------------
+
+    def bk_tot(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
+        """
+        Combine the 1-halo, 2-halo and 3-halo terms into the total halo-model bispectrum.
+
+        .. math::
+
+            B(k_1, k_2, k_3, z) = B_{1h} + B_{2h} + B_{3h}
+
+        A term excluded via :attr:`include_1h`/:attr:`include_2h`/:attr:`include_3h`
+        is simply left out of the sum.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+        k1, k2 : float or jnp.ndarray
+            Two triangle sides in :math:`\\mathrm{Mpc}^{-1}`. Must be the same size.
+        mu12 : float or jnp.ndarray
+            Cosine of the angle between the :math:`k_1` and :math:`k_2`
+            vectors. Must be a scalar or an array of shape :math:`(N_k,)`
+            matching k1, k2.
+        z : float or jnp.ndarray
+            Redshift grid.
+        profile1 : HaloProfile
+            Halo profile at wavenumber k1.
+        profile2, profile3 : HaloProfile or None, default None
+            Halo profiles at wavenumbers k2, k3 respectively. Each defaults
+            to profile1 if None.
+
+        Returns
+        -------
+        array
+            Combined bispectrum in :math:`\\mathrm{Mpc}^6`, shape :math:`(N_k, N_z)` before
+            singleton dimensions get squeezed before return.
+        """
+        # Validated out here, where k1/k2/mu12 are still concrete.
+        _check_bk_inputs(k1, k2, mu12)
+        return self._bk_tot(halo_model, k1, k2, mu12, z, profile1, profile2, profile3)
+
+    @jax.jit
+    def _bk_tot(self, halo_model, k1, k2, mu12, z, profile1, profile2=None, profile3=None):
+        b1h = self._bk_1h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3) if self.include_1h else 0.0
+        b2h = self._bk_2h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3) if self.include_2h else 0.0
+        b3h = self._bk_3h(halo_model, k1, k2, mu12, z, profile1, profile2, profile3) if self.include_3h else 0.0
+        return b1h + b2h + b3h
+
+
+jax.tree_util.register_pytree_node(
+    Bk,
+    lambda obj: obj._tree_flatten(),
+    lambda aux_data, children: Bk._tree_unflatten(aux_data, children)
+)
 
 
 # -------------------------
@@ -782,13 +877,51 @@ class Tk:
         This holds for matter density and electron pressure/density profiles,
         but not in general for profiles with non-trivial
         intra-halo occupancy statistics such as HOD or CIB.
+
+    Attributes
+    ----------
+    include_1h : bool
+        Whether :meth:`tk_tot` includes the 1-halo term.
+    include_2h : bool
+        Whether :meth:`tk_tot` includes the 2-halo term.
+    include_3h : bool
+        Whether :meth:`tk_tot` includes the 3-halo term.
+    include_4h : bool
+        Whether :meth:`tk_tot` includes the 4-halo term.
     """
+
+    def __init__(self, include_1h=True, include_2h=True, include_3h=True, include_4h=True):
+        """
+        Parameters
+        ----------
+        include_1h : bool, default True
+            Whether :meth:`tk_tot` includes the 1-halo term.
+        include_2h : bool, default True
+            Whether :meth:`tk_tot` includes the 2-halo term.
+        include_3h : bool, default True
+            Whether :meth:`tk_tot` includes the 3-halo term.
+        include_4h : bool, default True
+            Whether :meth:`tk_tot` includes the 4-halo term.
+        """
+        self.include_1h = include_1h
+        self.include_2h = include_2h
+        self.include_3h = include_3h
+        self.include_4h = include_4h
+
+    def _tree_flatten(self):
+        return (), (self.include_1h, self.include_2h, self.include_3h, self.include_4h)
+
+    @classmethod
+    def _tree_unflatten(cls, aux_data, children):
+        obj = cls.__new__(cls)
+        obj.include_1h, obj.include_2h, obj.include_3h, obj.include_4h = aux_data
+        return obj
 
     # ------------------------------------------------------------------
     # 1-halo term
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def tk_1h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         1-halo trispectrum term.
@@ -877,7 +1010,7 @@ class Tk:
         wgt = _TRISPEC_THETA_WEIGHT[None, None, :, None]
         return jnp.sum(pkr * wgt, axis=2)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def tk_2h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         2-halo trispectrum term (sum of the "22" and "13" diagrams).
@@ -1019,7 +1152,7 @@ class Tk:
         P3_kpk = jnp.swapaxes(self._P3_kernel(hm, kp, k, z_arr), 0, 1)
         return 12.0 / 7.0 * P_k * P_kp + 2.0 * (P_k * P3_kkp + P_kp * P3_kpk)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def tk_3h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         3-halo trispectrum term.
@@ -1117,7 +1250,7 @@ class Tk:
         P4X = jnp.sum(pkr * (f2_kkp * f2_kpk * wgt)[..., None], axis=2)
         return P4A, P4X
 
-    @partial(jax.jit, static_argnums=(0,))
+    @jax.jit
     def tk_4h(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
         """
         4-halo (tree-level) trispectrum term.
@@ -1195,10 +1328,57 @@ class Tk:
         return jnp.squeeze(T_pt * I1 * I2 * I3 * I4)
 
     # ------------------------------------------------------------------
+    # Combined 1-halo + 2-halo + 3-halo + 4-halo term
+    # ------------------------------------------------------------------
+
+    @jax.jit
+    def tk_tot(self, halo_model, k_u, k_v, z, profile1, profile2=None, profile3=None, profile4=None):
+        """
+        Combine the 1-halo, 2-halo, 3-halo and 4-halo terms into the total
+        halo-model trispectrum.
+
+        .. math::
+
+            T(k_u, k_v, z) = T_{1h} + T_{2h} + T_{3h} + T_{4h}
+
+        A term excluded via :attr:`include_1h`/:attr:`include_2h`/
+        :attr:`include_3h`/:attr:`include_4h` is simply left out of the sum.
+
+        Parameters
+        ----------
+        halo_model : HaloModel
+        k_u, k_v : float or jnp.ndarray
+            Independent wavenumber grids of the parallelogram
+            configuration, in :math:`\\mathrm{Mpc}^{-1}`. Need not be the
+            same length -- the two are broadcast into an (N_u, N_v) grid,
+            one trispectrum value per combination.
+        z : float or jnp.ndarray
+            Redshift grid.
+        profile1 : HaloProfile
+            First profile at wavenumber ``k_u``.
+        profile2, profile3, profile4 : HaloProfile or None, default None
+            Second profile at ``k_u``, and the two profiles at ``k_v``,
+            respectively. If None, profile2 and profile3 default to
+            profile1, and profile4 defaults to (the resolved) profile2.
+
+        Returns
+        -------
+        array
+            Combined trispectrum in :math:`\\mathrm{Mpc}^9`, with shape
+            :math:`(N_u, N_v, N_z)`, where singleton dimensions are
+            squeezed before return.
+        """
+        t1h = self.tk_1h(halo_model, k_u, k_v, z, profile1, profile2, profile3, profile4) if self.include_1h else 0.0
+        t2h = self.tk_2h(halo_model, k_u, k_v, z, profile1, profile2, profile3, profile4) if self.include_2h else 0.0
+        t3h = self.tk_3h(halo_model, k_u, k_v, z, profile1, profile2, profile3, profile4) if self.include_3h else 0.0
+        t4h = self.tk_4h(halo_model, k_u, k_v, z, profile1, profile2, profile3, profile4) if self.include_4h else 0.0
+        return t1h + t2h + t3h + t4h
+
+    # ------------------------------------------------------------------
     # Connected (non-Gaussian) angular power spectrum covariance
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0, 9))
+    @partial(jax.jit, static_argnums=(9,))
     def covariance_cng(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z_range, n_z, f_sky=1.0):
         """
         Connected (non-Gaussian) covariance between two Limber-projected
@@ -1229,7 +1409,7 @@ class Tk:
         W_2(z)` (or :math:`W_3(z)\\,W_4(z)`) depend on :math:`\\ell_1` (or
         :math:`\\ell_2`) too, via the same extended-Limber correction
         (Chisari et al. 2019 Sec. 2.4.1) used by
-        :meth:`~hmfast.stats.pk.Pk.cl_1h`/:meth:`~hmfast.stats.pk.Pk.cl_2h`
+        :meth:`~hmfast.stats.pk.Pk.cl_hm`
         (see :func:`_extended_limber_grid_for_pair`,
         :func:`_kernel_pair_effective`).
 
@@ -1279,12 +1459,8 @@ class Tk:
             k1 = (l1 + 0.5) / chi
             k2 = (l2 + 0.5) / chi
 
-            T = (
-                self.tk_1h(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
-                + self.tk_2h(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
-                + self.tk_3h(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
-                + self.tk_4h(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
-            )  # (N_l1, N_l2)
+            # Respects self.include_1h/2h/3h/4h, so a partial Tk sources a partial covariance.
+            T = self.tk_tot(hm, k1, k2, z_i, tracer1.profile, tracer2.profile, tracer3.profile, tracer4.profile)
 
             z_lp1, lp1h1, lp3h1, sqell1 = _extended_limber_grid_for_pair(
                 hm, tracer1, tracer2, tracer1.profile, tracer2.profile, z_i, l1, chi
@@ -1314,7 +1490,7 @@ class Tk:
     # Super-sample covariance
     # ------------------------------------------------------------------
 
-    @partial(jax.jit, static_argnums=(0, 9), static_argnames=("needs_counterterm1", "needs_counterterm2", "needs_counterterm3", "needs_counterterm4"))
+    @partial(jax.jit, static_argnums=(9,), static_argnames=("needs_counterterm1", "needs_counterterm2", "needs_counterterm3", "needs_counterterm4"))
     def covariance_ssc(self, halo_model, tracer1, tracer2, tracer3, tracer4, l1, l2, z_range, n_z, f_sky=1.0,
                         needs_counterterm1=None, needs_counterterm2=None,
                         needs_counterterm3=None, needs_counterterm4=None):
@@ -1469,3 +1645,10 @@ class Tk:
         cov = jnp.sum(integrand * z_gl_w[:, None, None], axis=0)
 
         return jnp.squeeze(cov)
+
+
+jax.tree_util.register_pytree_node(
+    Tk,
+    lambda obj: obj._tree_flatten(),
+    lambda aux_data, children: Tk._tree_unflatten(aux_data, children)
+)

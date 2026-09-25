@@ -15,8 +15,7 @@ class CMBLensingTracer(Tracer):
     """
     CMB weak lensing tracer.
 
-    The kernel has a single lensing convergence term (from
-    :meth:`_kernel_primary`):
+    The kernel has a single lensing convergence term:
 
     .. math::
 
@@ -126,10 +125,24 @@ class CMBLensingTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
+        Radial kernel terms of the CMB weak lensing tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
+
         Returns
         -------
-        list of (weight, der_bessel)
-            A single term, ``(W_kappa_cmb, 0)``.
+        list of tuple of (array_like, int)
+            - :math:`(W_{\\kappa_{\\mathrm{CMB}}}, 0)`: lensing convergence term, projected with :math:`j_\\ell`.
         """
         return [(self._kernel_primary(cosmology, z), 0)]
 

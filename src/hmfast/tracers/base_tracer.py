@@ -12,8 +12,16 @@ class Tracer(ABC):
     Parent tracer class from which other tracer classes inherit.
 
     Child tracers must implement :meth:`kernel`, returning a list of
-    ``(weight, der_bessel)`` terms. When used in the halo model, they must
-    also define a ``profile`` attribute with an appropriate profile object.
+    :math:`(W, n)` terms, where :math:`W(\\chi)` is a radial kernel and
+    :math:`n` selects the spherical Bessel derivative :math:`j_\\ell^{(n)}(k\\chi)`
+    the term is projected with in an angular power spectrum:
+
+    .. math::
+
+        \\Delta_\\ell(k) = \\int d\\chi\\, W(\\chi)\\, j_\\ell^{(n)}(k\\chi).
+
+    When used in the halo model, child tracers must also define a ``profile``
+    attribute with an appropriate profile object.
     """
     
     _required_profile_type = HaloProfile 
@@ -137,11 +145,24 @@ class Tracer(ABC):
     @abstractmethod
     def kernel(self, cosmology, z):
         """
-        Required tracer kernel. Returns a list of ``(weight(z), der_bessel)``
-        terms, where ``der_bessel`` tags the order of the spherical Bessel
-        function (or its derivative) each term projects through in an angular
-        power spectrum (``0`` for a plain density-type projection; e.g. ``2``
-        for redshift-space distortions).
+        Radial kernel terms of the tracer, to be implemented by child tracers.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
+
+        Returns
+        -------
+        list of tuple of (array_like, int)
+            One :math:`(W, n)` pair per kernel term.
         """
         pass
    

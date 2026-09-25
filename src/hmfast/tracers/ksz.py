@@ -12,11 +12,11 @@ class kSZTracer(Tracer):
     """
     kinetic Sunyaev-Zeldovich effect tracer.
 
-    The kernel has a single term (from :meth:`_kernel_primary`):
+    The kernel has a single term:
 
     .. math::
 
-        W_v(\\chi) = \\frac{\\sigma_T}{m_p}\\, \\frac{v_{\\mathrm{rms}}(z)}{1+z}
+        W_{\\mathrm{kSZ}}(\\chi) = \\frac{\\sigma_T}{m_p}\\, \\frac{v_{\\mathrm{rms}}(z)}{1+z}
 
     for :math:`z \\leq z_{\\max}`, and zero otherwise, where :math:`\\sigma_T`
     is the Thomson cross-section, :math:`m_p` is the proton mass, and
@@ -81,7 +81,7 @@ class kSZTracer(Tracer):
 
     def _kernel_primary(self, cosmology, z):
         """
-        Compute the kSZ kernel :math:`W_{\\mathrm{kSZ}}(z)` at redshift
+        Compute the kSZ kernel :math:`W_{\\mathrm{kSZ}}(\\chi)` at redshift
         :math:`z`.
 
         The kernel is given by:
@@ -120,10 +120,24 @@ class kSZTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
+        Radial kernel terms of the kinetic Sunyaev-Zeldovich tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
+
         Returns
         -------
-        list of (weight, der_bessel)
-            A single term, ``(W_v, 0)``.
+        list of tuple of (array_like, int)
+            - :math:`(W_{\\mathrm{kSZ}}, 0)`: kSZ term, projected with :math:`j_\\ell`.
         """
         return [(self._kernel_primary(cosmology, z), 0)]
 

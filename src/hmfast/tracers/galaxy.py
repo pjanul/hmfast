@@ -14,23 +14,29 @@ class GalaxyTracer(Tracer):
     """
     Galaxy counts tracer.
 
-    The kernel has up to three contributions. The galaxy density term
-    (from :meth:`_kernel_primary`, reusing :meth:`_density_kernel`):
+    The kernel has up to three contributions. The galaxy density term:
 
     .. math::
 
         W_g(\\chi) = \\frac{H(z)}{c}\\,\\frac{dN}{dz}(z).
 
-    A magnification-bias term (from :meth:`_kernel_mag_bias`), sourced by the
-    magnification-bias log-slope :math:`s(z)` (``mag_bias``):
+    A magnification-bias term, sourced by the magnification-bias log-slope
+    :math:`s(z)` (``mag_bias``):
 
     .. math::
 
         W_g^{\\mathrm{mag}}(\\chi) = -3\\,\\Omega_m \\left(\\frac{H_0}{c}\\right)^2
-        \\chi(z)\\,(1+z) \\int_z^\\infty dz_s\\, \\left(1 - \\tfrac{5}{2}s(z_s)\\right)
+        \\chi(z)\\,(1+z)\\, I_{\\mathrm{mag}}(z),
+
+    where :math:`I_{\\mathrm{mag}}(z)` is the magnification-weighted lensing
+    efficiency integral over the galaxy distribution ``dndz``:
+
+    .. math::
+
+        I_{\\mathrm{mag}}(z) = \\int_z^\\infty dz_s\\, \\left(1 - \\tfrac{5}{2}s(z_s)\\right)
         \\frac{dN}{dz}(z_s)\\, \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
 
-    If ``rsd=True``, a redshift-space distortion term (from :meth:`_kernel_rsd`):
+    If ``rsd=True``, a redshift-space distortion term:
 
     .. math::
 
@@ -156,9 +162,8 @@ class GalaxyTracer(Tracer):
     def _density_kernel(self, cosmology, z):
         """
         Compute the galaxy density kernel :math:`W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}`,
-        without the magnification-bias contribution. Shared by :meth:`_kernel_primary` and
-        :meth:`_kernel_rsd` (the redshift-space distortion term reuses this same
-        density-weighted shape).
+        without the magnification-bias contribution. The redshift-space distortion term
+        reuses this same density-weighted shape.
         """
         z = jnp.atleast_1d(z)
         z_g, phi_prime_g = self.dndz
@@ -170,14 +175,24 @@ class GalaxyTracer(Tracer):
     def _kernel_primary(self, cosmology, z):
         """
         Galaxy density term :math:`W_g(\\chi) = \\frac{H(z)}{c} \\frac{dN}{dz}`
-        (``der_bessel=0``), excluding magnification bias.
+        (:math:`n=0`, projected with :math:`j_\\ell`), excluding magnification bias.
         """
         return jnp.squeeze(self._density_kernel(cosmology, z))
 
     def _kernel_mag_bias(self, cosmology, z):
         """
-        Magnification-bias term (``der_bessel=0``) of the galaxy kernel, from the
-        ``mag_bias`` log-slope :math:`s(z)`.
+        Magnification-bias term (:math:`n=0`, projected with :math:`j_\\ell`) of the galaxy kernel, from the
+        ``mag_bias`` log-slope :math:`s(z)`:
+
+        .. math::
+
+            W_g^{\\mathrm{mag}}(\\chi) = -3\\,\\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\, I_{\\mathrm{mag}}(z),
+
+        with
+
+        .. math::
+
+            I_{\\mathrm{mag}}(z) = \\int_z^\\infty dz_s\\, \\left(1 - \\tfrac{5}{2}s(z_s)\\right) \\frac{dN}{dz}(z_s)\\, \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
         """
         z = jnp.atleast_1d(z)
         z_g, _ = self.dndz
@@ -196,7 +211,7 @@ class GalaxyTracer(Tracer):
 
     def _kernel_rsd(self, cosmology, z):
         """
-        Redshift-space distortion term (``der_bessel=2``) of the galaxy kernel.
+        Redshift-space distortion term (:math:`n=2`, projected with :math:`j_\\ell''`) of the galaxy kernel.
         """
         z = jnp.atleast_1d(z)
         f_z = cosmology.growth_rate(z)
@@ -205,13 +220,26 @@ class GalaxyTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Assemble the galaxy kernel terms.
+        Radial kernel terms of the galaxy counts tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
 
         Returns
         -------
-        list of (weight, der_bessel)
-            Always ``(W_g, 0)`` and ``(W_g^mag, 0)``; additionally
-            ``(W_g^RSD, 2)`` if ``self.rsd`` is True.
+        list of tuple of (array_like, int)
+            - :math:`(W_g, 0)`: galaxy density term, projected with :math:`j_\\ell`.
+            - :math:`(W_g^{\\mathrm{mag}}, 0)`: magnification-bias term, projected with :math:`j_\\ell`.
+            - :math:`(W_g^{\\mathrm{RSD}}, 2)`: redshift-space distortion term, projected with :math:`j_\\ell''`; included only if ``rsd=True``.
         """
         terms = [
             (self._kernel_primary(cosmology, z), 0),

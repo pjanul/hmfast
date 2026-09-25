@@ -13,11 +13,11 @@ class tSZTracer(Tracer):
     """
     thermal Sunyaev-Zeldovich effect tracer.
 
-    The kernel has a single term (from :meth:`_kernel_primary`):
+    The kernel has a single term:
 
     .. math::
 
-        W_y(\\chi) = \\frac{\\sigma_T}{m_e c^2}\\, \\frac{1}{1+z}
+        W_{\\mathrm{tSZ}}(\\chi) = \\frac{\\sigma_T}{m_e c^2}\\, \\frac{1}{1+z}
 
     for :math:`z \\leq z_{\\max}`, and zero otherwise, where :math:`\\sigma_T`
     is the Thomson cross-section and :math:`m_e c^2` is the electron
@@ -119,10 +119,24 @@ class tSZTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
+        Radial kernel terms of the thermal Sunyaev-Zeldovich tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
+
         Returns
         -------
-        list of (weight, der_bessel)
-            A single term, ``(W_y, 0)``.
+        list of tuple of (array_like, int)
+            - :math:`(W_{\\mathrm{tSZ}}, 0)`: tSZ term, projected with :math:`j_\\ell`.
         """
         return [(self._kernel_primary(cosmology, z), 0)]
 

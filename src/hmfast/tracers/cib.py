@@ -12,7 +12,7 @@ class CIBTracer(Tracer):
     """
     Cosmic infrared background tracer.
 
-    The kernel has a single term (from :meth:`_kernel_primary`):
+    The kernel has a single term:
 
     .. math::
 
@@ -105,10 +105,24 @@ class CIBTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
+        Radial kernel terms of the cosmic infrared background tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
+
         Returns
         -------
-        list of (weight, der_bessel)
-            A single term, ``(W_CIB, 0)``.
+        list of tuple of (array_like, int)
+            - :math:`(W_{\\mathrm{CIB}}, 0)`: CIB term, projected with :math:`j_\\ell`.
         """
         return [(self._kernel_primary(cosmology, z), 0)]
 

@@ -15,18 +15,22 @@ class GalaxyLensingTracer(Tracer):
     """
     Galaxy weak lensing tracer.
 
-    The kernel has two contributions. The lensing convergence term (from
-    :meth:`_kernel_primary`):
+    The kernel has two contributions. The lensing convergence term:
 
     .. math::
 
         W_{\\kappa_g}(\\chi) = \\frac{3}{2}\\,\\Omega_m \\left(\\frac{H_0}{c}\\right)^2
         \\chi(z)\\,(1+z)\\, I_s(z),
 
-    where :math:`I_s(z)` is the (unweighted) lensing efficiency integral
-    (:meth:`Tracer._lensing_efficiency_integral`) over the source
-    distribution ``dndz``. An intrinsic-alignment (NLA) term (from
-    :meth:`_kernel_ia`), controlled by ``ia_bias``:
+    where :math:`I_s(z)` is the lensing efficiency integral over the source
+    distribution ``dndz``:
+
+    .. math::
+
+        I_s(z) = \\int_z^\\infty dz_s\\, \\frac{dN}{dz}(z_s)\\,
+        \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
+
+    An intrinsic-alignment (NLA) term, controlled by ``ia_bias``:
 
     .. math::
 
@@ -134,16 +138,19 @@ class GalaxyLensingTracer(Tracer):
 
     def _kernel_primary(self, cosmology, z):
         """
-        Weak lensing convergence term (``der_bessel=0``) of the galaxy lensing
+        Weak lensing convergence term (:math:`n=0`, projected with :math:`j_\\ell`) of the galaxy lensing
         kernel:
 
         .. math::
 
             W_{\\kappa_g}(\\chi) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,I_s(z)
 
-        where :math:`I_s(z)` is the lensing efficiency integral
-        (:meth:`Tracer._lensing_efficiency_integral`) over the source
-        distribution ``dndz``.
+        where :math:`I_s(z)` is the lensing efficiency integral over the source
+        distribution ``dndz``:
+
+        .. math::
+
+            I_s(z) = \\int_z^\\infty dz_s\\, \\frac{dN}{dz}(z_s)\\, \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
         """
         cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z)
@@ -165,7 +172,7 @@ class GalaxyLensingTracer(Tracer):
 
     def _kernel_ia(self, cosmology, z):
         """
-        Intrinsic-alignment (NLA) term (``der_bessel=0``) of the galaxy lensing
+        Intrinsic-alignment (NLA) term (:math:`n=0`, projected with :math:`j_\\ell`) of the galaxy lensing
         kernel, controlled by ``ia_bias``.
         """
         cparams = cosmology._cosmo_params()
@@ -187,13 +194,25 @@ class GalaxyLensingTracer(Tracer):
 
     def kernel(self, cosmology, z):
         """
-        Assemble the galaxy lensing kernel terms.
+        Radial kernel terms of the galaxy weak lensing tracer.
+
+        Each term is a pair :math:`(W, n)`, where :math:`W(\\chi)` is a radial
+        kernel and :math:`n` selects the spherical Bessel derivative
+        :math:`j_\\ell^{(n)}(k\\chi)` the term is projected with in an angular
+        power spectrum.
+
+        Parameters
+        ----------
+        cosmology : Cosmology
+            Cosmology object.
+        z : float or array_like
+            Redshift(s) at which to evaluate the kernels.
 
         Returns
         -------
-        list of (weight, der_bessel)
-            Always ``(W_kappa_g, 0)`` and ``(W_g^IA, 0)`` (the latter is
-            identically zero for the default ``ia_bias``).
+        list of tuple of (array_like, int)
+            - :math:`(W_{\\kappa_g}, 0)`: lensing convergence term, projected with :math:`j_\\ell`.
+            - :math:`(W_g^{\\mathrm{IA}}, 0)`: intrinsic-alignment term, projected with :math:`j_\\ell`; identically zero for the default ``ia_bias``.
         """
         return [
             (self._kernel_primary(cosmology, z), 0),

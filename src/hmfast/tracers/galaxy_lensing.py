@@ -15,6 +15,31 @@ class GalaxyLensingTracer(Tracer):
     """
     Galaxy weak lensing tracer.
 
+    The kernel has two contributions. The lensing convergence term (from
+    :meth:`_kernel_primary`):
+
+    .. math::
+
+        W_{\\kappa_g}(\\chi) = \\frac{3}{2}\\,\\Omega_m \\left(\\frac{H_0}{c}\\right)^2
+        \\chi(z)\\,(1+z)\\, I_s(z),
+
+    where :math:`I_s(z)` is the (unweighted) lensing efficiency integral
+    (:meth:`Tracer._lensing_efficiency_integral`) over the source
+    distribution ``dndz``. An intrinsic-alignment (NLA) term (from
+    :meth:`_kernel_ia`), controlled by ``ia_bias``:
+
+    .. math::
+
+        W_g^{\\mathrm{IA}}(\\chi) = -A_{\\mathrm{IA}}(z)\\, C_1\\, \\rho_{\\mathrm{crit},0}\\,
+        \\frac{\\Omega_m}{D(z)}\\, W_n(\\chi),
+
+    where :math:`W_n(\\chi) = \\frac{H(z)}{c}\\frac{dN}{dz}(z)` is built from
+    this tracer's own ``dndz`` (not necessarily the same source distribution
+    as a :class:`~hmfast.tracers.galaxy.GalaxyTracer`), :math:`C_1` is the
+    Hirata & Seljak (2004) normalisation constant, and :math:`\\rho_{\\mathrm{crit},0}`
+    is the present-day critical density. See :meth:`kernel` for how these are
+    combined and returned.
+
     Attributes
     ----------
     profile : MatterProfile
@@ -161,6 +186,15 @@ class GalaxyLensingTracer(Tracer):
         return jnp.squeeze(W_IA)
 
     def kernel(self, cosmology, z):
+        """
+        Assemble the galaxy lensing kernel terms.
+
+        Returns
+        -------
+        list of (weight, der_bessel)
+            Always ``(W_kappa_g, 0)`` and ``(W_g^IA, 0)`` (the latter is
+            identically zero for the default ``ia_bias``).
+        """
         return [
             (self._kernel_primary(cosmology, z), 0),
             (self._kernel_ia(cosmology, z), 0),

@@ -12,6 +12,15 @@ class CIBTracer(Tracer):
     """
     Cosmic infrared background tracer.
 
+    The kernel has a single term (from :meth:`_kernel_primary`):
+
+    .. math::
+
+        W_{\\mathrm{CIB}}(\\chi) = \\frac{1}{1+z}
+
+    for :math:`z \\leq z_{\\max}`, and zero otherwise. See :meth:`kernel` for
+    how this is returned.
+
     Attributes
     ----------
     profile : CIBProfile
@@ -95,6 +104,12 @@ class CIBTracer(Tracer):
         return jnp.squeeze(jnp.where(z <= self.z_max + 1e-8, W, 0.0))
 
     def kernel(self, cosmology, z):
+        """
+        Returns
+        -------
+        list of (weight, der_bessel)
+            A single term, ``(W_CIB, 0)``.
+        """
         return [(self._kernel_primary(cosmology, z), 0)]
 
 

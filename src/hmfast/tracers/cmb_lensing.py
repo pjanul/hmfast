@@ -15,6 +15,18 @@ class CMBLensingTracer(Tracer):
     """
     CMB weak lensing tracer.
 
+    The kernel has a single lensing convergence term (from
+    :meth:`_kernel_primary`):
+
+    .. math::
+
+        W_{\\kappa_{\\mathrm{CMB}}}(\\chi) = \\frac{3}{2}\\,\\Omega_m
+        \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,
+        \\frac{\\chi_* - \\chi(z)}{\\chi_*},
+
+    where :math:`\\chi_*` is the comoving distance to the last-scattering
+    surface. See :meth:`kernel` for how this is returned.
+
     Attributes
     ----------
     profile : MatterProfile
@@ -113,6 +125,12 @@ class CMBLensingTracer(Tracer):
         return jnp.squeeze(W_kappa_cmb)
 
     def kernel(self, cosmology, z):
+        """
+        Returns
+        -------
+        list of (weight, der_bessel)
+            A single term, ``(W_kappa_cmb, 0)``.
+        """
         return [(self._kernel_primary(cosmology, z), 0)]
 
 

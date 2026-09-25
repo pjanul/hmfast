@@ -14,6 +14,31 @@ class GalaxyTracer(Tracer):
     """
     Galaxy counts tracer.
 
+    The kernel has up to three contributions. The galaxy density term
+    (from :meth:`_kernel_primary`, reusing :meth:`_density_kernel`):
+
+    .. math::
+
+        W_g(\\chi) = \\frac{H(z)}{c}\\,\\frac{dN}{dz}(z).
+
+    A magnification-bias term (from :meth:`_kernel_mag_bias`), sourced by the
+    magnification-bias log-slope :math:`s(z)` (``mag_bias``):
+
+    .. math::
+
+        W_g^{\\mathrm{mag}}(\\chi) = -3\\,\\Omega_m \\left(\\frac{H_0}{c}\\right)^2
+        \\chi(z)\\,(1+z) \\int_z^\\infty dz_s\\, \\left(1 - \\tfrac{5}{2}s(z_s)\\right)
+        \\frac{dN}{dz}(z_s)\\, \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
+
+    If ``rsd=True``, a redshift-space distortion term (from :meth:`_kernel_rsd`):
+
+    .. math::
+
+        W_g^{\\mathrm{RSD}}(\\chi) = -f(z)\\, W_g(\\chi),
+
+    where :math:`f(z)` is the linear growth rate. See :meth:`kernel` for how
+    these are combined and returned.
+
     Attributes
     ----------
     profile : GalaxyHODProfile
@@ -179,6 +204,15 @@ class GalaxyTracer(Tracer):
         return jnp.squeeze(W_rsd)
 
     def kernel(self, cosmology, z):
+        """
+        Assemble the galaxy kernel terms.
+
+        Returns
+        -------
+        list of (weight, der_bessel)
+            Always ``(W_g, 0)`` and ``(W_g^mag, 0)``; additionally
+            ``(W_g^RSD, 2)`` if ``self.rsd`` is True.
+        """
         terms = [
             (self._kernel_primary(cosmology, z), 0),
             (self._kernel_mag_bias(cosmology, z), 0),

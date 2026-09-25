@@ -12,6 +12,18 @@ class kSZTracer(Tracer):
     """
     kinetic Sunyaev-Zeldovich effect tracer.
 
+    The kernel has a single term (from :meth:`_kernel_primary`):
+
+    .. math::
+
+        W_v(\\chi) = \\frac{\\sigma_T}{m_p}\\, \\frac{v_{\\mathrm{rms}}(z)}{1+z}
+
+    for :math:`z \\leq z_{\\max}`, and zero otherwise, where :math:`\\sigma_T`
+    is the Thomson cross-section, :math:`m_p` is the proton mass, and
+    :math:`v_{\\mathrm{rms}}(z) = \\sqrt{\\langle v^2\\rangle(z)}` is the velocity
+    dispersion computed from the given cosmology. See :meth:`kernel` for how
+    this is returned.
+
     Attributes
     ----------
     profile : DensityProfile
@@ -107,6 +119,12 @@ class kSZTracer(Tracer):
         return jnp.squeeze(jnp.where(z <= self.z_max + 1e-8, W, 0.0))
 
     def kernel(self, cosmology, z):
+        """
+        Returns
+        -------
+        list of (weight, der_bessel)
+            A single term, ``(W_v, 0)``.
+        """
         return [(self._kernel_primary(cosmology, z), 0)]
 
 

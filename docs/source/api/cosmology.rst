@@ -8,3 +8,6 @@ hmfast.cosmology
    :nosignatures:
 
    Cosmology
+   Engine
+   EmulatorEngine
+   AnalyticEngine

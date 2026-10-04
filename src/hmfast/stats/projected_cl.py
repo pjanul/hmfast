@@ -173,7 +173,7 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
     chi_min = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_min) * (1.0 + z_min))
     chi_max = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_max) * (1.0 + z_max))
 
-    k_fine, _ = cosmology._pk_grid()
+    k_fine = cosmology._pk_grid()
     k_min, k_max = k_fine[0], k_fine[-1]
 
     chi_nodes = jnp.geomspace(chi_min, chi_max, n_fft)

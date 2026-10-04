@@ -31,7 +31,7 @@ class HaloModel:
     ----------
     cosmology : Cosmology
         Cosmology object supplying background, growth, and matter power spectra quantities.
-        Defaults to ``Cosmology(emulator_set="lcdm:v1")``.
+        Defaults to ``Cosmology()`` (``EmulatorEngine("lcdm:v1")``).
     mass_def : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
         Defaults to 200c, ``MassDefinition(delta=200, reference="critical")``.
@@ -72,19 +72,14 @@ class HaloModel:
         """Initialize the halo model."""
 
         # None-sentinel: avoids building these (some expensive, some cache-holding) at import time.
-        cosmology = cosmology if cosmology is not None else Cosmology(emulator_set="lcdm:v1")
+        cosmology = cosmology if cosmology is not None else Cosmology()
         mass_def = mass_def if mass_def is not None else MassDefinition(delta=200, reference="critical")
         halo_mass_function = halo_mass_function if halo_mass_function is not None else T08HaloMassFunction()
         halo_bias = halo_bias if halo_bias is not None else T10HaloBias()
         subhalo_mass_function = subhalo_mass_function if subhalo_mass_function is not None else TW10SubHaloMassFunction()
         concentration = concentration if concentration is not None else D08Concentration()
 
-        # Load cosmology and make sure the required files are loaded outside of jitted functions (note that DER is needed for CMB lensing tracers)
         self.cosmology = cosmology
-        self.cosmology._load_emulator("DAZ")
-        self.cosmology._load_emulator("HZ")
-        self.cosmology._load_emulator("PKL")
-        self.cosmology._load_emulator("DER")
 
         self.halo_mass_function = halo_mass_function
         self.halo_bias = halo_bias

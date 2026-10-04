@@ -148,7 +148,7 @@ def _dPk_response(halo_model, k, z, profile1, profile2=None, include_1h=True, in
     pk_lin = jnp.reshape(hm.cosmology.pk(k_arr, z_arr, linear=True), (nk, nz))
 
     # dlnP/dlnk needs a properly resolved k grid -- a finite difference on a sparse query k_arr is inaccurate.
-    k_fine, _ = hm.cosmology._pk_grid()
+    k_fine = hm.cosmology._pk_grid()
     pk_fine = jnp.reshape(hm.cosmology.pk(k_fine, z_arr, linear=True), (len(k_fine), nz))
     dlnp_fine = jnp.gradient(jnp.log(pk_fine), jnp.log(k_fine), axis=0)
     dlnp_dlnk = jax.vmap(
@@ -283,9 +283,9 @@ _DISC_VAR_LOW_K_DECADES = 2
 
 def _disc_var_transform(cosmology):
     """The disc-variance transform and its input k grid, the emulator's extended below k_min at the same log spacing."""
-    key = cosmology.emulator_set
+    key = cosmology.engine
     if key not in _DISC_VAR_TRANSFORMS:
-        k_grid, _ = cosmology._pk_grid()
+        k_grid = cosmology._pk_grid()
         dlnk = np.log(k_grid[1] / k_grid[0])
         n_low = int(np.ceil(_DISC_VAR_LOW_K_DECADES * np.log(10.0) / dlnk))
         k_ext = np.concatenate([k_grid[0] * np.exp(dlnk * np.arange(-n_low, 0)), k_grid])
@@ -328,7 +328,7 @@ def sigma2_b_disc(cosmology, z, *, f_sky=1.0):
         get squeezed before return.
     """
     z_arr = jnp.atleast_1d(z)
-    k_grid, _ = cosmology._pk_grid()
+    k_grid = cosmology._pk_grid()
     pk_grid = jnp.reshape(cosmology.pk(k_grid, z_arr, linear=True), (len(k_grid), len(z_arr)))
     transform, k_ext = _disc_var_transform(cosmology)
     # Power-law continuation of P_lin below k_min, independent of cosmology.extrapolate_k.

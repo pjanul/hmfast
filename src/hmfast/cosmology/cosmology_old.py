@@ -1,51 +1,64 @@
+import os
 import jax
 import jax.numpy as jnp
 import numpy as np
 import jax.scipy as jscipy
+from typing import Dict, Union
 from mcfit import TophatVar
-from hmfast.cosmology.engines import EmulatorEngine
-from hmfast.utils import Const, dopri5_integrate
+from hmfast.cosmology.emulator_load import EmulatorLoader, EmulatorLoaderPCA
+from hmfast.download import _get_default_data_path
+from hmfast.cosmology.halofit import halofit
+from hmfast.utils import Const, log_interp1d_extrap, dopri5_integrate
 from functools import partial
 
 jax.config.update("jax_enable_x64", True)
 
 
+# "free": extension parameters the emulator set takes as inputs, all others fixed at _DEFAULTS; "deg_ncdm": degenerate massive states (default 1).
+_COSMO_MODELS = {
+    "lcdm:v1": {"suffix": "v1", "subdir": "lcdm", "free": ()},
+    "mnu:v1": {"suffix": "mnu_v1", "subdir": "mnu", "free": ("m_ncdm",)},
+    "neff:v1": {"suffix": "neff_v1", "subdir": "neff", "free": ("N_ur",)},
+    "wcdm:v1": {"suffix": "w_v1", "subdir": "wcdm", "free": ("w0",)},
+    "ede:v1": {"suffix": "v1", "subdir": "ede", "free": ("m_ncdm", "N_ur", "f_ede", "z_c", "theta_i", "r"), "deg_ncdm": 3.0},
+    "mnu-3states:v1": {"suffix": "v1", "subdir": "mnu-3states", "free": ("m_ncdm",), "deg_ncdm": 3.0},
+    "ede:v2": {"suffix": "v2", "subdir": "ede", "free": ("m_ncdm", "N_ur", "f_ede", "z_c", "theta_i", "r"), "deg_ncdm": 3.0},
+}
+
 _DEFAULTS = {"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278, "theta_i": 1.57, "r": 0.01,
              "T_cmb": 2.7255}
 
 
-def _is_free(engine, name):
-    # T_cmb only enters the analytic background, so it stays settable for every engine.
-    return name == "T_cmb" or name in engine.free_params
+def _is_free(emulator_set, name):
+    # T_cmb is not an emulator input but only enters the analytic background, so it stays settable everywhere.
+    return name == "T_cmb" or name in _COSMO_MODELS[emulator_set]["free"]
 
 
-def _check_fixed(engine, passed, extra):
-    """Raise if an extension parameter is passed explicitly but is not an input of the engine, or is unknown."""
-    fixed = [name for name, value in passed.items() if value is not None and not _is_free(engine, name)]
+def _check_fixed(emulator_set, passed):
+    """Raise if an extension parameter is passed explicitly but is not an input of the emulator set."""
+    fixed = [name for name, value in passed.items() if value is not None and not _is_free(emulator_set, name)]
     if fixed:
-        raise ValueError(f"{', '.join(fixed)} cannot be set with {engine!r}, which fixes "
+        raise ValueError(f"{', '.join(fixed)} cannot be set with emulator_set={emulator_set!r}, which fixes "
                          + ", ".join(f"{name}={_DEFAULTS[name]}" for name in fixed) + ".")
-    unknown = [name for name in extra if name not in engine.extra_params]
-    if unknown:
-        raise TypeError(f"Unknown parameter(s) {', '.join(unknown)} for {engine!r}.")
 
 
 
 class Cosmology:
     """
-    Cosmology model: cosmological parameters plus the engine that computes from them.
+    Cosmology model and emulator interface.
 
-    Provides access to cosmological parameters and engine-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
-    Note that using parameters outside the engine's valid domain (e.g. emulator training bounds) will result in NaN outputs.
-    Extension parameters that are not inputs of the selected engine are
+    Provides access to cosmological parameters and emulator-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
+    Note that using parameters outside the emulator training bounds will result in NaN outputs.
+    Extension parameters that are not inputs of the selected emulator set are
     stored as ``None`` (so they are not pytree leaves), take their default
     value internally, and raise a ``ValueError`` if set explicitly.
 
     Attributes
     ----------
-    engine : Engine
-        Source of :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)`, e.g. ``EmulatorEngine("ede:v2")``.
-        Defaults to ``EmulatorEngine("lcdm:v1")``.
+    emulator_set : str
+        Emulator-set identifier selecting the corresponding emulator set.
+        Allowed values are ``"lcdm:v1"``, ``"mnu:v1"``, ``"neff:v1"``,
+        ``"wcdm:v1"``, ``"ede:v1"``, ``"mnu-3states:v1"``, and ``"ede:v2"``.
     H0 : float
         Hubble constant at :math:`z = 0` in units of
         :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
@@ -87,25 +100,26 @@ class Cosmology:
         Tensor-to-scalar ratio, used if a cosmological model including primordial tensors is selected.
     T_cmb : float
         CMB temperature today in Kelvin, used when non-emulator background quantities require it.
-    **extra_params
-        Values for parameters the engine adds beyond these (``engine.extra_params``).
     extrapolate_z : bool
-        If True, redshifts above the engine's maximum are
+        If True, redshifts above the emulators' trained maximum are
         extrapolated. This is less accurate for early dark
         energy models, and for masses/neutrino content where the
         non-relativistic approximation for massive neutrinos breaks down
         before then.
     extrapolate_k : bool
         If True (default), :meth:`pk` power-law extrapolates in log-log beyond
-        the engine's :math:`k` grid; if False, it returns NaN there.
+        the emulators' trained :math:`k` range; if False, it returns NaN there.
         Also sets whether :func:`~hmfast.stats.corr_3d` and :func:`~hmfast.stats.corr_angular`
         power-law extrapolate their input beyond the ends of its grid.
     ncdm_mode : {"cb", "m"}
         Mean density, :math:`\\bar\\rho_{cb}` (default) or :math:`\\bar\\rho_m`, used for
         :math:`M(R)` in :math:`\\sigma(M)` and the mass function. :math:`\\sigma(M)` always uses
         the total-matter linear spectrum, and everything else uses total matter.
+    pknl_mode : {"hmcode", "halofit"}
+        Source of the nonlinear :math:`P(k)`: the HMcode emulator (default), or halofit
+        (Takahashi et al. 2012, with the Bird et al. 2012 neutrino correction) applied to the emulated linear :math:`P(k)`.
     """
-    def __init__(self, engine=None, *,
+    def __init__(self, emulator_set="lcdm:v1", *,
                  H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,                       # LCDM
                  m_ncdm=None, N_ur=None, w0=None,                                                                           # wCDM, Neff, MNU
                  f_ede=None, z_c=None, theta_i=None, r=None,                                                                # EDE
@@ -113,28 +127,38 @@ class Cosmology:
                  extrapolate_z=False,                                                                                      # z-extrapolation
                  extrapolate_k=True,                                                                                       # k-extrapolation
                  ncdm_mode="cb",                                                                                           # Halo-model field
-                 **extra_params,                                                                                           # Engine-specific
+                 pknl_mode="hmcode",                                                                                       # Nonlinear P(k)
         ):
 
         # Static Metadata
-        engine = engine if engine is not None else EmulatorEngine("lcdm:v1")
+        if emulator_set not in _COSMO_MODELS:
+            allowed_models = ", ".join(f'"{model}"' for model in _COSMO_MODELS)
+            raise ValueError(
+                f"Unknown emulator_set {emulator_set!r}. Allowed values are: {allowed_models}."
+            )
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
+        if pknl_mode not in ("hmcode", "halofit"):
+            raise ValueError(f'pknl_mode must be "hmcode" or "halofit", got {pknl_mode!r}.')
         passed = dict(m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r, T_cmb=T_cmb)
-        _check_fixed(engine, passed, extra_params)
-        self.engine = engine
+        _check_fixed(emulator_set, passed)
+        self.emulator_set = emulator_set
         self.extrapolate_z = extrapolate_z
         self.extrapolate_k = extrapolate_k
         self.ncdm_mode = ncdm_mode
-        self._tophat_instance = partial(TophatVar(engine.k_grid, lowring=True, backend='jax'), extrap=True)
+        self.pknl_mode = pknl_mode
+        self._emu = {}  # This will be treated as static
+        # Eagerly load these emulators to keep Python-side loader state out of jitted paths and avoid JAX tracer errors.
+        if os.environ.get("READTHEDOCS") != "True":
+            for key in ("S8Z", "HZ", "DAZ", "PKL", "PKNL", "DER"):
+                self._load_emulator(key)
+        self._tophat_instance = partial(TophatVar(self._pk_grid()[0], lowring=True, backend='jax'), extrap=True)
 
         # Cosmological params (leaves) to be changed without recompiling jit
         self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau = H0, omega_cdm, omega_b, A_s, n_s, tau
         # Fixed extension parameters stay None, so they drop out of the pytree.
         for name, value in passed.items():
-            setattr(self, name, (_DEFAULTS[name] if value is None else value) if _is_free(engine, name) else None)
-        for name, default in engine.extra_params.items():
-            setattr(self, name, extra_params.get(name, default))
+            setattr(self, name, (_DEFAULTS[name] if value is None else value) if _is_free(emulator_set, name) else None)
 
 
     # ------------------------------------------------------------------
@@ -147,40 +171,39 @@ class Cosmology:
             self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau,
             self.m_ncdm, self.N_ur, self.w0, 
             self.f_ede, self.z_c, self.theta_i, self.r,
-            self.T_cmb,
-            tuple(getattr(self, name) for name in self.engine.extra_params),
+            self.T_cmb
         )
         # 2. Aux data: Static metadata and cached helper objects.
-        aux_data = (self.engine, self.extrapolate_z, self.extrapolate_k, self.ncdm_mode, self._tophat_instance)
+        aux_data = (self.emulator_set, self.extrapolate_z, self.extrapolate_k, self.ncdm_mode, self.pknl_mode, self._emu, self._tophat_instance)
         return (children, aux_data)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
         # Reconstruct using the static metadata
-        engine, extrapolate_z, extrapolate_k, ncdm_mode, _tophat_instance = aux_data
+        emulator_set, extrapolate_z, extrapolate_k, ncdm_mode, pknl_mode, _emu, _tophat_instance = aux_data
 
         # We bypass __init__ to avoid re-triggering the Loader logic
         obj = cls.__new__(cls)
-        obj.engine = engine
+        obj.emulator_set = emulator_set
         obj.extrapolate_z = extrapolate_z
         obj.extrapolate_k = extrapolate_k
         obj.ncdm_mode = ncdm_mode
+        obj.pknl_mode = pknl_mode
+        obj._emu = _emu
         obj._tophat_instance = _tophat_instance
 
         # Assign the parameter children to the object
         (obj.H0, obj.omega_cdm, obj.omega_b, obj.A_s, obj.n_s, obj.tau,
          obj.m_ncdm, obj.N_ur, obj.w0, 
          obj.f_ede, obj.z_c, obj.theta_i, obj.r,
-         obj.T_cmb, extra) = children
-        for name, value in zip(engine.extra_params, extra):
-            setattr(obj, name, value)
+         obj.T_cmb) = children
         
         return obj
     
     def update(self, *, H0=None, omega_cdm=None, omega_b=None, A_s=None, n_s=None,
         tau=None, m_ncdm=None, N_ur=None, w0=None, f_ede=None, z_c=None,
         theta_i=None, r=None, T_cmb=None, extrapolate_z=None, extrapolate_k=None,
-        ncdm_mode=None, **extra_params):
+        ncdm_mode=None, pknl_mode=None):
         """
         Return a new Cosmology instance with updated parameters.
 
@@ -196,8 +219,8 @@ class Cosmology:
             If not None, replaces :attr:`extrapolate_k`.
         ncdm_mode : {"cb", "m"} or None
             If not None, replaces :attr:`ncdm_mode`.
-        **extra_params
-            New values for the engine's extra parameters; None leaves a parameter unchanged.
+        pknl_mode : {"hmcode", "halofit"} or None
+            If not None, replaces :attr:`pknl_mode`.
 
         Returns
         -------
@@ -218,37 +241,117 @@ class Cosmology:
             f_ede, z_c, theta_i, r,
             T_cmb
         ]
-        _check_fixed(self.engine, dict(zip(names[6:], values[6:])), extra_params)
+        _check_fixed(self.emulator_set, dict(zip(names[6:], values[6:])))
         # Only update values that are not None
-        new_leaves = [v if v is not None else old for v, old in zip(values, leaves[:-1])]
-        new_leaves.append(tuple(old if extra_params.get(name) is None else extra_params[name]
-                                for name, old in zip(self.engine.extra_params, leaves[-1])))
+        new_leaves = [v if v is not None else old for v, old in zip(values, leaves)]
         if ncdm_mode is not None and ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
-        engine, old_extrapolate_z, old_extrapolate_k, old_ncdm_mode, _tophat_instance = aux_data
+        if pknl_mode is not None and pknl_mode not in ("hmcode", "halofit"):
+            raise ValueError(f'pknl_mode must be "hmcode" or "halofit", got {pknl_mode!r}.')
+        emulator_set, old_extrapolate_z, old_extrapolate_k, old_ncdm_mode, old_pknl_mode, _emu, _tophat_instance = aux_data
         aux_data = (
-            engine,
+            emulator_set,
             old_extrapolate_z if extrapolate_z is None else extrapolate_z,
             old_extrapolate_k if extrapolate_k is None else extrapolate_k,
             old_ncdm_mode if ncdm_mode is None else ncdm_mode,
-            _tophat_instance,
+            old_pknl_mode if pknl_mode is None else pknl_mode,
+            _emu, _tophat_instance,
         )
         return self._tree_unflatten(aux_data, new_leaves)
             
+    # ------------------------------------------------------------------
+    # atomic lazy loader (Python-side only)
+    # ------------------------------------------------------------------
+
+    def _base_path(self):
+        return os.path.join(_get_default_data_path(),_COSMO_MODELS[self.emulator_set]["subdir"])
+                         
+
+    def _load_emulator(self, key: str):
+        if key in self._emu:
+            return self._emu[key]
+    
+        key_map = {
+            "DAZ":  ("growth-and-distances", EmulatorLoader),
+            "HZ":   ("growth-and-distances", EmulatorLoader),
+            "S8Z":  ("growth-and-distances", EmulatorLoader),
+            "PKL":  ("PK", EmulatorLoader),
+            "PKNL": ("PK", EmulatorLoader),
+            "TT":   ("TTTEEE", EmulatorLoader),
+            "EE":   ("TTTEEE", EmulatorLoader),
+            "TE":   ("TTTEEE", EmulatorLoaderPCA),
+            "PP":   ("PP", EmulatorLoader),
+            "BB":   ("BB", EmulatorLoader),
+            "DER":  ("derived-parameters", EmulatorLoader),
+        }
+    
+        try:
+            subdir, loader_cls = key_map[key]
+        except KeyError:
+            raise KeyError(f"Unknown key: {key}")
+    
+        # Keep the loaded weights concrete even when first reached under a trace, so no tracer is cached on self.
+        with jax.ensure_compile_time_eval():
+            self._emu[key] = loader_cls(os.path.join(self._base_path(), subdir, f"{key}_{_COSMO_MODELS[self.emulator_set]['suffix']}"))
+        return self._emu[key]
+
+
     def _to_dict(self):
         """
-        Cosmological parameters by name, fixed extension parameters at their defaults,
-        plus the engine's extra parameters; this is what the engine receives.
+        Converts the class attributes into a dictionary format 
+        required by the underlying emulator predictions.
         """
-        p = {name: getattr(self, name) for name in ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau")}
-        p.update({name: _DEFAULTS[name] if getattr(self, name) is None else getattr(self, name) for name in _DEFAULTS})
-        p.update({name: getattr(self, name) for name in self.engine.extra_params})
-        p['deg_ncdm'] = self.engine.deg_ncdm
-        return p
+        ext = {name: _DEFAULTS[name] if getattr(self, name) is None else getattr(self, name) for name in _DEFAULTS}
+        return {
+            'H0': self.H0,
+            'omega_cdm': self.omega_cdm,
+            'omega_b': self.omega_b,
+            'ln10^{10}A_s': jnp.log(1.0e10 * self.A_s),
+            'n_s': self.n_s,
+            'tau_reio': self.tau,
+            'm_ncdm': ext['m_ncdm'],
+            'N_ur': ext['N_ur'],
+            'w0_fld': ext['w0'],
+            'fEDE': ext['f_ede'],
+            'log10z_c': jnp.log10(ext['z_c']),
+            'thetai_scf': ext['theta_i'],
+            'r': ext['r'],
+            'T_cmb': ext['T_cmb'],
+            'deg_ncdm': _COSMO_MODELS[self.emulator_set].get("deg_ncdm", 1.0)
+        }
+
+    @partial(jax.jit, static_argnums=(0,))
+    def _emulator_params_in_bounds(self):
+        """
+        Return whether the cosmology lies within the emulator training domain.
+
+        The LCDM emulators use a narrower prior on ``n_s`` than the extension
+        emulators; all other bounds follow the shared emulator training ranges.
+        """
+        ns_min, ns_max = (0.8812, 1.0492) if self.emulator_set == "lcdm:v1" else (0.8, 1.2)
+        p = self._to_dict()
+        ln_1e10_As = p['ln10^{10}A_s']
+        log10_z_c = p['log10z_c']
+
+        return (
+            (ln_1e10_As >= 2.5) & (ln_1e10_As <= 3.5)
+            & (self.omega_cdm >= 0.08) & (self.omega_cdm <= 0.20)
+            & (self.omega_b >= 0.01933) & (self.omega_b <= 0.02533)
+            & (self.H0 >= 39.99) & (self.H0 <= 100.01)
+            & (self.n_s >= ns_min) & (self.n_s <= ns_max)
+            & (self.tau >= 0.02) & (self.tau <= 0.12)
+            & (p['m_ncdm'] >= 0.0) & (p['m_ncdm'] <= 0.33333)
+            & (p['w0_fld'] >= -2.0) & (p['w0_fld'] <= -0.33)
+            & (p['N_ur'] >= 0.49) & (p['N_ur'] <= 4.49)
+            & (p['thetai_scf'] >= 0.1) & (p['thetai_scf'] <= 3.1)
+            & (log10_z_c >= 3.0) & (log10_z_c <= 4.3)
+            & (p['fEDE'] >= 0.001) & (p['fEDE'] <= 0.5)
+            & (p['r'] >= 0.0) & (p['r'] <= 0.3)
+        )
 
     @partial(jax.jit, static_argnums=(0,))
     def _enforce_bounds(self, values):
-        valid = self.engine.in_bounds(self._cosmo_params())
+        valid = self._emulator_params_in_bounds()
         values = jnp.asarray(values)
         return jnp.where(valid, values, jnp.full_like(values, jnp.nan))
                        
@@ -258,14 +361,29 @@ class Cosmology:
     # ------------------------------------------------------------------
 
     def _z_grid_bg(self):
-        return jnp.linspace(0.0, self.engine.z_max_bg, 5000, dtype=jnp.float64) 
+        return jnp.linspace(0.0, 20.0, 5000, dtype=jnp.float64) 
 
     def _z_grid_pk(self):
-        return jnp.linspace(0.0, self.engine.z_max_pk, 100, dtype=jnp.float64)     # z grid for Pk(z)
+        z_max = jnp.where(self.emulator_set == "ede:v2", 20.0, 5.0)
+        return jnp.linspace(0.0, z_max, 100, dtype=jnp.float64)     # z grid for Pk(z)
 
     def _pk_grid(self):
-        # numpy, not jnp: fixed by the engine alone, so it stays concrete for mcfit to plan on.
-        return self.engine.k_grid
+        # numpy, not jnp: fixed by the emulator set alone, so it stays concrete for mcfit to plan on.
+        is_ede_v2 = (self.emulator_set == "ede:v2")
+        k_min = 5e-4 if is_ede_v2 else 1e-4
+        k_max = 10.0 if is_ede_v2 else 50.0
+
+        n_downsample_k = 1 if is_ede_v2 else 10
+        n_k            = 1000 if is_ede_v2 else 5000
+        _k_grid = np.geomspace(k_min, k_max, n_k, dtype=np.float64)[::n_downsample_k]
+
+        if is_ede_v2:
+            _pk_power_fac = _k_grid ** (-3)
+        else:
+            ls = np.arange(2,n_k+2)[::n_downsample_k]
+            _pk_power_fac = (ls*(ls+1.)/2./np.pi)**-1.
+
+        return _k_grid, _pk_power_fac
 
     
     @partial(jax.jit, static_argnums=(0,))
@@ -290,7 +408,7 @@ class Cosmology:
         cparams = self._cosmo_params()
 
         # Power spectra for all redshifts, shape: (n_k, n_z)
-        k_grid = self._pk_grid()
+        k_grid, _ = self._pk_grid()
         pk_grid = self.pk(k_grid, z_grid, linear=True)
 
         # Compute σ²(R, z) using the cached top-hat helper.
@@ -399,8 +517,10 @@ class Cosmology:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _squeeze_single(values):
-        return values[0] if values.shape[0] == 1 else values
+    def _interp_z(z, z_grid, values):
+        z = jnp.atleast_1d(z)
+        out = jnp.interp(z, z_grid, values, left=jnp.nan, right=jnp.nan)
+        return out[0] if out.shape[0] == 1 else out
 
 
     # ------------------------------------------------------------------
@@ -414,7 +534,7 @@ class Cosmology:
             return self.H0 * jnp.sqrt(
                 (p['Omega0_m_nonu'] + p['Omega0_ncdm']) * zp1 ** 3
                 + p['Omega0_r'] * zp1 ** 4
-                + p['Omega_Lambda'] * zp1 ** (3.0 * (1.0 + p['w0']))
+                + p['Omega_Lambda'] * zp1 ** (3.0 * (1.0 + p['w0_fld']))
             )
         # Force the non-extrapolated path to avoid recursing into this method via jnp.where's eager evaluation.
         correction = (self.update(extrapolate_z=False).hubble_parameter(z_max) / hz_flrw(z_max)) ** 2
@@ -423,7 +543,7 @@ class Cosmology:
     @jax.jit
     def hubble_parameter(self, z):
         """
-        Get Hubble parameter :math:`H(z)` at redshift :math:`z` from the engine.
+        Get Hubble parameter :math:`H(z)` at redshift :math:`z` from the emulator.
 
         Parameters
         ----------
@@ -436,19 +556,24 @@ class Cosmology:
             Hubble parameter(s) in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`
         """
 
-        z_arr = jnp.atleast_1d(z)
-        Hz = self.engine.hubble_parameter(z_arr, self._cosmo_params())
+        params = self._to_dict()
+        emu = self._load_emulator("HZ")
+        preds = 10.0 ** emu.predictions(params) * (Const._c_ / 1e3)
+        Hz = self._interp_z(z, self._z_grid_bg(), preds)
 
         if self.extrapolate_z:
             z_max = self._z_grid_bg()[-1]
-            Hz = jnp.where(z_arr > z_max, self._hz_flrw_calibrated(z_max)(z_arr), Hz)
+            z_arr = jnp.atleast_1d(z)
+            Hz_analytic = self._hz_flrw_calibrated(z_max)(z_arr)
+            Hz_arr = jnp.where(z_arr > z_max, Hz_analytic, jnp.atleast_1d(Hz))
+            Hz = Hz_arr[0] if Hz_arr.shape[0] == 1 else Hz_arr
 
-        return self._enforce_bounds(self._squeeze_single(Hz))
+        return self._enforce_bounds(Hz)
 
     @jax.jit
     def angular_diameter_distance(self, z):
         """
-        Get angular diameter distance :math:`D_A(z)` at redshift :math:`z` from the engine.
+        Get angular diameter distance :math:`D_A(z)` at redshift :math:`z` from the emulator.
 
         Parameters
         ----------
@@ -461,11 +586,19 @@ class Cosmology:
             Angular diameter distance(s) in :math:`\\mathrm{Mpc}`.
         """
 
-        z_arr = jnp.atleast_1d(z)
-        DA = self.engine.angular_diameter_distance(z_arr, self._cosmo_params())
+        params = self._to_dict()
+        emu = self._load_emulator("DAZ")
+        preds = emu.predictions(params)
+
+        if self.emulator_set == "ede:v2":
+            preds = 10.0 ** preds
+            preds = jnp.insert(preds, 0, 0.0)
+
+        DA = self._interp_z(z, self._z_grid_bg(), preds)
 
         if self.extrapolate_z:
             z_max = self._z_grid_bg()[-1]
+            z_arr = jnp.atleast_1d(z)
             # Same recursion hazard as _hz_flrw_calibrated -- force the non-extrapolated path for this boundary-anchor call.
             chi_max = self.update(extrapolate_z=False).angular_diameter_distance(z_max) * (1.0 + z_max)
 
@@ -481,14 +614,18 @@ class Cosmology:
                 _, chi_traj = dopri5_integrate(dchi_dx, chi_max, x_max, jnp.log1p(z_target), rtol=1e-4, atol=1e-7, max_steps=16)
                 return chi_traj[-1]
 
-            DA = jnp.where(z_arr > z_max, jax.vmap(chi_at)(z_arr) / (1.0 + z_arr), DA)
+            chi_ext = jax.vmap(chi_at)(z_arr)
 
-        return self._enforce_bounds(self._squeeze_single(DA))
+            DA_analytic = chi_ext / (1.0 + z_arr)
+            DA_arr = jnp.where(z_arr > z_max, DA_analytic, jnp.atleast_1d(DA))
+            DA = DA_arr[0] if DA_arr.shape[0] == 1 else DA_arr
+
+        return self._enforce_bounds(DA)
 
     @jax.jit
     def sigma8(self, z):
         """
-        Get :math:`\\sigma_8(z)` at redshift :math:`z`, from the engine if it provides one, else from :meth:`sigma_r`.
+        Get :math:`\\sigma_8(z)` at redshift :math:`z` from the emulator.
 
         :math:`\\sigma_8(z)` is the dimensionless root-mean-square linear
         matter fluctuation amplitude in spheres of radius
@@ -505,10 +642,14 @@ class Cosmology:
             Dimensionless :math:`\\sigma_8` value(s)
         """
 
-        p = self._cosmo_params()
-        if hasattr(self.engine, "sigma8"):
-            return self._enforce_bounds(self._squeeze_single(self.engine.sigma8(jnp.atleast_1d(z), p)))
-        return self.sigma_r(8.0 / p["h"], z)
+
+        params = self._to_dict()
+        emu = self._load_emulator("S8Z")
+        preds = emu.predictions(params)
+        if self.emulator_set == "ede:v2":
+            # ede:v2's S8Z emulator was trained on log10(sigma8), unlike every other emulator
+            preds = 10.0 ** preds
+        return self._enforce_bounds(self._interp_z(z, self._z_grid_bg(), preds))
 
     @jax.jit
     def _cosmo_params(self):
@@ -518,7 +659,7 @@ class Cosmology:
         Returns
         -------
         dict
-            Dictionary containing the cosmological parameters and the following
+            Dictionary containing the emulator input parameters and the following
             derived quantities:
     
             - ``h``: Dimensionless Hubble parameter, :math:`h = H_0 / 100`
@@ -854,7 +995,7 @@ class Cosmology:
         
         z = jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
-        k_grid = self._pk_grid()
+        k_grid, _ = self._pk_grid()
         z_grid_pk = self._z_grid_pk()
 
         P_grid = self.pk(k_grid, z_grid_pk, linear=True).T
@@ -912,7 +1053,7 @@ class Cosmology:
         z : float or jnp.ndarray
             Redshift(s) at which to evaluate the power spectrum.
         linear : bool
-            True for linear :math:`P(k)`, False for nonlinear :math:`P(k)` (source set by the engine).
+            True for linear :math:`P(k)`, False for nonlinear :math:`P(k)` (source set by :attr:`pknl_mode`).
 
         Returns
         -------
@@ -929,8 +1070,25 @@ class Cosmology:
             growth_ratio_sq = jnp.where(in_z_bounds, 1.0, (self.growth_factor(z) / self.growth_factor(z_max)) ** 2)
             z = jnp.where(in_z_bounds, z, z_max)
 
-        k_grid = self._pk_grid()
-        pk_out = self.engine.pk(k, z, self._cosmo_params(), linear=linear)  # shape (Nk, Nz)
+        params_base = self._to_dict()
+        use_halofit = not linear and self.pknl_mode == "halofit"
+        emu = self._load_emulator("PKL" if linear or use_halofit else "PKNL")
+        k_grid, pk_power_fac = self._pk_grid()
+        cparams = self._cosmo_params()
+
+        # Predict on the emulator grid for each redshift, then interpolate
+        def predict_for_z(z_i):
+            params = dict(params_base)
+            params["z_pk_save_nonclass"] = z_i
+            pk_log = emu.predictions(params)
+            pk_vals = 10.0 ** pk_log * pk_power_fac
+            if use_halofit:
+                pk_vals = halofit(k_grid, pk_vals, self.omega_m(z_i), cparams['Omega0_m'], cparams['w0_fld'],
+                                  cparams['Omega0_ncdm'] / cparams['Omega0_m'], cparams['h'])
+            return log_interp1d_extrap(k, k_grid, pk_vals)
+
+        pk_for_z = jax.vmap(predict_for_z)(z)  # shape (Nz, Nk)
+        pk_out = jnp.transpose(pk_for_z)  # shape (Nk, Nz)
         if not self.extrapolate_k:
             in_k_bounds = (k >= k_grid[0]) & (k <= k_grid[-1])
             pk_out = jnp.where(in_k_bounds[:, None], pk_out, jnp.nan)
@@ -946,7 +1104,7 @@ class Cosmology:
 
     def cl_cmb(self, type, l):
         """
-        Evaluate the CMB power spectrum of the specified type at requested multipoles `l` using the engine.
+        Evaluate the CMB power spectrum of the specified type at requested multipoles `l` using the emulator.
         This method can be used to evaluate :math:`C_\\ell^{TT}`, :math:`C_\\ell^{EE}`, :math:`C_\\ell^{TE}`, and :math:`C_\\ell^{\\phi\\phi}` by passing the appropriate `type` argument.
 
         Parameters
@@ -965,13 +1123,41 @@ class Cosmology:
         if s not in ("TT", "EE", "TE", "PP"):
             raise ValueError(f"Unsupported spectrum type: {type}")
 
+        # Load the emulator here, outside of any jax.jit trace. Loading it lazily from inside
+        # the jitted numeric core below (as this used to do) mutates `self._emu` as a side
+        # effect *during* tracing, which JAX's leak-checker can non-deterministically flag as
+        # an escaping tracer the next time the jitted core is traced for a different type or
+        # `l` shape on this same instance.
+        self._load_emulator(s)
         return self._cl_jit(s, l)
 
     @partial(jax.jit, static_argnums=(1,))
     def _cl_jit(self, s, l):
-        cl_out = self.engine.cl_cmb(s, jnp.atleast_1d(l), self._cosmo_params())
+        params = self._to_dict()
+
+        if s == "TT":
+            preds = self._load_emulator("TT").ten_to_predictions(params)
+        elif s == "EE":
+            preds = self._load_emulator("EE").ten_to_predictions(params)
+        elif s == "TE":
+            preds = self._load_emulator("TE").predictions(params)
+        elif s == "PP":
+            preds = self._load_emulator("PP").ten_to_predictions(params)
+            preds = preds / (2 * jnp.pi)
+
+        ell = jnp.arange(2, len(preds) + 2)
+        l = jnp.atleast_1d(l)
+        cl_out = jnp.interp(l, ell, preds, left=jnp.nan, right=jnp.nan)
         return jnp.squeeze(self._enforce_bounds(cl_out))
 
+    # def cl_bb(self):
+    #     if self.emulator_set != "ede:v2": 
+    #         raise ValueError("This function is only implemented for EDE-v2 emulators.")
+    #     params = self._to_dict()
+    #     preds = self._load_emulator("BB").ten_to_predictions(params)
+    #     ell, n = self._get_ell_and_n(preds, lmax)
+    #     return ell, preds[:n]
+        
     # ------------------------------------------------------------------
     # Derived parameters
     # ------------------------------------------------------------------
@@ -979,7 +1165,7 @@ class Cosmology:
     @jax.jit
     def derived_parameters(self):
         """
-        Get derived cosmological parameters from the engine.
+        Get derived cosmological parameters from the emulator.
     
         Returns
         -------
@@ -1001,10 +1187,31 @@ class Cosmology:
             - 'chi_star' : Comoving distance to last scattering [Mpc]
             - 'rs_drag' : Comoving sound horizon at baryon drag [Mpc]
         """
-        p = self._cosmo_params()
-        out = self.engine.derived_parameters(p)
-        valid = self.engine.in_bounds(p)
+        params = self._to_dict()
+        emu = self._load_emulator("DER")
+        preds = emu.ten_to_predictions(params)
+
+        names = [  '100*theta_s',
+                   'sigma8',
+                   'YHe',
+                   'z_reio',
+                   'Neff',
+                   'tau_rec',  # conformal time at which the visibility reaches its maximum (= recombination time)
+                   'z_rec', # z at which the visibility reaches its maximum (= recombination redshift)
+                   'rs_rec', # comoving sound horizon at recombination in Mpc
+                   'chi_rec', # comoving distance to recombination in Mpc
+                   'tau_star', # conformal time at which photon optical depth crosses one
+                   'z_star', # redshift at which photon optical depth crosses one, i.e., last scattering surface
+                   'rs_star', # comoving sound horizon at z_star in Mpc
+                   'chi_star', # comoving distance to the last scattering surface in Mpc
+                   'rs_drag'] # comoving sound horizon at baryon drag in Mpc
+
+        
+        out = {n: preds[i] for i, n in enumerate(names) if i < len(preds)}
+
+        valid = self._emulator_params_in_bounds()
         return {name: jnp.where(valid, value, jnp.asarray(jnp.nan, dtype=jnp.asarray(value).dtype)) for name, value in out.items()}
+
 
 
 jax.tree_util.register_pytree_node(

@@ -3,7 +3,7 @@ Quickstart
 
 ``hmfast`` is organized around three main pieces:
 
-- ``Cosmology`` provides emulator-backed background and power-spectrum quantities.
+- ``Cosmology`` holds the cosmological parameters and an engine (emulators or analytic formulae) that computes background and power-spectrum quantities from them.
 - ``HaloModel`` combines the cosmology with halo ingredients such as the mass function, bias, concentration, and mass definition.
 - ``Tracer`` classes pair a kernel with a halo profile so you can build projected observables such as :math:`C_\ell`.
 
@@ -21,14 +21,14 @@ The snippet below shows three core tasks: reading the Hubble parameter, evaluati
 
    import jax
    import jax.numpy as jnp
-   from hmfast.cosmology import Cosmology
+   from hmfast.cosmology import Cosmology, EmulatorEngine
    from hmfast.halos import HaloModel
    from hmfast.halos.massdef import MassDefinition
    from hmfast.halos.massfunc import T08HaloMassFunction
    from hmfast.tracers import CMBLensingTracer, tSZTracer
    from hmfast.stats import Pk, cl
 
-   cosmo = Cosmology(emulator_set="lcdm:v1")
+   cosmo = Cosmology(EmulatorEngine("lcdm:v1"))
    cosmo = cosmo.update(H0=67.4)
    m_200c = MassDefinition(200, "critical")
    hmf_t08 = T08HaloMassFunction()

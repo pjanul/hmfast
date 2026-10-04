@@ -3,11 +3,13 @@ Custom extensions guide
 =======================
 
 This short guide points to the API pages for the parent classes that users
-can subclass to provide custom ingredients (tracers, profiles, and halo-model
-components).
+can subclass to provide custom ingredients (cosmology engines, tracers, profiles,
+and halo-model components).
 
 The following list shows some of the parent classes you can implement:
 
+- **Cosmology engine**: computes :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)`
+  for a ``Cosmology``: :doc:`/api/cosmology`.
 - **Tracer**: see the Tracer API documentation: :doc:`/api/tracers`.
 - **Halo profiles**: prefer one of the profile parent classes (examples
   include MatterProfile, CIBProfile, GalaxyHODProfile, PressureProfile,
@@ -195,4 +197,53 @@ gradient immediately after the class).
   print(g)
 
 See the API pages for full method signatures and optional behaviors.
+
+
+Cosmology engines
+-----------------
+
+A ``Cosmology`` holds the cosmological parameters; its engine computes
+:math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)` from them, and ``hmfast``
+derives everything else (growth, :math:`\sigma(M)`, halo model, statistics).
+Two engines are built in: ``EmulatorEngine`` calls the emulators (within their
+training ranges), and ``AnalyticEngine`` uses analytic formulae with the
+Eisenstein & Hu (1998) transfer function and halofit (for any parameter values)::
+
+  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine
+
+  cosmo_emu = Cosmology(EmulatorEngine("lcdm:v1"), H0=67.4)
+  cosmo_ana = Cosmology(AnalyticEngine(), H0=110.0, omega_cdm=0.30, w0=-0.7)
+
+For your own engine, subclass ``Engine`` and implement ``hubble_parameter(z, p)``
+and the linear branch of ``pk(k, z, p, linear=True)``, where ``p`` holds the
+cosmology's parameters and derived densities. :math:`D_A(z)` defaults to the
+integral of :math:`c/H`, and the nonlinear :math:`P(k, z)` to halofit on your
+linear spectrum. New parameters go in ``extra_params``; they are then set,
+read and updated on the ``Cosmology`` like any other parameter. The example
+below adds a running of the spectral index to the analytic engine::
+
+  import jax
+  import jax.numpy as jnp
+  from hmfast.cosmology import Cosmology, Engine, AnalyticEngine
+
+  class RunningEngine(Engine):
+    """Analytic LCDM with a running spectral index."""
+    extra_params = {"n_run": 0.0}
+    _analytic = AnalyticEngine()
+
+    def hubble_parameter(self, z, p):
+      return self._analytic.hubble_parameter(z, p)
+
+    def pk(self, k, z, p, linear=True):
+      if not linear:
+        return super().pk(k, z, p, linear=False)  # halofit
+      running = jnp.exp(0.5 * p["n_run"] * jnp.log(k / 0.05) ** 2)
+      return self._analytic.pk(k, z, p) * running[:, None]
+
+  engine = RunningEngine()
+  cosmo = Cosmology(engine, H0=67.4, n_run=-0.01)
+  g = jax.grad(lambda a: cosmo.update(n_run=a).sigma8(0.0))(-0.01)
+
+Engines are static under ``jit``, so create one and reuse it: a new instance
+per cosmology triggers recompilation.
 

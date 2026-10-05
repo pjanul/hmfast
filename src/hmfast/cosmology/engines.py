@@ -1,7 +1,8 @@
 """Engines: the source of the background and matter power spectrum behind a Cosmology."""
-import abc
+import dataclasses
 import os
 from types import MappingProxyType
+from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
@@ -12,279 +13,193 @@ from hmfast.download import _get_default_data_path
 from hmfast.utils import Const, log_interp1d_extrap
 
 _C_KMS = Const._c_ / 1e3
+_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(64)
 
 _LCDM_PARAMS = MappingProxyType({"H0": 68.0, "omega_cdm": 0.12, "omega_b": 0.02246576, "A_s": 2.1053e-9, "n_s": 0.965})
-_STANDARD_FIXED = MappingProxyType({"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255, "deg_ncdm": 1.0})
+
+_REQUIRED = ("hubble_parameter", "pk_linear", "densities")
+_OPTIONAL = ("pk_nonlinear", "angular_diameter_distance", "growth_factor", "sigma8", "cl_cmb",
+             "derived_parameters", "in_bounds")
+# Replacing a key field resets these to their defaults, so none is left computed from the old function.
+_DEPENDENTS = {
+    "hubble_parameter": ("angular_diameter_distance",),
+    "pk_linear": ("pk_nonlinear", "growth_factor", "sigma8"),
+}
 
 
-def _freeze(params, fixed):
-    """Read-only copies of an engine's ``params`` and ``fixed``, which must not share a name."""
-    both = params.keys() & fixed.keys()
-    if both:
-        raise TypeError(f"{', '.join(sorted(both))} cannot be both a parameter and fixed.")
-    return MappingProxyType(dict(params)), MappingProxyType(dict(fixed))
-
-
-class Engine(abc.ABC):
+@dataclasses.dataclass(frozen=True, eq=False)
+class Engine:
     """
-    Parent engine class from which cosmology engines inherit.
+    Source of the background and matter power spectrum behind a :class:`~hmfast.cosmology.Cosmology`.
 
-    An engine is what a :class:`~hmfast.cosmology.Cosmology` computes with. Each ``Cosmology`` method
-    listed below calls the engine method of the same name with a ``compute_`` prefix,
-    passing the same arguments plus ``p``. ``Cosmology`` then sets values outside
-    :meth:`in_bounds` to NaN and, if requested, extrapolates beyond :attr:`z_max_bg`,
-    :attr:`z_max_pk` and :attr:`k_grid`; everything else (growth, :math:`\\sigma(M)`,
-    halo model, statistics) is derived from these methods.
+    An engine is a set of functions of ``p``, a dict of the engine's :attr:`params` at the cosmology's
+    values. ``Cosmology`` jits, differentiates and vmaps through them, so each must be JAX-traceable
+    and read every parameter from ``p``; a value taken from an enclosing scope is a constant with zero gradient.
 
-    ================================  =========================================  ========
-    ``Cosmology`` method              ``Engine`` method                          Required
-    ================================  =========================================  ========
-    ``hubble_parameter(z)``           :meth:`compute_hubble_parameter`           yes
-    ``pk(k, z, linear)``              :meth:`compute_pk`                         yes
-    ``angular_diameter_distance(z)``  :meth:`compute_angular_diameter_distance`  no
-    ``sigma8(z)``                     :meth:`compute_sigma8`                     no
-    ``cl_cmb(type, l)``               :meth:`compute_cl_cmb`                     no
-    ``derived_parameters()``          :meth:`compute_derived_parameters`         no
-    ================================  =========================================  ========
+    Three functions are required. Each optional one left as None falls back to the default given
+    below, computed from the required ones of the same engine. On construction the required functions
+    are traced once, without being evaluated, so a parameter missing from ``params`` or a wrong
+    output shape raises a ``TypeError`` immediately.
 
-    :meth:`compute_densities` supplies the density parameters that all of these and ``Cosmology``
-    itself use, and :meth:`in_bounds` decides where ``Cosmology`` returns NaN.
-
-    Child classes must implement :meth:`compute_hubble_parameter` and :meth:`compute_pk`.
-
-    Every method receives ``p``, a dict holding the cosmology's :attr:`params`, the
-    engine's :attr:`fixed` values, ``h`` and the output of :meth:`compute_densities`.
-
-    Attributes
+    Parameters
     ----------
-    params : Mapping
-        Parameters the engine takes, with their defaults: the keywords of ``Cosmology``
-        and its differentiable leaves. Read-only.
-    fixed : Mapping
-        Values the engine assumes for anything not in ``params`` (by default ``m_ncdm``,
-        ``N_ur``, ``w0``, ``T_cmb``, ``deg_ncdm``). Read-only and never shares a name with
-        ``params``: a subclass that declares only one of the two removes its names from the inherited other.
-    k_grid : numpy.ndarray
-        Wavenumbers in :math:`\\mathrm{Mpc}^{-1}` on which ``Cosmology`` tabulates :math:`P(k)`
-        for :math:`\\sigma(M)` and FFTLog transforms; beyond them ``pk`` is NaN unless ``extrapolate_k``.
-    z_max_bg : float
-        Highest redshift of the background; ``Cosmology`` extrapolates :math:`H` and :math:`D_A` above it if ``extrapolate_z``.
-    z_max_pk : float
-        Highest redshift of :math:`P(k, z)`; ``Cosmology`` scales by the growth factor above it if ``extrapolate_z``.
+    params : dict
+        Parameter names and default values: the keywords of ``Cosmology`` and its differentiable leaves.
+    hubble_parameter : callable
+        ``(z, p) -> H(z)`` in :math:`\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}`, shape :math:`(N_z,)`.
+        If ``H0`` is not in ``params``, ``Cosmology`` takes :math:`H_0 = H(0)` from it.
+    pk_linear : callable
+        ``(k, z, p) -> P_L(k, z)`` of total matter (massive neutrinos included) in :math:`\\mathrm{Mpc}^3`,
+        shape :math:`(N_k, N_z)`, with ``k`` in :math:`\\mathrm{Mpc}^{-1}`.
+    densities : callable
+        ``p -> dict`` of ``Omega0_m`` (total matter), ``Omega0_cb`` (CDM + baryons) and ``Omega0_b`` today;
+        optionally ``Omega0_r`` (default 0) and ``w0`` (default -1), used by halofit and redshift extrapolation.
+        :func:`standard_densities` covers the usual case.
+    pk_nonlinear : callable, optional
+        ``(k, z, p) -> P_NL(k, z)``, as ``pk_linear``. Default: halofit (Takahashi et al. 2012; Bird et al. 2012) on ``pk_linear``.
+    angular_diameter_distance : callable, optional
+        ``(z, p) -> D_A(z)`` in Mpc. Default: integral of :math:`c/H` over :math:`\\ln(1+z)`, divided by :math:`1+z` (flat).
+    growth_factor : callable, optional
+        ``(z, p) -> D(z)`` with :math:`D(0) = 1`. Default: :math:`\\sqrt{P_L(k_0, z)/P_L(k_0, 0)}`, :math:`k_0 = 0.01\\,\\mathrm{Mpc}^{-1}`.
+    sigma8 : callable, optional
+        ``(z, p) -> sigma_8(z)``. Default: top-hat variance of ``pk_linear`` at :math:`R = 8\\,h^{-1}\\mathrm{Mpc}`.
+    cl_cmb : callable, optional
+        ``(type, l, p) -> C_l``, shape :math:`(N_\\ell,)`, type ∈ {"TT", "EE", "TE", "PP"} (static). Default: not available.
+    derived_parameters : callable, optional
+        ``p -> dict`` of scalars. CMB lensing reads ``z_star`` and ``chi_star``. Default: not available,
+        so CMB-lensing tracers need ``z_source``.
+    in_bounds : callable, optional
+        ``p -> bool`` (scalar); ``Cosmology`` returns NaN where False. Default: always True.
+    k_grid : array_like, optional
+        Wavenumbers in :math:`\\mathrm{Mpc}^{-1}` for :math:`\\sigma(M)` and FFTLog (static);
+        ``Cosmology.pk`` extrapolates beyond them if ``extrapolate_k``. Default: ``np.geomspace(1e-4, 50, 500)``.
+    z_max_bg : float, optional
+        Highest redshift of ``hubble_parameter`` and ``angular_diameter_distance``; NaN above unless ``extrapolate_z``. Default: inf.
+    z_max_pk : float, optional
+        Highest redshift of the power spectra and growth; NaN above unless ``extrapolate_z``. Default: inf.
+    name : str, optional
+        Label shown by ``repr``.
+
+    Examples
+    --------
+    >>> engine = Engine(
+    ...     params={"H0": 67.7, "Omega_m": 0.31, "Omega_b": 0.049},
+    ...     hubble_parameter=lambda z, p: p["H0"] * jnp.sqrt(p["Omega_m"] * (1 + z) ** 3 + 1 - p["Omega_m"]),
+    ...     pk_linear=my_pk,
+    ...     densities=lambda p: {"Omega0_m": p["Omega_m"], "Omega0_cb": p["Omega_m"], "Omega0_b": p["Omega_b"]},
+    ... )
+    >>> cosmo = Cosmology(engine, Omega_m=0.3)
+
+    Emulated background with an analytic linear spectrum, which needs two extra parameters:
+
+    >>> emu = EmulatorEngine("lcdm:v1")
+    >>> mixed = emu.replace(pk_linear=AnalyticEngine().pk_linear, params={**emu.params, "T_cmb": 2.7255, "w0": -1.0})
     """
-    params, fixed = _freeze(_LCDM_PARAMS, _STANDARD_FIXED)
-    k_grid = np.geomspace(1e-4, 50.0, 500)
-    z_max_bg = 20.0
-    z_max_pk = 10.0
+    params: dict
+    hubble_parameter: Callable
+    pk_linear: Callable
+    densities: Callable
+    pk_nonlinear: Optional[Callable] = None
+    angular_diameter_distance: Optional[Callable] = None
+    growth_factor: Optional[Callable] = None
+    sigma8: Optional[Callable] = None
+    cl_cmb: Optional[Callable] = None
+    derived_parameters: Optional[Callable] = None
+    in_bounds: Optional[Callable] = None
+    k_grid: np.ndarray = dataclasses.field(default_factory=lambda: np.geomspace(1e-4, 50.0, 500))
+    z_max_bg: float = np.inf
+    z_max_pk: float = np.inf
+    name: Optional[str] = None
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        own = vars(cls)
-        params, fixed = cls.params, cls.fixed
-        # The attribute declared in the subclass wins over the inherited one.
-        if "params" in own and "fixed" not in own:
-            fixed = {n: v for n, v in fixed.items() if n not in params}
-        elif "fixed" in own and "params" not in own:
-            params = {n: v for n, v in params.items() if n not in fixed}
-        cls.params, cls.fixed = _freeze(params, fixed)
+    # Built-in engines skip the trace check: their functions are known to fit the contract.
+    _check_on_init = True
 
-    @abc.abstractmethod
-    def compute_hubble_parameter(self, z, p):
+    def __post_init__(self):
+        for name in _REQUIRED:
+            if not callable(getattr(self, name)):
+                raise TypeError(f"Engine needs {name}, a callable; got {getattr(self, name)!r}.")
+        for name in _OPTIONAL:
+            value = getattr(self, name)
+            if value is not None and not callable(value):
+                raise TypeError(f"Engine {name} must be callable or None; got {value!r}.")
+        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+        object.__setattr__(self, "k_grid", np.asarray(self.k_grid, dtype=float))
+        object.__setattr__(self, "z_max_bg", float(self.z_max_bg))
+        object.__setattr__(self, "z_max_pk", float(self.z_max_pk))
+        if self._check_on_init:
+            self._check()
+
+    def _check(self):
+        """Trace the required functions once, so a missing parameter or a wrong shape fails here."""
+        p = {n: jnp.asarray(v, dtype=float) for n, v in self.params.items()}
+        z, k = jnp.zeros(3), jnp.asarray(self.k_grid[:4])
+        expected = {"hubble_parameter": ((z, p), (3,)), "pk_linear": ((k, z, p), (4, 3))}
+        if self.pk_nonlinear is not None:
+            expected["pk_nonlinear"] = ((k, z, p), (4, 3))
+        for name, (args, shape) in expected.items():
+            try:
+                out = jax.eval_shape(getattr(self, name), *args)
+            except KeyError as err:
+                raise TypeError(f"{name} reads parameter {err}, which is not in params ({', '.join(self.params)}).") from None
+            if out.shape != shape:
+                raise TypeError(f"{name} must return shape {shape} for these inputs, got {out.shape}.")
+        try:
+            d = jax.eval_shape(self.densities, p)
+        except KeyError as err:
+            raise TypeError(f"densities reads parameter {err}, which is not in params ({', '.join(self.params)}).") from None
+        missing = {"Omega0_m", "Omega0_cb", "Omega0_b"} - set(d)
+        if missing:
+            raise TypeError(f"densities must return {', '.join(sorted(missing))}.")
+
+    def replace(self, **changes):
         """
-        Hubble parameter, returned by :meth:`Cosmology.hubble_parameter <hmfast.cosmology.Cosmology.hubble_parameter>`. Required.
+        New engine with the given fields replaced.
+
+        Replacing ``pk_linear`` also resets ``pk_nonlinear``, ``growth_factor`` and ``sigma8``, and
+        replacing ``hubble_parameter`` resets ``angular_diameter_distance``, to their defaults unless
+        they are given too, so no output is left computed from the old function.
 
         Parameters
         ----------
-        z : jnp.ndarray
-            Redshifts, shape :math:`(N_z,)`.
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
+        **changes
+            Fields of :class:`Engine` and their new values; ``params`` is replaced whole, not merged.
 
         Returns
         -------
-        jnp.ndarray
-            :math:`H(z)` in :math:`\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}`, shape :math:`(N_z,)`.
+        Engine
         """
+        for key, dependents in _DEPENDENTS.items():
+            if key in changes:
+                for name in dependents:
+                    changes.setdefault(name, None)
+        fields = {f.name: getattr(self, f.name) for f in dataclasses.fields(Engine)}
+        unknown = changes.keys() - fields.keys()
+        if unknown:
+            raise TypeError(f"{', '.join(sorted(unknown))} is not a field of Engine.")
+        return Engine(**{**fields, **changes})
 
-    @abc.abstractmethod
-    def compute_pk(self, k, z, p, linear=True):
-        """
-        Total-matter power spectrum, returned by :meth:`Cosmology.pk <hmfast.cosmology.Cosmology.pk>`. Required.
+    def _call(self, name, *args):
+        """Call an optional function, or its default if it is None."""
+        f = getattr(self, name)
+        if f is not None:
+            return f(*args)
+        if name in _DEFAULTS:
+            return _DEFAULTS[name](self, *args)
+        raise NotImplementedError(f"{self!r} provides no {name}.")
 
-        The linear spectrum must be implemented. Calling ``super().compute_pk(k, z, p, linear=False)``
-        returns halofit (Takahashi et al. 2012, with the Bird et al. 2012 neutrino correction)
-        applied to it, which is the nonlinear spectrum unless the child class provides its own.
-
-        Parameters
-        ----------
-        k : jnp.ndarray
-            Wavenumbers in :math:`\\mathrm{Mpc}^{-1}`, shape :math:`(N_k,)`.
-        z : jnp.ndarray
-            Redshifts, shape :math:`(N_z,)`.
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-        linear : bool
-            Linear or nonlinear :math:`P(k, z)` (static).
-
-        Returns
-        -------
-        jnp.ndarray
-            :math:`P(k, z)` in :math:`\\mathrm{Mpc}^3`, shape :math:`(N_k, N_z)`.
-        """
-        if linear:
-            raise NotImplementedError
-        k_grid = jnp.asarray(self.k_grid)
-        f_nu = p["Omega0_ncdm"] / p["Omega0_m"]
-
-        def one_z(z_i):
-            omega_m_z = p["Omega0_m"] * (1.0 + z_i) ** 3 * (p["H0"] / self.compute_hubble_parameter(z_i, p)) ** 2
-            pk_lin = self.compute_pk(k_grid, jnp.atleast_1d(z_i), p)[:, 0]
-            pk_nl = halofit(k_grid, pk_lin, omega_m_z, p["Omega0_m"], p["w0"], f_nu, p["h"])
-            return log_interp1d_extrap(k, k_grid, pk_nl)
-
-        return jax.vmap(one_z, out_axes=1)(z)
-
-    def compute_angular_diameter_distance(self, z, p):
-        """
-        Angular diameter distance, returned by
-        :meth:`Cosmology.angular_diameter_distance <hmfast.cosmology.Cosmology.angular_diameter_distance>`.
-
-        By default, the trapezoidal integral of :math:`c/H(z)` on 5000 points up to
-        :attr:`z_max_bg`, divided by :math:`1+z` (flat universe).
-
-        Parameters
-        ----------
-        z : jnp.ndarray
-            Redshifts, shape :math:`(N_z,)`.
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-
-        Returns
-        -------
-        jnp.ndarray
-            :math:`D_A(z)` in :math:`\\mathrm{Mpc}`, shape :math:`(N_z,)`.
-        """
-        z_grid = jnp.linspace(0.0, self.z_max_bg, 5000)
-        integrand = _C_KMS / self.compute_hubble_parameter(z_grid, p)
-        chi = jnp.concatenate([jnp.zeros(1), jnp.cumsum(0.5 * (integrand[1:] + integrand[:-1]) * jnp.diff(z_grid))])
-        return jnp.interp(z, z_grid, chi, right=jnp.nan) / (1.0 + z)
-
-    def compute_densities(self, p):
-        """
-        Present-day density parameters, which ``Cosmology`` adds to ``p`` before calling any other
-        engine method and uses itself for :math:`\\rho_{\\rm crit}`, :math:`\\Omega_m(z)`, growth and :math:`M(R)`.
-
-        By default, a flat universe with photons at ``T_cmb``, ``N_ur`` massless neutrinos and
-        ``deg_ncdm`` massive states of mass ``m_ncdm`` (:math:`\\Omega_\\nu h^2 = m/93.14\\,\\mathrm{eV}`),
-        with dark energy closing the budget.
-
-        Parameters
-        ----------
-        p : dict
-            The cosmology's :attr:`params`, the engine's :attr:`fixed` values and ``h``.
-
-        Returns
-        -------
-        dict
-            ``Omega_b``, ``Omega_cdm``, ``Omega0_g``, ``Omega0_ur``, ``Omega0_ncdm``, ``Omega0_cb``,
-            ``Omega0_m``, ``Omega0_r`` and ``Omega_Lambda``, all at :math:`z = 0`.
-        """
-        c, G, sigma_B, Mpc_over_m = Const._c_, Const._G_, Const._sigma_B_, Const._Mpc_over_m_
-        h = p["h"]
-        d = {"Omega_b": p["omega_b"] / h**2, "Omega_cdm": p["omega_cdm"] / h**2}
-        d["Omega0_g"] = (4.0 * sigma_B / c * p["T_cmb"] ** 4) / (3.0 * c**2 * 1e10 * h**2 / Mpc_over_m**2 / 8.0 / jnp.pi / G)
-        d["Omega0_ur"] = p["N_ur"] * 7.0 / 8.0 * (4.0 / 11.0) ** (4.0 / 3.0) * d["Omega0_g"]
-        d["Omega0_ncdm"] = p["deg_ncdm"] * p["m_ncdm"] / (93.14 * h**2)
-        d["Omega0_cb"] = d["Omega_b"] + d["Omega_cdm"]
-        d["Omega0_m"] = d["Omega0_cb"] + d["Omega0_ncdm"]
-        d["Omega0_r"] = d["Omega0_g"] + d["Omega0_ur"]
-        d["Omega_Lambda"] = 1.0 - d["Omega0_m"] - d["Omega0_r"]
+    def _densities(self, p):
+        d = dict(self.densities(p))
+        d.setdefault("Omega0_r", 0.0)
+        d.setdefault("w0", -1.0)
         return d
 
-    def compute_sigma8(self, z, p):
-        """
-        :math:`\\sigma_8(z)`, returned by :meth:`Cosmology.sigma8 <hmfast.cosmology.Cosmology.sigma8>`.
+    def _H0(self, p):
+        return p["H0"] if "H0" in self.params else self.hubble_parameter(jnp.zeros(1), p)[0]
 
-        By default, None, in which case ``Cosmology`` integrates the linear :meth:`compute_pk`
-        with a top-hat window of radius :math:`8\\,h^{-1}\\mathrm{Mpc}`.
-
-        Parameters
-        ----------
-        z : jnp.ndarray
-            Redshifts, shape :math:`(N_z,)`.
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-
-        Returns
-        -------
-        jnp.ndarray or None
-            :math:`\\sigma_8(z)`, shape :math:`(N_z,)`, or None.
-        """
-        return None
-
-    def compute_cl_cmb(self, type, l, p):
-        """
-        CMB power spectrum, returned by :meth:`Cosmology.cl_cmb <hmfast.cosmology.Cosmology.cl_cmb>`.
-
-        By default, not provided (raises ``NotImplementedError``).
-
-        Parameters
-        ----------
-        type : str
-            Spectrum, one of "TT", "EE", "TE", "PP" (static).
-        l : jnp.ndarray
-            Multipoles, shape :math:`(N_\\ell,)`.
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-
-        Returns
-        -------
-        jnp.ndarray
-            :math:`C_\\ell`, shape :math:`(N_\\ell,)`.
-        """
-        raise NotImplementedError(f"{self!r} provides no CMB spectra.")
-
-    def compute_derived_parameters(self, p):
-        """
-        Derived parameters, returned by :meth:`Cosmology.derived_parameters <hmfast.cosmology.Cosmology.derived_parameters>`.
-
-        By default, not provided (raises ``NotImplementedError``); CMB-lensing tracers then need
-        an explicit ``z_source``, since they read ``z_star`` and ``chi_star`` from here.
-
-        Parameters
-        ----------
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-
-        Returns
-        -------
-        dict
-            Scalars by name, e.g. ``z_star`` and ``chi_star`` (comoving distance in :math:`\\mathrm{Mpc}`).
-        """
-        raise NotImplementedError(f"{self!r} provides no derived parameters; give CMB-lensing tracers a z_source.")
-
-    def in_bounds(self, p):
-        """
-        Whether the cosmology lies in the engine's valid domain; ``Cosmology`` returns NaN from every
-        engine-based method where it does not.
-
-        By default, always True.
-
-        Parameters
-        ----------
-        p : dict
-            Parameters, fixed values and densities of the cosmology (see :class:`Engine`).
-
-        Returns
-        -------
-        bool or jnp.ndarray
-            Scalar boolean.
-        """
-        return True
-
-    # Engines that compare equal share jit caches; override _key with the settings that change the output.
+    # Engines that compare equal share jit caches, so the key holds everything that changes the output.
     def _key(self):
-        return id(self)
+        return (tuple(self.params.items()), *(getattr(self, n) for n in _REQUIRED + _OPTIONAL),
+                self.k_grid.tobytes(), self.z_max_bg, self.z_max_pk)
 
     def __eq__(self, other):
         return type(other) is type(self) and other._key() == self._key()
@@ -293,17 +208,99 @@ class Engine(abc.ABC):
         return hash((type(self), self._key()))
 
     def __repr__(self):
-        return f"{type(self).__name__}()"
+        return f"{type(self).__name__}({self.name!r})" if self.name else f"{type(self).__name__}()"
 
     def __str__(self):
-        fmt = lambda d: ", ".join(f"{k}={v:.6g}" for k, v in d.items())
-        return f"{self!r}\n  free : {fmt(self.params)}\n  fixed: {fmt(self.fixed)}"
+        provides = [n for n in _REQUIRED + _OPTIONAL if getattr(self, n) is not None]
+        params = ", ".join(f"{k}={v:.6g}" for k, v in self.params.items())
+        return f"{self!r}\n  params  : {params}\n  provides: {', '.join(provides)}"
+
+
+# ----------------------------------------------------------------------
+# Defaults for the optional functions
+# ----------------------------------------------------------------------
+
+def _default_angular_diameter_distance(engine, z, p):
+    z = jnp.asarray(z)
+    x_max = jnp.log1p(z)[..., None]
+    zp1 = jnp.exp(0.5 * x_max * (_GL_NODES + 1.0))
+    integrand = _C_KMS * zp1 / engine.hubble_parameter((zp1 - 1.0).ravel(), p).reshape(zp1.shape)
+    return 0.5 * x_max[..., 0] * jnp.sum(_GL_WEIGHTS * integrand, axis=-1) / (1.0 + z)
+
+
+def _default_pk_nonlinear(engine, k, z, p):
+    d = engine._densities(p)
+    k_grid = jnp.asarray(engine.k_grid)
+    H0 = engine._H0(p)
+    f_nu = 1.0 - d["Omega0_cb"] / d["Omega0_m"]
+
+    def one_z(z_i):
+        z_i = jnp.atleast_1d(z_i)
+        omega_m_z = d["Omega0_m"] * (1.0 + z_i[0]) ** 3 * (H0 / engine.hubble_parameter(z_i, p)[0]) ** 2
+        pk_lin = engine.pk_linear(k_grid, z_i, p)[:, 0]
+        pk_nl = halofit(k_grid, pk_lin, omega_m_z, d["Omega0_m"], d["w0"], f_nu, H0 / 100.0)
+        return log_interp1d_extrap(k, k_grid, pk_nl)
+
+    return jax.vmap(one_z, out_axes=1)(z)
+
+
+def _default_growth_factor(engine, z, p, k0=1e-2):
+    k = jnp.array([k0])
+    return jnp.sqrt(engine.pk_linear(k, z, p)[0] / engine.pk_linear(k, jnp.zeros(1), p)[0, 0])
+
+
+_DEFAULTS = {
+    "pk_nonlinear": _default_pk_nonlinear,
+    "angular_diameter_distance": _default_angular_diameter_distance,
+    "growth_factor": _default_growth_factor,
+    "in_bounds": lambda engine, p: True,
+}
+
+
+def standard_densities(p, *, m_ncdm=0.06, deg_ncdm=1.0, N_ur=3.046, T_cmb=2.7255, w0=-1.0):
+    """
+    Densities of a flat universe for :attr:`Engine.densities`, from ``H0``, ``omega_b`` and ``omega_cdm`` in ``p``.
+
+    Photons at ``T_cmb``, ``N_ur`` massless neutrinos and ``deg_ncdm`` massive states of ``m_ncdm`` each
+    (:math:`\\Omega_\\nu h^2 = m/93.14\\,\\mathrm{eV}`); dark energy closes the budget. A keyword that
+    is also a key of ``p`` is read from ``p``, so engines that vary it need no special case.
+
+    Parameters
+    ----------
+    p : dict
+        Engine parameters, containing at least ``H0``, ``omega_b`` and ``omega_cdm``.
+    m_ncdm : float
+        Mass per massive neutrino state in eV.
+    deg_ncdm : float
+        Number of degenerate massive states.
+    N_ur : float
+        Number of massless neutrino species.
+    T_cmb : float
+        CMB temperature today in K.
+    w0 : float
+        Dark-energy equation of state.
+
+    Returns
+    -------
+    dict
+        ``Omega0_m``, ``Omega0_cb``, ``Omega0_b``, ``Omega0_r`` and ``w0``.
+    """
+    c = {"m_ncdm": m_ncdm, "deg_ncdm": deg_ncdm, "N_ur": N_ur, "T_cmb": T_cmb, "w0": w0}
+    c.update({n: p[n] for n in c if n in p})
+    G, sigma_B, Mpc_over_m = Const._G_, Const._sigma_B_, Const._Mpc_over_m_
+    h = p["H0"] / 100.0
+    omega_g = (4.0 * sigma_B / Const._c_ * c["T_cmb"] ** 4) / (3.0 * Const._c_**2 * 1e10 * h**2 / Mpc_over_m**2 / 8.0 / jnp.pi / G)
+    omega_ur = c["N_ur"] * 7.0 / 8.0 * (4.0 / 11.0) ** (4.0 / 3.0) * omega_g
+    cb = (p["omega_b"] + p["omega_cdm"]) / h**2
+    return {"Omega0_m": cb + c["deg_ncdm"] * c["m_ncdm"] / (93.14 * h**2), "Omega0_cb": cb,
+            "Omega0_b": p["omega_b"] / h**2, "Omega0_r": omega_g + omega_ur, "w0": c["w0"]}
 
 
 # ----------------------------------------------------------------------
 # Emulator engine
 # ----------------------------------------------------------------------
 
+_STANDARD_CONSTANTS = MappingProxyType({"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255, "deg_ncdm": 1.0})
 _EXTENSION_DEFAULTS = {"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278,
                        "theta_i": 1.57, "r": 0.01}
 _EDE = ("m_ncdm", "N_ur", "f_ede", "z_c", "theta_i", "r")
@@ -344,42 +341,87 @@ _DERIVED_NAMES = ("100*theta_s", "sigma8", "YHe", "z_reio", "Neff", "tau_rec", "
                   "tau_star", "z_star", "rs_star", "chi_star", "rs_drag")
 
 _WEIGHTS = {}  # (set name, key) -> loader, shared by every EmulatorEngine
+_Z_BG = np.linspace(0.0, 20.0, 5000)  # redshifts of the emulated background
 
 
 class EmulatorEngine(Engine):
     """
-    Engine that calls the neural-network emulators of CLASS for the background, power spectra,
-    CMB spectra and derived parameters. Outputs are NaN outside the emulators' training ranges.
+    Engine from the neural-network emulators of CLASS: background, linear and nonlinear power spectra,
+    :math:`\\sigma_8(z)`, CMB spectra and derived parameters. Outputs are NaN outside the training ranges.
+
+    Every set takes ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s`` and ``tau``, plus:
+
+    ==================  ===============================================  ==================  ==============
+    Set                 Extra parameters                                 Massive states      ``z_max_pk``
+    ==================  ===============================================  ==================  ==============
+    ``lcdm:v1``         --                                               1 (0.06 eV)         5
+    ``mnu:v1``          ``m_ncdm``                                       1                   5
+    ``mnu-3states:v1``  ``m_ncdm`` (per state)                           3                   5
+    ``neff:v1``         ``N_ur``                                         1 (0.06 eV)         5
+    ``wcdm:v1``         ``w0``                                           1 (0.06 eV)         5
+    ``ede:v1``          ``m_ncdm``, ``N_ur``, ``f_ede``, ``z_c``,        3                   5
+                        ``theta_i``, ``r``
+    ``ede:v2``          as ``ede:v1``                                    3                   20
+    ==================  ===============================================  ==================  ==============
+
+    Constants a set does not take are :math:`m_\\nu = 0.06` eV, :math:`N_{\\rm ur} = 3.046`, :math:`w_0 = -1`
+    and :math:`T_{\\rm cmb} = 2.7255` K. The background is valid to :math:`z = 20` for every set, and
+    ``print(engine)`` lists a set's parameters, defaults and constants.
 
     Parameters
     ----------
     name : str
-        Emulator set: ``"lcdm:v1"``, ``"mnu:v1"``, ``"neff:v1"``, ``"wcdm:v1"``, ``"ede:v1"``,
-        ``"mnu-3states:v1"`` or ``"ede:v2"``. ``print(engine)`` lists its free and fixed parameters.
+        Emulator set, one of the table above.
     pknl_mode : {"hmcode", "halofit"}
-        Nonlinear P(k) from the HMcode emulator, or halofit on the emulated linear P(k).
+        Nonlinear :math:`P(k)` from the HMcode emulator, or halofit on the emulated linear :math:`P(k)`.
+
+    Attributes
+    ----------
+    k_grid : numpy.ndarray
+        The emulators' output wavenumbers: 500 points in :math:`[10^{-4}, 50]\\,\\mathrm{Mpc}^{-1}` (v1 sets)
+        or 1000 in :math:`[5 \\times 10^{-4}, 10]\\,\\mathrm{Mpc}^{-1}` (``ede:v2``).
+
+    Examples
+    --------
+    >>> cosmo = Cosmology(EmulatorEngine("ede:v2"), f_ede=0.08)
     """
+    _check_on_init = False
 
     def __init__(self, name="lcdm:v1", pknl_mode="hmcode"):
         if name not in _EMULATOR_SETS:
             raise ValueError(f"Unknown emulator set {name!r}. Allowed: {', '.join(_EMULATOR_SETS)}.")
         if pknl_mode not in ("hmcode", "halofit"):
             raise ValueError(f'pknl_mode must be "hmcode" or "halofit", got {pknl_mode!r}.')
-        self.name, self.pknl_mode = name, pknl_mode
-        self._spec = spec = _EMULATOR_SETS[name]
+        spec = _EMULATOR_SETS[name]
         params = {**_LCDM_PARAMS, "tau": 0.0544, **{n: _EXTENSION_DEFAULTS[n] for n in spec["free"]}}
-        fixed = {n: v for n, v in {**_STANDARD_FIXED, "deg_ncdm": spec["deg_ncdm"]}.items() if n not in params}
-        self.params, self.fixed = _freeze(params, fixed)
-
-        self.z_max_pk = spec["z_max_pk"]
-        self._z_bg = jnp.linspace(0.0, self.z_max_bg, 5000)
+        constants = {n: v for n, v in {**_STANDARD_CONSTANTS, "deg_ncdm": spec["deg_ncdm"]}.items() if n not in params}
         if spec["grid"] == "v2":
-            self.k_grid = np.geomspace(5e-4, 10.0, 1000)
-            self._pk_fac = self.k_grid ** -3
+            k_grid = np.geomspace(5e-4, 10.0, 1000)
+            pk_fac = k_grid ** -3
         else:
-            self.k_grid = np.geomspace(1e-4, 50.0, 5000)[::10]
+            k_grid = np.geomspace(1e-4, 50.0, 5000)[::10]
             ell = np.arange(2, 5002)[::10]
-            self._pk_fac = (ell * (ell + 1.0) / (2.0 * np.pi)) ** -1
+            pk_fac = (ell * (ell + 1.0) / (2.0 * np.pi)) ** -1
+        for attr, value in (("pknl_mode", pknl_mode), ("constants", MappingProxyType(constants)),
+                            ("_spec", spec), ("_pk_fac", pk_fac)):
+            object.__setattr__(self, attr, value)
+
+        super().__init__(
+            params=params,
+            hubble_parameter=self._hubble_parameter,
+            pk_linear=self._pk_linear,
+            densities=self._densities_of_set,
+            pk_nonlinear=self._pk_nonlinear if pknl_mode == "hmcode" else None,
+            angular_diameter_distance=self._angular_diameter_distance,
+            sigma8=self._sigma8,
+            cl_cmb=self._cl_cmb,
+            derived_parameters=self._derived_parameters,
+            in_bounds=self._in_bounds,
+            k_grid=k_grid,
+            z_max_bg=float(_Z_BG[-1]),
+            z_max_pk=spec["z_max_pk"],
+            name=name,
+        )
 
         if os.environ.get("READTHEDOCS") != "True":
             for key in ("HZ", "DAZ", "S8Z", "PKL", "PKNL", "DER"):
@@ -390,6 +432,9 @@ class EmulatorEngine(Engine):
 
     def __repr__(self):
         return f"EmulatorEngine({self.name!r}, pknl_mode={self.pknl_mode!r})"
+
+    def __str__(self):
+        return f"{super().__str__()}\n  constants: {', '.join(f'{k}={v:.6g}' for k, v in self.constants.items())}"
 
     def _emu(self, key):
         if (self.name, key) not in _WEIGHTS:
@@ -405,24 +450,24 @@ class EmulatorEngine(Engine):
         """Translate hmfast parameter names to the emulators' input names."""
         return {emu: (f(p[name]) if f else p[name]) for name, (emu, f) in _INPUTS.items() if name in p}
 
-    def compute_hubble_parameter(self, z, p):
-        """Emulated :math:`H(z)`; see :meth:`Engine.compute_hubble_parameter`."""
-        hz = 10.0 ** self._emu("HZ").predictions(self._inputs(p)) * _C_KMS
-        return jnp.interp(z, self._z_bg, hz, left=jnp.nan, right=jnp.nan)
+    def _densities_of_set(self, p):
+        return standard_densities(p, **self.constants)
 
-    def compute_angular_diameter_distance(self, z, p):
-        """Emulated :math:`D_A(z)`; see :meth:`Engine.compute_angular_diameter_distance`."""
+    def _hubble_parameter(self, z, p):
+        hz = 10.0 ** self._emu("HZ").predictions(self._inputs(p)) * _C_KMS
+        return jnp.interp(z, _Z_BG, hz, left=jnp.nan, right=jnp.nan)
+
+    def _angular_diameter_distance(self, z, p):
         da = self._emu("DAZ").predictions(self._inputs(p))
         if self._spec["log_bg"]:
             da = jnp.insert(10.0 ** da, 0, 0.0)
-        return jnp.interp(z, self._z_bg, da, left=jnp.nan, right=jnp.nan)
+        return jnp.interp(z, _Z_BG, da, left=jnp.nan, right=jnp.nan)
 
-    def compute_sigma8(self, z, p):
-        """Emulated :math:`\\sigma_8(z)`; see :meth:`Engine.compute_sigma8`."""
+    def _sigma8(self, z, p):
         s8 = self._emu("S8Z").predictions(self._inputs(p))
         if self._spec["log_bg"]:
             s8 = 10.0 ** s8
-        return jnp.interp(z, self._z_bg, s8, left=jnp.nan, right=jnp.nan)
+        return jnp.interp(z, _Z_BG, s8, left=jnp.nan, right=jnp.nan)
 
     def _power(self, key, k, z, p):
         inputs = self._inputs(p)
@@ -433,18 +478,16 @@ class EmulatorEngine(Engine):
 
         return jax.vmap(one_z, out_axes=1)(z)
 
-    def compute_pk(self, k, z, p, linear=True):
-        """Emulated linear :math:`P(k, z)`, nonlinear from the HMcode emulator or halofit per :attr:`pknl_mode`; see :meth:`Engine.compute_pk`."""
-        if not linear and self.pknl_mode == "halofit":
-            return super().compute_pk(k, z, p, linear=False)
-        return self._power("PKL" if linear else "PKNL", k, z, p)
+    def _pk_linear(self, k, z, p):
+        return self._power("PKL", k, z, p)
 
-    def compute_derived_parameters(self, p):
-        """Emulated derived parameters (``100*theta_s``, ``sigma8``, ``z_star``, ``chi_star``, ``rs_drag``, ...); see :meth:`Engine.compute_derived_parameters`."""
+    def _pk_nonlinear(self, k, z, p):
+        return self._power("PKNL", k, z, p)
+
+    def _derived_parameters(self, p):
         return dict(zip(_DERIVED_NAMES, self._emu("DER").ten_to_predictions(self._inputs(p))))
 
-    def compute_cl_cmb(self, type, l, p):
-        """Emulated CMB :math:`C_\\ell`; see :meth:`Engine.compute_cl_cmb`."""
+    def _cl_cmb(self, type, l, p):
         inputs = self._inputs(p)
         cl = self._emu(type).predictions(inputs) if type == "TE" else self._emu(type).ten_to_predictions(inputs)
         if type == "PP":
@@ -452,8 +495,7 @@ class EmulatorEngine(Engine):
         ell = jnp.arange(2, cl.shape[0] + 2)
         return jnp.interp(l, ell, cl, left=jnp.nan, right=jnp.nan)
 
-    def in_bounds(self, p):
-        """Whether the parameters the set takes lie inside its training ranges; see :meth:`Engine.in_bounds`."""
+    def _in_bounds(self, p):
         bounds = {**_BOUNDS, "n_s": self._spec["n_s"]}
         valid = True
         for name in self.params:
@@ -544,9 +586,6 @@ def halofit(k, pk_lin, omega_m, omega_m0, w0, f_nu, h):
 # Analytic engine
 # ----------------------------------------------------------------------
 
-_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(64)
-
-
 def eisenstein_hu(k, omega_cb, omega_b, T_cmb):
     """
     Eisenstein & Hu (1998) matter transfer function with baryon acoustic oscillations.
@@ -610,67 +649,75 @@ def eisenstein_hu(k, omega_cb, omega_b, T_cmb):
     return f_b * T_b + f_c * T_c
 
 
+_ANALYTIC_PARAMS = MappingProxyType({**_LCDM_PARAMS, "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255})
+
+
+def _analytic_hubble_parameter(z, p):
+    d = standard_densities(p)
+    zp1 = 1.0 + z
+    omega_de = 1.0 - d["Omega0_m"] - d["Omega0_r"]
+    return p["H0"] * jnp.sqrt(d["Omega0_r"] * zp1**4 + d["Omega0_m"] * zp1**3 + omega_de * zp1 ** (3.0 * (1.0 + p["w0"])))
+
+
+def _analytic_growth(z, om, w, n_steps=400):
+    """Linear growth normalised to :math:`D = a` in matter domination, from RK4 in :math:`\\ln a`."""
+    x = jnp.linspace(jnp.log(1e-3), 0.0, n_steps)
+    dx = x[1] - x[0]
+
+    # Radiation is left out, so D = a holds exactly at the starting point.
+    def rhs(xx, y):
+        a = jnp.exp(xx)
+        m, de = om * a**-3, (1.0 - om) * a ** (-3.0 * (1.0 + w))
+        dlnh = -1.5 * (m + (1.0 + w) * de) / (m + de)
+        return jnp.array([y[1], -(2.0 + dlnh) * y[1] + 1.5 * m / (m + de) * y[0]])
+
+    def step(y, xx):
+        k1 = rhs(xx, y)
+        k2 = rhs(xx + 0.5 * dx, y + 0.5 * dx * k1)
+        k3 = rhs(xx + 0.5 * dx, y + 0.5 * dx * k2)
+        k4 = rhs(xx + dx, y + dx * k3)
+        y = y + dx / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        return y, y[0]
+
+    y0 = jnp.array([1e-3, 1e-3])
+    _, D = jax.lax.scan(step, y0, x[:-1])
+    return jnp.interp(-jnp.log1p(z), x, jnp.concatenate([y0[:1], D]))
+
+
+def _analytic_pk_linear(k, z, p):
+    om = standard_densities(p)["Omega0_m"]
+    T = eisenstein_hu(k, p["omega_cdm"] + p["omega_b"], p["omega_b"], p["T_cmb"])
+    delta2 = 0.16 * p["A_s"] * (k / 0.05) ** (p["n_s"] - 1.0) * (k * _C_KMS / p["H0"]) ** 4 * T**2
+    D = _analytic_growth(z, om, p["w0"]) / om
+    return (2.0 * jnp.pi**2 / k**3 * delta2)[:, None] * D[None, :] ** 2
+
+
 class AnalyticEngine(Engine):
     """
-    Engine that computes a flat :math:`w_0\\mathrm{CDM}` cosmology from analytic formulae, for any parameter values.
+    Engine for a flat :math:`w_0\\mathrm{CDM}` cosmology from analytic formulae, valid for any
+    parameter values and redshift.
 
-    :math:`H(z)` comes from the Friedmann equation (massive neutrinos counted as matter) and
-    :math:`D_A(z)` from its integral. The linear :math:`P(k, z)` uses the Eisenstein & Hu (1998)
-    transfer function without massive-neutrino suppression, and the nonlinear one is halofit.
-    There are no CMB spectra or derived parameters, so CMB-lensing tracers need ``z_source``.
+    :math:`H(z)` is the Friedmann equation with photons, ``N_ur`` massless neutrinos, massive neutrinos
+    counted as matter, and constant-:math:`w_0` dark energy. The linear :math:`P(k, z)` is
+    :math:`A_s` and :math:`n_s` times the Eisenstein & Hu (1998) transfer function and the linear
+    growth factor, without massive-neutrino suppression; the nonlinear one is halofit. There are no
+    CMB spectra or derived parameters, so CMB-lensing tracers need ``z_source``.
+
+    Its parameters are ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s``, ``m_ncdm`` (one state),
+    ``N_ur``, ``w0`` and ``T_cmb``.
+
+    Examples
+    --------
+    >>> cosmo = Cosmology(AnalyticEngine(), w0=-0.9)
     """
-    params = {**_LCDM_PARAMS, "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255}
+    _check_on_init = False
 
-    def _key(self):
-        return ()
+    def __init__(self):
+        super().__init__(params=_ANALYTIC_PARAMS, hubble_parameter=_analytic_hubble_parameter,
+                         pk_linear=_analytic_pk_linear, densities=standard_densities)
 
-    def compute_hubble_parameter(self, z, p):
-        """:math:`H(z)` from the Friedmann equation with radiation, matter and constant-:math:`w_0` dark energy; see :meth:`Engine.compute_hubble_parameter`."""
-        zp1 = 1.0 + z
-        return p["H0"] * jnp.sqrt(p["Omega0_r"] * zp1**4 + p["Omega0_m"] * zp1**3
-                                  + p["Omega_Lambda"] * zp1 ** (3.0 * (1.0 + p["w0"])))
-
-    def compute_angular_diameter_distance(self, z, p):
-        """:math:`D_A(z)` by 64-point Gauss-Legendre quadrature of :math:`c/H` in :math:`\\ln(1+z)`; see :meth:`Engine.compute_angular_diameter_distance`."""
-        z = jnp.asarray(z)
-        x_max = jnp.log1p(z)[..., None]
-        zp1 = jnp.exp(0.5 * x_max * (_GL_NODES + 1.0))
-        chi = 0.5 * x_max[..., 0] * jnp.sum(_GL_WEIGHTS * _C_KMS * zp1 / self.compute_hubble_parameter(zp1 - 1.0, p), axis=-1)
-        return chi / (1.0 + z)
-
-    def _growth(self, z, p, n_steps=400):
-        """Linear growth normalised to :math:`D = a` in matter domination, from RK4 in :math:`\\ln a`."""
-        om, w = p["Omega0_m"], p["w0"]
-        x = jnp.linspace(jnp.log(1e-3), 0.0, n_steps)
-        dx = x[1] - x[0]
-
-        # Radiation is left out, so D = a holds exactly at the starting point.
-        def rhs(xx, y):
-            a = jnp.exp(xx)
-            m, de = om * a**-3, (1.0 - om) * a ** (-3.0 * (1.0 + w))
-            dlnh = -1.5 * (m + (1.0 + w) * de) / (m + de)
-            return jnp.array([y[1], -(2.0 + dlnh) * y[1] + 1.5 * m / (m + de) * y[0]])
-
-        def step(y, xx):
-            k1 = rhs(xx, y)
-            k2 = rhs(xx + 0.5 * dx, y + 0.5 * dx * k1)
-            k3 = rhs(xx + 0.5 * dx, y + 0.5 * dx * k2)
-            k4 = rhs(xx + dx, y + dx * k3)
-            y = y + dx / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-            return y, y[0]
-
-        y0 = jnp.array([1e-3, 1e-3])
-        _, D = jax.lax.scan(step, y0, x[:-1])
-        return jnp.interp(-jnp.log1p(z), x, jnp.concatenate([y0[:1], D]))
-
-    def compute_pk(self, k, z, p, linear=True):
-        """Linear :math:`P(k, z)` from :math:`A_s`, :math:`n_s`, the Eisenstein & Hu transfer function and the growth factor, nonlinear from halofit; see :meth:`Engine.compute_pk`."""
-        if not linear:
-            return super().compute_pk(k, z, p, linear=False)
-        T = eisenstein_hu(k, p["omega_cdm"] + p["omega_b"], p["omega_b"], p["T_cmb"])
-        delta2 = 0.16 * p["A_s"] * (k / 0.05) ** (p["n_s"] - 1.0) * (k * _C_KMS / p["H0"]) ** 4 * T**2
-        D = self._growth(z, p) / p["Omega0_m"]
-        return (2.0 * jnp.pi**2 / k**3 * delta2)[:, None] * D[None, :] ** 2
+    def __repr__(self):
+        return "AnalyticEngine()"
 
 
 # ----------------------------------------------------------------------
@@ -679,65 +726,34 @@ class AnalyticEngine(Engine):
 
 class CombinedEngine(Engine):
     """
-    Engine that takes the background from one engine and the power spectrum from another.
+    Engine with the background of one engine and the power spectrum of another; the same as
+    ``background.replace(...)`` with the power-spectrum fields of ``power``.
 
-    A parameter fixed by either engine is fixed for both, so the two always see the same cosmology;
-    two engines that fix the same parameter at different values cannot be combined.
+    Its parameters are those of both engines, with ``background``'s defaults where they share a name.
 
     Parameters
     ----------
     background : Engine
         Source of :math:`H(z)`, :math:`D_A(z)`, the densities and any CMB spectra or derived parameters.
     power : Engine
-        Source of the linear and nonlinear :math:`P(k, z)` and :math:`\\sigma_8(z)`.
+        Source of the linear and nonlinear :math:`P(k, z)`, the growth factor and :math:`\\sigma_8(z)`.
     """
+    _check_on_init = False
 
     def __init__(self, background, power):
-        self.background, self.power = background, power
-        fixed_bg, fixed_pk = background.fixed, power.fixed
-        clash = {n for n in fixed_bg.keys() & fixed_pk.keys() if fixed_bg[n] != fixed_pk[n]}
-        if clash:
-            raise ValueError(f"{background!r} and {power!r} fix {', '.join(sorted(clash))} at different values.")
-        fixed = {**fixed_pk, **fixed_bg}
-        params = {n: v for n, v in {**power.params, **background.params}.items() if n not in fixed}
-        self.params, self.fixed = _freeze(params, fixed)
-        self.k_grid, self.z_max_pk = power.k_grid, power.z_max_pk
-        self.z_max_bg = background.z_max_bg
+        for attr, value in (("background", background), ("power", power)):
+            object.__setattr__(self, attr, value)
+        fields = {f.name: getattr(background, f.name) for f in dataclasses.fields(Engine)}
+        fields.update({n: getattr(power, n) for n in ("pk_linear", "pk_nonlinear", "growth_factor", "sigma8",
+                                                      "k_grid", "z_max_pk")})
+        fields.update(params={**power.params, **background.params}, in_bounds=self._both_in_bounds, name=None)
+        super().__init__(**fields)
+
+    def _both_in_bounds(self, p):
+        return self.background._call("in_bounds", p) & self.power._call("in_bounds", p)
 
     def _key(self):
         return (self.background, self.power)
 
     def __repr__(self):
         return f"CombinedEngine(background={self.background!r}, power={self.power!r})"
-
-    def compute_hubble_parameter(self, z, p):
-        """From the background engine; see :meth:`Engine.compute_hubble_parameter`."""
-        return self.background.compute_hubble_parameter(z, p)
-
-    def compute_angular_diameter_distance(self, z, p):
-        """From the background engine; see :meth:`Engine.compute_angular_diameter_distance`."""
-        return self.background.compute_angular_diameter_distance(z, p)
-
-    def compute_densities(self, p):
-        """From the background engine; see :meth:`Engine.compute_densities`."""
-        return self.background.compute_densities(p)
-
-    def compute_pk(self, k, z, p, linear=True):
-        """From the power engine; see :meth:`Engine.compute_pk`."""
-        return self.power.compute_pk(k, z, p, linear)
-
-    def compute_sigma8(self, z, p):
-        """From the power engine; see :meth:`Engine.compute_sigma8`."""
-        return self.power.compute_sigma8(z, p)
-
-    def compute_cl_cmb(self, type, l, p):
-        """From the background engine; see :meth:`Engine.compute_cl_cmb`."""
-        return self.background.compute_cl_cmb(type, l, p)
-
-    def compute_derived_parameters(self, p):
-        """From the background engine; see :meth:`Engine.compute_derived_parameters`."""
-        return self.background.compute_derived_parameters(p)
-
-    def in_bounds(self, p):
-        """In bounds for both engines; see :meth:`Engine.in_bounds`."""
-        return self.background.in_bounds(p) & self.power.in_bounds(p)

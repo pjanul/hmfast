@@ -11,6 +11,7 @@ jax.config.update("jax_enable_x64", True)
 
 
 _TOPHATS = {}  # engine -> sigma(R) transform on its k grid, so equal engines give equal treedefs
+_Z_TAB_BG, _Z_TAB_PK = 20.0, 10.0  # top of Cosmology's own background and P(k) tables for engines with no z limit
 
 
 def _tophat(engine):
@@ -20,11 +21,10 @@ def _tophat(engine):
 
 
 def _check_params(engine, names):
-    """Raise if a name is not a parameter of the engine, saying whether it is fixed or unknown."""
+    """Raise if a name is not a parameter of the engine."""
     bad = [n for n in names if n not in engine.params]
     if bad:
-        why = [f"{n} is fixed at {engine.fixed[n]:.6g}" if n in engine.fixed else f"{n} is not a parameter" for n in bad]
-        raise TypeError(f"{'; '.join(why)} for {engine!r}, whose parameters are {', '.join(engine.params)}.")
+        raise TypeError(f"{', '.join(bad)} is not a parameter of {engine!r}, whose parameters are {', '.join(engine.params)}.")
 
 
 class Cosmology:
@@ -33,10 +33,8 @@ class Cosmology:
 
     Provides access to cosmological parameters and engine-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
     Note that using parameters outside the engine's valid domain (e.g. emulator training bounds) will result in NaN outputs.
-    The engine decides which parameters exist: ``print(engine)`` lists the ones it takes, with their
-    defaults, and the values it fixes. Parameters are passed as keywords, read as attributes
-    (``cosmo.H0``) and changed with :meth:`update`; fixed values can be read but not set.
-    The parameters of the built-in engines are listed below.
+    The engine decides which parameters exist: ``print(engine)`` lists them with their defaults.
+    Parameters are passed as keywords, read as attributes (``cosmo.H0``) and changed with :meth:`update`.
 
     Attributes
     ----------
@@ -46,46 +44,8 @@ class Cosmology:
     params : dict
         The engine's parameters and their values; these are the pytree leaves.
     H0 : float
-        Hubble constant at :math:`z = 0` in units of
-        :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
-    omega_cdm : float
-        Physical cold dark matter density,
-        :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2`.
-    omega_b : float
-        Physical baryon density, :math:`\\omega_b = \\Omega_b h^2`.
-    A_s : float
-        Amplitude of the primordial scalar power spectrum, :math:`A_s`.
-    n_s : float
-        Scalar spectral index of primordial perturbations, :math:`n_s`.
-    tau : float
-        Optical depth to reionization, :math:`\\tau`.
-    m_ncdm : float
-        Non-cold dark matter mass, used if a massive-neutrino cosmological model is selected. This is the
-        mass per state for ``"mnu-3states:v1"`` and the EDE sets, which have three degenerate states.
-    N_ur : float
-        Effective number of ultra-relativistic species, :math:`N_{\\mathrm{ur}}`,
-        used if a model with additional radiation degrees of freedom is
-        selected.
-    w0 : float
-        Present-day dark energy equation-of-state parameter :math:`w_0`,
-        used if a cosmological model with dark energy equation-of-state
-        parameter :math:`w_0` is selected.
-    f_ede : float
-        Maximum fractional contribution of early dark energy,
-        :math:`f_{\\mathrm{ede}}`, used if an early dark energy cosmological
-        model is selected.
-    z_c : float
-        Critical redshift for the early dark energy transition,
-        :math:`z_c`, used if an early dark energy cosmological model is
-        selected.
-    theta_i : float
-        Initial scalar field displacement for the early dark energy model,
-        :math:`\\theta_i`, in radians, used if an early dark energy
-        cosmological model is selected.
-    r : float
-        Tensor-to-scalar ratio, used if a cosmological model including primordial tensors is selected.
-    T_cmb : float
-        CMB temperature today in Kelvin; fixed at 2.7255 by the emulator engines.
+        Hubble constant in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`: the parameter
+        if the engine has one, else :math:`H(0)` from the engine.
     extrapolate_z : bool
         If True, redshifts above the engine's maximum are
         extrapolated. This is less accurate for early dark
@@ -106,9 +66,6 @@ class Cosmology:
         engine = engine if engine is not None else EmulatorEngine("lcdm:v1")
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
-        both = engine.params.keys() & engine.fixed.keys()
-        if both:
-            raise TypeError(f"{engine!r} declares {', '.join(sorted(both))} both as a parameter and fixed.")
         _check_params(engine, params)
         self.engine = engine
         self.params = {**engine.params, **params}
@@ -123,8 +80,8 @@ class Cosmology:
             raise AttributeError(name)
         if name in self.params:
             return self.params[name]
-        if name in self.engine.fixed:
-            return self.engine.fixed[name]
+        if name == "H0":
+            return self._cosmo_params()["H0"]
         raise AttributeError(f"{type(self).__name__!r} with {self.engine!r} has no attribute {name!r}")
 
     def __repr__(self):
@@ -185,7 +142,7 @@ class Cosmology:
 
     @partial(jax.jit, static_argnums=(0,))
     def _enforce_bounds(self, values):
-        valid = self.engine.in_bounds(self._cosmo_params())
+        valid = self.engine._call("in_bounds", self.params)
         values = jnp.asarray(values)
         return jnp.where(valid, values, jnp.full_like(values, jnp.nan))
                        
@@ -195,10 +152,12 @@ class Cosmology:
     # ------------------------------------------------------------------
 
     def _z_grid_bg(self):
-        return jnp.linspace(0.0, self.engine.z_max_bg, 5000, dtype=jnp.float64) 
+        z_max = self.engine.z_max_bg if np.isfinite(self.engine.z_max_bg) else _Z_TAB_BG
+        return jnp.linspace(0.0, z_max, 5000, dtype=jnp.float64)
 
     def _z_grid_pk(self):
-        return jnp.linspace(0.0, self.engine.z_max_pk, 100, dtype=jnp.float64)     # z grid for Pk(z)
+        z_max = self.engine.z_max_pk if np.isfinite(self.engine.z_max_pk) else _Z_TAB_PK
+        return jnp.linspace(0.0, z_max, 100, dtype=jnp.float64)
 
     def _pk_grid(self):
         # numpy, not jnp: fixed by the engine alone, so it stays concrete for mcfit to plan on.
@@ -348,8 +307,8 @@ class Cosmology:
         def hz_flrw(z):
             p = self._cosmo_params()
             zp1 = 1.0 + z
-            return self.H0 * jnp.sqrt(
-                (p['Omega0_m_nonu'] + p['Omega0_ncdm']) * zp1 ** 3
+            return p['H0'] * jnp.sqrt(
+                p['Omega0_m'] * zp1 ** 3
                 + p['Omega0_r'] * zp1 ** 4
                 + p['Omega_Lambda'] * zp1 ** (3.0 * (1.0 + p['w0']))
             )
@@ -374,11 +333,12 @@ class Cosmology:
         """
 
         z_arr = jnp.atleast_1d(z)
-        Hz = self.engine.compute_hubble_parameter(z_arr, self._cosmo_params())
-
-        if self.extrapolate_z:
-            z_max = self._z_grid_bg()[-1]
-            Hz = jnp.where(z_arr > z_max, self._hz_flrw_calibrated(z_max)(z_arr), Hz)
+        z_max = self.engine.z_max_bg
+        z_eval = jnp.minimum(z_arr, z_max) if np.isfinite(z_max) else z_arr
+        Hz = self.engine.hubble_parameter(z_eval, self.params)
+        if np.isfinite(z_max):
+            fill = self._hz_flrw_calibrated(z_max)(z_arr) if self.extrapolate_z else jnp.nan
+            Hz = jnp.where(z_arr > z_max, fill, Hz)
 
         return self._enforce_bounds(self._squeeze_single(Hz))
 
@@ -399,10 +359,13 @@ class Cosmology:
         """
 
         z_arr = jnp.atleast_1d(z)
-        DA = self.engine.compute_angular_diameter_distance(z_arr, self._cosmo_params())
+        z_max = self.engine.z_max_bg
+        z_eval = jnp.minimum(z_arr, z_max) if np.isfinite(z_max) else z_arr
+        DA = self.engine._call("angular_diameter_distance", z_eval, self.params)
+        if np.isfinite(z_max) and not self.extrapolate_z:
+            DA = jnp.where(z_arr > z_max, jnp.nan, DA)
 
-        if self.extrapolate_z:
-            z_max = self._z_grid_bg()[-1]
+        if self.extrapolate_z and np.isfinite(z_max):
             # Same recursion hazard as _hz_flrw_calibrated -- force the non-extrapolated path for this boundary-anchor call.
             chi_max = self.update(extrapolate_z=False).angular_diameter_distance(z_max) * (1.0 + z_max)
 
@@ -442,32 +405,31 @@ class Cosmology:
             Dimensionless :math:`\\sigma_8` value(s)
         """
 
-        p = self._cosmo_params()
-        s8 = self.engine.compute_sigma8(jnp.atleast_1d(z), p)
-        if s8 is None:
-            return self.sigma_r(8.0 / p["h"], z)
+        if self.engine.sigma8 is None:
+            return self.sigma_r(8.0 / self._cosmo_params()["h"], z)
+        s8 = self.engine.sigma8(jnp.atleast_1d(z), self.params)
         return self._enforce_bounds(self._squeeze_single(s8))
 
     @jax.jit
     def _cosmo_params(self):
         """
-        Get the engine's parameters and fixed values together with derived background quantities.
+        Get the engine's parameters together with derived background quantities.
     
         Returns
         -------
         dict
-            Dictionary containing the parameters, the fixed values and the following
-            derived quantities (the densities come from :meth:`Engine.compute_densities`):
+            Dictionary containing the parameters and the following derived quantities
+            (the densities come from :attr:`Engine.densities`):
     
+            - ``H0``: Hubble constant, the parameter if the engine has one, else :math:`H(0)`
             - ``h``: Dimensionless Hubble parameter, :math:`h = H_0 / 100`
             - ``Omega_b``: Present-day baryon density parameter
             - ``Omega_cdm``: Present-day cold dark matter density parameter
-            - ``Omega0_g``: Present-day photon density parameter
-            - ``Omega0_ur``: Present-day ultra-relativistic density parameter
             - ``Omega0_ncdm``: Present-day massive neutrino density parameter
             - ``Omega_Lambda``: Present-day dark energy density parameter
             - ``Omega0_m``: Present-day total matter density parameter
             - ``Omega0_r``: Present-day total radiation density parameter
+            - ``w0``: Dark-energy equation of state
             - ``Omega0_m_nonu``: Present-day matter density parameter excluding
               massive neutrinos
             - ``Omega0_cb``: Present-day CDM+baryon density parameter
@@ -479,9 +441,13 @@ class Cosmology:
         """
     
         c, G, M_sun, Mpc_over_m = Const._c_, Const._G_, Const._M_sun_, Const._Mpc_over_m_
-        p = {**self.engine.fixed, **self.params}
+        d = self.engine._densities(self.params)
+        p = dict(self.params)
+        p['H0'] = self.engine._H0(self.params)
         p['h'] = p['H0'] / 100.
-        p.update(self.engine.compute_densities(p))
+        p.update(Omega_b=d['Omega0_b'], Omega_cdm=d['Omega0_cb'] - d['Omega0_b'], Omega0_cb=d['Omega0_cb'],
+                 Omega0_m=d['Omega0_m'], Omega0_ncdm=d['Omega0_m'] - d['Omega0_cb'], Omega0_r=d['Omega0_r'],
+                 Omega_Lambda=1.0 - d['Omega0_m'] - d['Omega0_r'], w0=d['w0'])
         p['Omega0_m_nonu'] = p['Omega0_cb']
         # sigma(M) and the mass function use Omega0_halo; matter profiles, counterterms and lensing use Omega0_m.
         p['Omega0_halo'] = p['Omega0_cb'] if self.ncdm_mode == "cb" else p['Omega0_m']
@@ -654,10 +620,9 @@ class Cosmology:
         """
         Linear growth factor :math:`D(z)`, normalized to :math:`D(0)=1`.
 
-        Without ``extrapolate_z``, NaN beyond the emulator's trained z-grid (plain
-        ``jnp.interp`` clamps by default, which silently returned a flat, wrong value
-        here previously -- fixed to NaN instead). With ``extrapolate_z=True``, the
-        growth ODE branch below still applies, unchanged.
+        From :attr:`Engine.growth_factor`, or by default from the linear power spectrum at
+        :math:`k = 0.01\\,\\mathrm{Mpc}^{-1}`. NaN above the engine's ``z_max_pk`` unless
+        ``extrapolate_z``, in which case the growth ODE continues it.
 
         Parameters
         ----------
@@ -674,19 +639,13 @@ class Cosmology:
 
         z = jnp.atleast_1d(z)
 
-        # These pk() calls must bypass self.extrapolate_z to avoid recursing back into this method via pk()'s own extrapolation branch.
-        strict = self.update(extrapolate_z=False)
-        k0 = 1e-2
-        z_grid_pk = self._z_grid_pk()
-        pk0_tmp = strict.pk(jnp.array([k0]), z_grid_pk, linear=True)
-        pk0_grid = jnp.atleast_2d(pk0_tmp)[0, :]
-        pk0_z0_tmp = strict.pk(jnp.array([k0]), jnp.array([0.0]), linear=True)
-        D_grid = jnp.sqrt(pk0_grid / jnp.atleast_2d(pk0_z0_tmp)[0, 0])
+        # Clamp to the engine's range before calling it, so the masked values cannot poison gradients.
+        z_max = self.engine.z_max_pk
+        z_eval = jnp.minimum(z, z_max) if np.isfinite(z_max) else z
+        D = self._enforce_bounds(self.engine._call("growth_factor", z_eval, self.params))
+        D = jnp.where(z > z_max, jnp.nan, D)
 
-        D = jnp.interp(z, z_grid_pk, D_grid, left=jnp.nan, right=jnp.nan)
-
-        if self.extrapolate_z:
-            z_max = self._z_grid_pk()[-1]
+        if self.extrapolate_z and np.isfinite(z_max):
             D_ext, _ = self._growth_ode(z, z_max)
             D = jnp.where(z > z_max, D_ext, D)
 
@@ -849,18 +808,22 @@ class Cosmology:
         k = jnp.atleast_1d(k)
         z = jnp.atleast_1d(z)
 
-        z_max = self._z_grid_pk()[-1]
+        z_max = self.engine.z_max_pk
         in_z_bounds = z <= z_max
-        if self.extrapolate_z:
+        if self.extrapolate_z and np.isfinite(z_max):
             growth_ratio_sq = jnp.where(in_z_bounds, 1.0, (self.growth_factor(z) / self.growth_factor(z_max)) ** 2)
-            z = jnp.where(in_z_bounds, z, z_max)
 
         k_grid = self._pk_grid()
-        pk_out = self.engine.compute_pk(k, z, self._cosmo_params(), linear=linear)  # shape (Nk, Nz)
+        # Clamp to the engine's range before calling it, so the masked values cannot poison gradients.
+        z = jnp.where(in_z_bounds, z, z_max) if np.isfinite(z_max) else z
+        if linear:
+            pk_out = self.engine.pk_linear(k, z, self.params)  # shape (Nk, Nz)
+        else:
+            pk_out = self.engine._call("pk_nonlinear", k, z, self.params)
         if not self.extrapolate_k:
             in_k_bounds = (k >= k_grid[0]) & (k <= k_grid[-1])
             pk_out = jnp.where(in_k_bounds[:, None], pk_out, jnp.nan)
-        if self.extrapolate_z:
+        if self.extrapolate_z and np.isfinite(z_max):
             pk_out = pk_out * growth_ratio_sq[None, :]
         else:
             pk_out = jnp.where(in_z_bounds[None, :], pk_out, jnp.nan)
@@ -895,7 +858,7 @@ class Cosmology:
 
     @partial(jax.jit, static_argnums=(1,))
     def _cl_jit(self, s, l):
-        cl_out = self.engine.compute_cl_cmb(s, jnp.atleast_1d(l), self._cosmo_params())
+        cl_out = self.engine._call("cl_cmb", s, jnp.atleast_1d(l), self.params)
         return jnp.squeeze(self._enforce_bounds(cl_out))
 
     # ------------------------------------------------------------------
@@ -927,9 +890,8 @@ class Cosmology:
             - 'chi_star' : Comoving distance to last scattering [Mpc]
             - 'rs_drag' : Comoving sound horizon at baryon drag [Mpc]
         """
-        p = self._cosmo_params()
-        out = self.engine.compute_derived_parameters(p)
-        valid = self.engine.in_bounds(p)
+        out = self.engine._call("derived_parameters", self.params)
+        valid = self.engine._call("in_bounds", self.params)
         return {name: jnp.where(valid, value, jnp.asarray(jnp.nan, dtype=jnp.asarray(value).dtype)) for name, value in out.items()}
 
 

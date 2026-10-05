@@ -80,9 +80,16 @@ class CMBLensingTracer(Tracer):
         new_z_source = z_source if z_source is not None else old_z_source
         return self._tree_unflatten(aux, (new_profile, new_z_source))
 
+    @staticmethod
+    def _derived(cosmology, name):
+        """A derived parameter of the cosmology, for the last-scattering source plane."""
+        if not hasattr(cosmology, "derived_parameters"):
+            raise TypeError(f"{type(cosmology).__name__} has no derived parameters, so CMBLensingTracer needs z_source.")
+        return cosmology.derived_parameters()[name]
+
     def _z_source(self, cosmology):
         """Source-plane redshift: z_source, or the derived z_star if z_source is None."""
-        return cosmology.derived_parameters()["z_star"] if self.z_source is None else jnp.asarray(self.z_source)
+        return self._derived(cosmology, "z_star") if self.z_source is None else jnp.asarray(self.z_source)
 
     def _z_max(self, cosmology):
         """Redshift above which every kernel term vanishes: the source plane."""
@@ -91,7 +98,7 @@ class CMBLensingTracer(Tracer):
     def _chi_source(self, cosmology):
         """Comoving distance to the source plane: chi(z_source), or the derived chi_star if z_source is None."""
         if self.z_source is None:
-            return cosmology.derived_parameters()["chi_star"]
+            return self._derived(cosmology, "chi_star")
         z_s = jnp.asarray(self.z_source)
         return cosmology.angular_diameter_distance(z_s) * (1.0 + z_s)
 

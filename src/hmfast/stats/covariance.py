@@ -283,7 +283,7 @@ _DISC_VAR_LOW_K_DECADES = 2
 
 def _disc_var_transform(cosmology):
     """The disc-variance transform and its input k grid, the emulator's extended below k_min at the same log spacing."""
-    key = cosmology.engine
+    key = cosmology._grid
     if key not in _DISC_VAR_TRANSFORMS:
         k_grid = cosmology._pk_grid()
         dlnk = np.log(k_grid[1] / k_grid[0])

@@ -13,7 +13,7 @@ from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration, B13Concentration
 from hmfast.halos.massdef import MassDefinition
 from hmfast.halos.profiles.profiles_2pt import _fourier_2pt
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
 from hmfast.utils import gauss_legendre_nodes_weights
 
 jax.config.update("jax_enable_x64", True)
@@ -31,7 +31,7 @@ class HaloModel:
     ----------
     cosmology : Cosmology
         Cosmology object supplying background, growth, and matter power spectra quantities.
-        Defaults to ``Cosmology()`` (``EmulatorEngine("lcdm:v1")``).
+        Defaults to ``CosmoPowerCosmology()``.
     mass_def : MassDefinition
         Native spherical-overdensity mass definition used throughout the halo model.
         Defaults to 200c, ``MassDefinition(delta=200, reference="critical")``.
@@ -72,7 +72,7 @@ class HaloModel:
         """Initialize the halo model."""
 
         # None-sentinel: avoids building these (some expensive, some cache-holding) at import time.
-        cosmology = cosmology if cosmology is not None else Cosmology()
+        cosmology = cosmology if cosmology is not None else CosmoPowerCosmology()
         mass_def = mass_def if mass_def is not None else MassDefinition(delta=200, reference="critical")
         halo_mass_function = halo_mass_function if halo_mass_function is not None else T08HaloMassFunction()
         halo_bias = halo_bias if halo_bias is not None else T10HaloBias()

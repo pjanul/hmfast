@@ -28,7 +28,8 @@ def _resolve_z_range(cosmology, z_range, *tracers):
     if z_range is not None:
         return z_range
     z_maxes = [z for z in (t._z_max(cosmology) for t in tracers) if z is not None]
-    if not cosmology.extrapolate_z or not z_maxes:
+    # A cosmology without extrapolate_z is capped at its P(k) table, as with extrapolate_z=False.
+    if not getattr(cosmology, "extrapolate_z", False) or not z_maxes:
         z_maxes.append(cosmology._z_grid_pk()[-1])
     z_max = z_maxes[0]
     for z in z_maxes[1:]:
@@ -50,7 +51,7 @@ def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn):
     # NaN past it, so fall back to no growth correction there instead.
     z_b = cosmology._z_grid_pk()[-1]
     in_bounds_lp = z_lp_raw <= z_b
-    if cosmology.extrapolate_z:
+    if getattr(cosmology, "extrapolate_z", False):
         growth_ratio_sq_lp = jnp.where(in_bounds_lp, 1.0, (cosmology.growth_factor(z_lp_raw) / cosmology.growth_factor(z_b)) ** 2)
     else:
         growth_ratio_sq_lp = jnp.ones_like(z_lp_raw)  # never evaluate the NaN growth_factor: masking it still leaves NaN reverse-mode gradients
@@ -483,7 +484,7 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
         ``(z_min, z_max)`` of the redshift integration. If None, ``z_min`` is
         :math:`10^{-5}` and ``z_max`` is the lowest redshift at which a tracer kernel
         vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ), capped at the
-        emulator's trained range unless :attr:`Cosmology.extrapolate_z` is True.
+        emulator's trained range unless :attr:`CosmoPowerCosmology.extrapolate_z` is True.
     n_z : int, default 100
         Number of redshift nodes (static).
     l_limber : float, default 0.0
@@ -569,7 +570,7 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
         ``(z_min, z_max)`` of the redshift integration. If None, ``z_min`` is
         :math:`10^{-5}` and ``z_max`` is the lowest redshift at which a tracer kernel
         vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ), capped at the
-        emulator's trained range unless :attr:`Cosmology.extrapolate_z` is True.
+        emulator's trained range unless :attr:`CosmoPowerCosmology.extrapolate_z` is True.
     n_z : int, default 100
         Number of redshift nodes (static).
     linear : bool, default True

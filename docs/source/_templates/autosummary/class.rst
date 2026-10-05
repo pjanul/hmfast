@@ -12,14 +12,6 @@
 {% set excluded_members = excluded_members + ['delta', 'reference'] %}
 {% set excluded_attributes = excluded_attributes + ['delta', 'reference'] %}
 {% endif %}
-{% if objname in ['Engine', 'EmulatorEngine', 'AnalyticEngine'] %}
-{# Engine fields are documented under Parameters, so they get no second entry. #}
-{% set engine_fields = ['params', 'hubble_parameter', 'pk_linear', 'densities', 'pk_nonlinear',
-                        'angular_diameter_distance', 'growth_factor', 'sigma8', 'cl_cmb', 'derived_parameters',
-                        'in_bounds', 'k_grid', 'z_max_bg', 'z_max_pk', 'name'] %}
-{% set excluded_members = excluded_members + engine_fields %}
-{% set excluded_attributes = excluded_attributes + engine_fields %}
-{% endif %}
 
 .. autoclass:: {{ objname }}
    :members:

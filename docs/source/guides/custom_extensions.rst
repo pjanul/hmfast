@@ -3,13 +3,13 @@ Custom extensions guide
 =======================
 
 This short guide points to the API pages for the parent classes that users
-can subclass or build to provide custom ingredients (cosmology engines, tracers,
+can subclass or build to provide custom ingredients (cosmologies, tracers,
 profiles, and halo-model components).
 
 The following list shows some of the parent classes you can implement:
 
-- **Cosmology engine**: computes :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)`
-  for a ``Cosmology``: :doc:`/api/cosmology`.
+- **Cosmology**: computes :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)`
+  from functions you supply: :doc:`/api/cosmology`.
 - **Tracer**: see the Tracer API documentation: :doc:`/api/tracers`.
 - **Halo profiles**: prefer one of the profile parent classes (examples
   include MatterProfile, CIBProfile, GalaxyHODProfile, PressureProfile,
@@ -21,31 +21,22 @@ The following list shows some of the parent classes you can implement:
 
 For JAX `jit`/autodiff compatibility implement your classes as JAX pytrees
 so JAX can traverse array children while treating configuration as static
-(engines are the exception; see `Pytrees & differentiability`_).
+(``Cosmology`` is the exception; see `Pytrees & differentiability`_).
 
-A ``Cosmology`` takes :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)` from its
-engine, and everything else in ``hmfast`` (growth, :math:`\sigma(M)`, the halo
-model, statistics) is built on them. An engine is just a set of functions, so you
-can define your own cosmology if you want. ``hmfast`` already provides working
-engines for the cosmopower emulators (``EmulatorEngine``) and for an analytic
-cosmology (``AnalyticEngine``), but to test a model ``hmfast`` does not support
-you can swap any of their functions with ``Engine.replace``, for example
-interchanging the linear and nonlinear spectra::
+A ``Cosmology`` takes :math:`H(z)` and :math:`P(k, z)` from functions, and
+everything else in ``hmfast`` (distances, growth, :math:`\sigma(M)`, the halo
+model, statistics) is built on them. ``hmfast`` provides two ready-made
+cosmologies, ``CosmoPowerCosmology`` (emulators) and ``AnalyticCosmology``
+(analytic formulae); to test a model ``hmfast`` does not support, pass your own
+functions to ``Cosmology`` itself.
 
-  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine
-
-  emu = EmulatorEngine("lcdm:v1")
-  linear_only = emu.replace(pk_nonlinear=emu.pk_linear)  # emulated PKL wherever PKNL is used
-  mixed = emu.replace(pk_linear=AnalyticEngine().pk_linear,  # analytic P(k) on the emulated background
-                      params=(*emu.params, "T_cmb", "w0"))  # parameters the analytic P(k) also reads
-  cosmo = Cosmology(linear_only, H0=67.4)
-
-``engine.params`` names the parameters an engine reads. ``Cosmology`` supplies
-the defaults of those it knows (``H0``, ``omega_b``, ...), and any new one must
-be passed to it. Each function takes ``p``, a dict of the parameter values, and
-must be JAX-traceable; :class:`~hmfast.cosmology.Engine` lists the functions,
-their signatures and which are optional. The example below builds an engine
-from scratch.
+Each function takes ``p``, the dict of the cosmology's parameter values, as its
+last argument and must be JAX-traceable; :class:`~hmfast.cosmology.Cosmology`
+lists the functions, their signatures and which are optional. ``p`` holds the
+standard parameters (``H0``, ``omega_b``, ``omega_cdm``, ...), which also set the
+densities, plus any further keyword passed to ``Cosmology``. The functions are
+traced on construction, so a parameter name they read that does not exist raises
+a ``TypeError`` straight away. The example below builds one from scratch.
 
 For full API details and method signatures consult the linked API pages above.
 
@@ -57,7 +48,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
 
   import jax.numpy as jnp
   from jax.tree_util import register_pytree_node_class
-  from hmfast.cosmology import Cosmology, Engine
+  from hmfast.cosmology import Cosmology
   from hmfast.halos import HaloModel
   from hmfast.halos.massfunc import HaloMassFunction, SubHaloMassFunction
   from hmfast.halos.bias import HaloBias
@@ -72,15 +63,16 @@ Not physical — only intended as a tiny runnable example users can adapt::
   z_range = (0.05, 2.0)
   n_z = 32
 
-  # --- Toy cosmology engine: flat LCDM expansion and a toy linear P(k) ---
+  # --- Toy cosmology: flat LCDM expansion and a toy linear P(k) ---
 
-  engine = Engine(
-    params=("H0", "Omega_m"),
-    hubble_parameter=lambda z, p: p["H0"] * jnp.sqrt(p["Omega_m"] * (1 + z) ** 3 + 1 - p["Omega_m"]),
-    pk_linear=lambda k, z, p: jnp.outer(1e4 * k / (1 + (k / 0.02) ** 3), 1 / (1 + z) ** 2),
-    densities=lambda p: {"Omega0_m": p["Omega_m"], "Omega0_cb": p["Omega_m"], "Omega0_b": 0.05},
-  )
-  cosmo = Cosmology(engine, Omega_m=0.31)  # H0 takes Cosmology's default; Omega_m has none, so it is required
+  def hubble(z, p):
+    om = (p["omega_b"] + p["omega_cdm"]) / (p["H0"] / 100) ** 2
+    return p["H0"] * jnp.sqrt(om * (1 + z) ** 3 + 1 - om)
+
+  def pk_linear(k, z, p):
+    return p["amp"] * jnp.outer(1e4 * k / (1 + (k / 0.02) ** 3), 1 / (1 + z) ** 2)
+
+  cosmo = Cosmology(hubble, pk_linear, amp=1.0)  # amp is a new parameter; the standard ones take their defaults
 
   # --- Toy implementations of halo-model building blocks ---
   #
@@ -233,12 +225,13 @@ gradient immediately after the class).
   g = jax.grad(lambda a: jnp.sum(NewHaloMassFunction(a).dndlnm(None, m, z)))(0.5)
   print(g)
 
-Engines need no registration: their functions are static and their parameters
-are the leaves of the ``Cosmology``, so a gradient goes through ``update``::
+A ``Cosmology`` needs no registration: its functions are static and its parameters
+are its leaves, so a gradient goes through ``update``::
 
-  g = jax.grad(lambda om: cosmo.update(Omega_m=om).hubble_parameter(1.0))(0.31)
+  g = jax.grad(lambda a: cosmo.update(amp=a).pk(0.1, 1.0))(1.0)
 
-A new engine compiles anew under ``jit``, so create it once and reuse it.
+Functions are compared by identity under ``jit``, so define them once and reuse
+them; building a ``Cosmology`` from new function objects compiles anew.
 
 See the API pages for full method signatures and optional behaviors.
 

@@ -11,3 +11,4 @@ hmfast.cosmology
    Engine
    EmulatorEngine
    AnalyticEngine
+   CombinedEngine

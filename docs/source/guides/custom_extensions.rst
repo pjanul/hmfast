@@ -207,43 +207,62 @@ A ``Cosmology`` holds the cosmological parameters; its engine computes
 derives everything else (growth, :math:`\sigma(M)`, halo model, statistics).
 Two engines are built in: ``EmulatorEngine`` calls the emulators (within their
 training ranges), and ``AnalyticEngine`` uses analytic formulae with the
-Eisenstein & Hu (1998) transfer function and halofit (for any parameter values)::
+Eisenstein & Hu (1998) transfer function and halofit (for any parameter values).
+``CombinedEngine`` takes the background from one engine and :math:`P(k, z)` from another::
 
-  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine
+  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine, CombinedEngine
 
   cosmo_emu = Cosmology(EmulatorEngine("lcdm:v1"), H0=67.4)
   cosmo_ana = Cosmology(AnalyticEngine(), H0=110.0, omega_cdm=0.30, w0=-0.7)
+  cosmo_mix = Cosmology(CombinedEngine(background=EmulatorEngine("wcdm:v1"), power=AnalyticEngine()), w0=-0.9)
 
-For your own engine, subclass ``Engine`` and implement ``hubble_parameter(z, p)``
-and the linear branch of ``pk(k, z, p, linear=True)``, where ``p`` holds the
-cosmology's parameters and derived densities. :math:`D_A(z)` defaults to the
-integral of :math:`c/H`, and the nonlinear :math:`P(k, z)` to halofit on your
-linear spectrum. New parameters go in ``extra_params``; they are then set,
-read and updated on the ``Cosmology`` like any other parameter. The example
-below adds a running of the spectral index to the analytic engine::
+The engine decides which parameters exist. ``print(engine)`` lists the ones it
+takes (``engine.params``, with defaults) and the values it fixes (``engine.fixed``)::
+
+  >>> print(EmulatorEngine("wcdm:v1"))
+  EmulatorEngine('wcdm:v1', pknl_mode='hmcode')
+    free : H0=68, omega_cdm=0.12, omega_b=0.0224658, A_s=2.1053e-09, n_s=0.965, tau=0.0544, w0=-1
+    fixed: m_ncdm=0.06, N_ur=3.046, T_cmb=2.7255, deg_ncdm=1
+
+Parameters are passed to ``Cosmology`` as keywords, read as attributes
+(``cosmo.H0``) and changed with ``update``; setting a fixed or unknown one
+raises a ``TypeError``. A ``CombinedEngine`` fixes anything either engine fixes,
+so both always see the same cosmology.
+
+For your own engine, subclass ``Engine`` (or a built-in engine). Every
+``Cosmology`` method ``X`` that uses the engine calls ``engine.compute_X`` with the
+same arguments plus ``p``, a dict of the parameters, fixed values and densities;
+``Cosmology`` then masks values outside the engine's domain and extrapolates.
+``compute_hubble_parameter(z, p)`` and ``compute_pk(k, z, p, linear=True)`` are
+required; ``super().compute_pk(k, z, p, linear=False)`` is halofit on your linear
+spectrum, and :math:`D_A(z)` defaults to the integral of :math:`c/H`.
+``compute_sigma8``, ``compute_cl_cmb``, ``compute_derived_parameters``,
+``compute_densities`` and ``in_bounds`` are optional. New parameters go in
+``params``; the example below adds a running of the spectral index to the
+analytic engine::
 
   import jax
   import jax.numpy as jnp
-  from hmfast.cosmology import Cosmology, Engine, AnalyticEngine
+  from hmfast.cosmology import Cosmology, AnalyticEngine
 
-  class RunningEngine(Engine):
+  class RunningEngine(AnalyticEngine):
     """Analytic LCDM with a running spectral index."""
-    extra_params = {"n_run": 0.0}
-    _analytic = AnalyticEngine()
+    params = {**AnalyticEngine.params, "n_run": 0.0}
 
-    def hubble_parameter(self, z, p):
-      return self._analytic.hubble_parameter(z, p)
-
-    def pk(self, k, z, p, linear=True):
+    def compute_pk(self, k, z, p, linear=True):
       if not linear:
-        return super().pk(k, z, p, linear=False)  # halofit
+        return super().compute_pk(k, z, p, linear=False)  # halofit on the spectrum below
       running = jnp.exp(0.5 * p["n_run"] * jnp.log(k / 0.05) ** 2)
-      return self._analytic.pk(k, z, p) * running[:, None]
+      return super().compute_pk(k, z, p) * running[:, None]
 
   engine = RunningEngine()
   cosmo = Cosmology(engine, H0=67.4, n_run=-0.01)
   g = jax.grad(lambda a: cosmo.update(n_run=a).sigma8(0.0))(-0.01)
 
-Engines are static under ``jit``, so create one and reuse it: a new instance
-per cosmology triggers recompilation.
+To fix a parameter instead, declare it in ``fixed`` (for example
+``fixed = {**AnalyticEngine.fixed, "w0": -1.0}``); a name is never in both.
+
+Engines are static under ``jit``. Built-in engines with the same settings share
+compiled code; a custom engine shares it only with itself unless it defines
+``_key()`` to return the settings that change its output, so create one and reuse it.
 

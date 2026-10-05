@@ -10,25 +10,21 @@ from functools import partial
 jax.config.update("jax_enable_x64", True)
 
 
-_DEFAULTS = {"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278, "theta_i": 1.57, "r": 0.01,
-             "T_cmb": 2.7255}
+_TOPHATS = {}  # engine -> sigma(R) transform on its k grid, so equal engines give equal treedefs
 
 
-def _is_free(engine, name):
-    # T_cmb only enters the analytic background, so it stays settable for every engine.
-    return name == "T_cmb" or name in engine.free_params
+def _tophat(engine):
+    if engine not in _TOPHATS:
+        _TOPHATS[engine] = partial(TophatVar(engine.k_grid, lowring=True, backend="jax"), extrap=True)
+    return _TOPHATS[engine]
 
 
-def _check_fixed(engine, passed, extra):
-    """Raise if an extension parameter is passed explicitly but is not an input of the engine, or is unknown."""
-    fixed = [name for name, value in passed.items() if value is not None and not _is_free(engine, name)]
-    if fixed:
-        raise ValueError(f"{', '.join(fixed)} cannot be set with {engine!r}, which fixes "
-                         + ", ".join(f"{name}={_DEFAULTS[name]}" for name in fixed) + ".")
-    unknown = [name for name in extra if name not in engine.extra_params]
-    if unknown:
-        raise TypeError(f"Unknown parameter(s) {', '.join(unknown)} for {engine!r}.")
-
+def _check_params(engine, names):
+    """Raise if a name is not a parameter of the engine, saying whether it is fixed or unknown."""
+    bad = [n for n in names if n not in engine.params]
+    if bad:
+        why = [f"{n} is fixed at {engine.fixed[n]:.6g}" if n in engine.fixed else f"{n} is not a parameter" for n in bad]
+        raise TypeError(f"{'; '.join(why)} for {engine!r}, whose parameters are {', '.join(engine.params)}.")
 
 
 class Cosmology:
@@ -37,15 +33,18 @@ class Cosmology:
 
     Provides access to cosmological parameters and engine-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
     Note that using parameters outside the engine's valid domain (e.g. emulator training bounds) will result in NaN outputs.
-    Extension parameters that are not inputs of the selected engine are
-    stored as ``None`` (so they are not pytree leaves), take their default
-    value internally, and raise a ``ValueError`` if set explicitly.
+    The engine decides which parameters exist: ``print(engine)`` lists the ones it takes, with their
+    defaults, and the values it fixes. Parameters are passed as keywords, read as attributes
+    (``cosmo.H0``) and changed with :meth:`update`; fixed values can be read but not set.
+    The parameters of the built-in engines are listed below.
 
     Attributes
     ----------
     engine : Engine
         Source of :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)`, e.g. ``EmulatorEngine("ede:v2")``.
         Defaults to ``EmulatorEngine("lcdm:v1")``.
+    params : dict
+        The engine's parameters and their values; these are the pytree leaves.
     H0 : float
         Hubble constant at :math:`z = 0` in units of
         :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`.
@@ -86,9 +85,7 @@ class Cosmology:
     r : float
         Tensor-to-scalar ratio, used if a cosmological model including primordial tensors is selected.
     T_cmb : float
-        CMB temperature today in Kelvin, used when non-emulator background quantities require it.
-    **extra_params
-        Values for parameters the engine adds beyond these (``engine.extra_params``).
+        CMB temperature today in Kelvin; fixed at 2.7255 by the emulator engines.
     extrapolate_z : bool
         If True, redshifts above the engine's maximum are
         extrapolated. This is less accurate for early dark
@@ -105,146 +102,86 @@ class Cosmology:
         :math:`M(R)` in :math:`\\sigma(M)` and the mass function. :math:`\\sigma(M)` always uses
         the total-matter linear spectrum, and everything else uses total matter.
     """
-    def __init__(self, engine=None, *,
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,                       # LCDM
-                 m_ncdm=None, N_ur=None, w0=None,                                                                           # wCDM, Neff, MNU
-                 f_ede=None, z_c=None, theta_i=None, r=None,                                                                # EDE
-                 T_cmb=None,                                                                                                # Non-emulator
-                 extrapolate_z=False,                                                                                      # z-extrapolation
-                 extrapolate_k=True,                                                                                       # k-extrapolation
-                 ncdm_mode="cb",                                                                                           # Halo-model field
-                 **extra_params,                                                                                           # Engine-specific
-        ):
-
-        # Static Metadata
+    def __init__(self, engine=None, *, extrapolate_z=False, extrapolate_k=True, ncdm_mode="cb", **params):
         engine = engine if engine is not None else EmulatorEngine("lcdm:v1")
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
-        passed = dict(m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r, T_cmb=T_cmb)
-        _check_fixed(engine, passed, extra_params)
+        both = engine.params.keys() & engine.fixed.keys()
+        if both:
+            raise TypeError(f"{engine!r} declares {', '.join(sorted(both))} both as a parameter and fixed.")
+        _check_params(engine, params)
         self.engine = engine
+        self.params = {**engine.params, **params}
         self.extrapolate_z = extrapolate_z
         self.extrapolate_k = extrapolate_k
         self.ncdm_mode = ncdm_mode
-        self._tophat_instance = partial(TophatVar(engine.k_grid, lowring=True, backend='jax'), extrap=True)
+        self._tophat_instance = _tophat(engine)
 
-        # Cosmological params (leaves) to be changed without recompiling jit
-        self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau = H0, omega_cdm, omega_b, A_s, n_s, tau
-        # Fixed extension parameters stay None, so they drop out of the pytree.
-        for name, value in passed.items():
-            setattr(self, name, (_DEFAULTS[name] if value is None else value) if _is_free(engine, name) else None)
-        for name, default in engine.extra_params.items():
-            setattr(self, name, extra_params.get(name, default))
+    def __getattr__(self, name):
+        # Only reached when normal lookup fails, i.e. for parameter names.
+        if name.startswith("_") or name in ("params", "engine"):
+            raise AttributeError(name)
+        if name in self.params:
+            return self.params[name]
+        if name in self.engine.fixed:
+            return self.engine.fixed[name]
+        raise AttributeError(f"{type(self).__name__!r} with {self.engine!r} has no attribute {name!r}")
 
+    def __repr__(self):
+        values = ", ".join(f"{k}={v:.6g}" if isinstance(v, float) else f"{k}={v}" for k, v in self.params.items())
+        return f"Cosmology({self.engine!r}, {values})"
 
     # ------------------------------------------------------------------
     # PyTree registration
     # ------------------------------------------------------------------
 
     def _tree_flatten(self):
-        # 1. Children: the numerical parameters JAX should "see" (fixed extension parameters are None)
-        children = (
-            self.H0, self.omega_cdm, self.omega_b, self.A_s, self.n_s, self.tau,
-            self.m_ncdm, self.N_ur, self.w0, 
-            self.f_ede, self.z_c, self.theta_i, self.r,
-            self.T_cmb,
-            tuple(getattr(self, name) for name in self.engine.extra_params),
-        )
-        # 2. Aux data: Static metadata and cached helper objects.
+        # Children are the engine's parameters; the engine and settings are static.
+        children = tuple(self.params[name] for name in self.engine.params)
         aux_data = (self.engine, self.extrapolate_z, self.extrapolate_k, self.ncdm_mode, self._tophat_instance)
-        return (children, aux_data)
+        return children, aux_data
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
-        # Reconstruct using the static metadata
-        engine, extrapolate_z, extrapolate_k, ncdm_mode, _tophat_instance = aux_data
-
-        # We bypass __init__ to avoid re-triggering the Loader logic
+        # Bypass __init__ so no checks run under a trace.
         obj = cls.__new__(cls)
-        obj.engine = engine
-        obj.extrapolate_z = extrapolate_z
-        obj.extrapolate_k = extrapolate_k
-        obj.ncdm_mode = ncdm_mode
-        obj._tophat_instance = _tophat_instance
-
-        # Assign the parameter children to the object
-        (obj.H0, obj.omega_cdm, obj.omega_b, obj.A_s, obj.n_s, obj.tau,
-         obj.m_ncdm, obj.N_ur, obj.w0, 
-         obj.f_ede, obj.z_c, obj.theta_i, obj.r,
-         obj.T_cmb, extra) = children
-        for name, value in zip(engine.extra_params, extra):
-            setattr(obj, name, value)
-        
+        obj.engine, obj.extrapolate_z, obj.extrapolate_k, obj.ncdm_mode, obj._tophat_instance = aux_data
+        obj.params = dict(zip(obj.engine.params, children))
         return obj
-    
-    def update(self, *, H0=None, omega_cdm=None, omega_b=None, A_s=None, n_s=None,
-        tau=None, m_ncdm=None, N_ur=None, w0=None, f_ede=None, z_c=None,
-        theta_i=None, r=None, T_cmb=None, extrapolate_z=None, extrapolate_k=None,
-        ncdm_mode=None, **extra_params):
+
+    def update(self, *, extrapolate_z=None, extrapolate_k=None, ncdm_mode=None, **params):
         """
         Return a new Cosmology instance with updated parameters.
 
-        Each parameter defaults to None. Only those not None are updated.
-
         Parameters
         ----------
-        H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb : float or None
-            Cosmological parameters to update. 
         extrapolate_z : bool or None
             If not None, replaces :attr:`extrapolate_z`.
         extrapolate_k : bool or None
             If not None, replaces :attr:`extrapolate_k`.
         ncdm_mode : {"cb", "m"} or None
             If not None, replaces :attr:`ncdm_mode`.
-        **extra_params
-            New values for the engine's extra parameters; None leaves a parameter unchanged.
+        **params
+            New values for the engine's parameters; None leaves a parameter unchanged.
 
         Returns
         -------
         Cosmology
             New instance with updated parameters.
         """
-        # Flatten the current instance to get aux_data (static metadata)
-        leaves, aux_data = self._tree_flatten()
-        names = [
-            'H0', 'omega_cdm', 'omega_b', 'A_s', 'n_s', 'tau',
-            'm_ncdm', 'N_ur', 'w0',
-            'f_ede', 'z_c', 'theta_i', 'r',
-            'T_cmb'
-        ]
-        values = [
-            H0, omega_cdm, omega_b, A_s, n_s, tau,
-            m_ncdm, N_ur, w0,
-            f_ede, z_c, theta_i, r,
-            T_cmb
-        ]
-        _check_fixed(self.engine, dict(zip(names[6:], values[6:])), extra_params)
-        # Only update values that are not None
-        new_leaves = [v if v is not None else old for v, old in zip(values, leaves[:-1])]
-        new_leaves.append(tuple(old if extra_params.get(name) is None else extra_params[name]
-                                for name, old in zip(self.engine.extra_params, leaves[-1])))
+        _check_params(self.engine, params)
         if ncdm_mode is not None and ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
-        engine, old_extrapolate_z, old_extrapolate_k, old_ncdm_mode, _tophat_instance = aux_data
-        aux_data = (
+        children, (engine, old_z, old_k, old_ncdm, tophat) = self._tree_flatten()
+        obj = self._tree_unflatten((
             engine,
-            old_extrapolate_z if extrapolate_z is None else extrapolate_z,
-            old_extrapolate_k if extrapolate_k is None else extrapolate_k,
-            old_ncdm_mode if ncdm_mode is None else ncdm_mode,
-            _tophat_instance,
-        )
-        return self._tree_unflatten(aux_data, new_leaves)
-            
-    def _to_dict(self):
-        """
-        Cosmological parameters by name, fixed extension parameters at their defaults,
-        plus the engine's extra parameters; this is what the engine receives.
-        """
-        p = {name: getattr(self, name) for name in ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau")}
-        p.update({name: _DEFAULTS[name] if getattr(self, name) is None else getattr(self, name) for name in _DEFAULTS})
-        p.update({name: getattr(self, name) for name in self.engine.extra_params})
-        p['deg_ncdm'] = self.engine.deg_ncdm
-        return p
+            old_z if extrapolate_z is None else extrapolate_z,
+            old_k if extrapolate_k is None else extrapolate_k,
+            old_ncdm if ncdm_mode is None else ncdm_mode,
+            tophat,
+        ), children)
+        obj.params.update({name: value for name, value in params.items() if value is not None})
+        return obj
 
     @partial(jax.jit, static_argnums=(0,))
     def _enforce_bounds(self, values):
@@ -437,7 +374,7 @@ class Cosmology:
         """
 
         z_arr = jnp.atleast_1d(z)
-        Hz = self.engine.hubble_parameter(z_arr, self._cosmo_params())
+        Hz = self.engine.compute_hubble_parameter(z_arr, self._cosmo_params())
 
         if self.extrapolate_z:
             z_max = self._z_grid_bg()[-1]
@@ -462,7 +399,7 @@ class Cosmology:
         """
 
         z_arr = jnp.atleast_1d(z)
-        DA = self.engine.angular_diameter_distance(z_arr, self._cosmo_params())
+        DA = self.engine.compute_angular_diameter_distance(z_arr, self._cosmo_params())
 
         if self.extrapolate_z:
             z_max = self._z_grid_bg()[-1]
@@ -506,20 +443,21 @@ class Cosmology:
         """
 
         p = self._cosmo_params()
-        if hasattr(self.engine, "sigma8"):
-            return self._enforce_bounds(self._squeeze_single(self.engine.sigma8(jnp.atleast_1d(z), p)))
-        return self.sigma_r(8.0 / p["h"], z)
+        s8 = self.engine.compute_sigma8(jnp.atleast_1d(z), p)
+        if s8 is None:
+            return self.sigma_r(8.0 / p["h"], z)
+        return self._enforce_bounds(self._squeeze_single(s8))
 
     @jax.jit
     def _cosmo_params(self):
         """
-        Get the input cosmological parameters together with derived background quantities.
+        Get the engine's parameters and fixed values together with derived background quantities.
     
         Returns
         -------
         dict
-            Dictionary containing the cosmological parameters and the following
-            derived quantities:
+            Dictionary containing the parameters, the fixed values and the following
+            derived quantities (the densities come from :meth:`Engine.compute_densities`):
     
             - ``h``: Dimensionless Hubble parameter, :math:`h = H_0 / 100`
             - ``Omega_b``: Present-day baryon density parameter
@@ -540,23 +478,11 @@ class Cosmology:
     
         """
     
-        p = self._to_dict()
-        c, G, M_sun, sigma_B, Mpc_over_m = Const._c_, Const._G_, Const._M_sun_, Const._sigma_B_, Const._Mpc_over_m_
-
-        # From user-defined parameters (or defaults if none are defined)
-        p['h'] = p['H0']/100.
-        p['Omega_b'] = p['omega_b'] / p['h']**2.
-        p['Omega_cdm'] = p['omega_cdm'] / p['h']**2.
-        
-        # More cosmological params
-        p['Omega0_g'] = (4. * sigma_B / c * p['T_cmb']**4.) / (3.0 * c**2 * 1e10 * p['h']**2 / Mpc_over_m**2 /8.0 / jnp.pi / G)
-        p['Omega0_ur'] = p['N_ur']* 7.0/8.0 * (4.0/11.0)**(4.0/3.0) * p['Omega0_g']
-        p['Omega0_ncdm'] = p['deg_ncdm'] * p['m_ncdm'] / (93.14 * p['h']**2) ## valid only in standard cases, default T_ncdm etc
-        p['Omega_Lambda'] = 1. - p['Omega0_g'] - p['Omega_b'] - p['Omega_cdm'] - p['Omega0_ncdm'] - p['Omega0_ur']
-        p['Omega0_m'] = p['Omega_cdm'] + p['Omega_b'] + p['Omega0_ncdm']
-        p['Omega0_r'] = p['Omega0_ur']+p['Omega0_g']
-        p['Omega0_m_nonu'] = p['Omega0_m'] - p['Omega0_ncdm']
-        p['Omega0_cb'] = p['Omega0_m_nonu']
+        c, G, M_sun, Mpc_over_m = Const._c_, Const._G_, Const._M_sun_, Const._Mpc_over_m_
+        p = {**self.engine.fixed, **self.params}
+        p['h'] = p['H0'] / 100.
+        p.update(self.engine.compute_densities(p))
+        p['Omega0_m_nonu'] = p['Omega0_cb']
         # sigma(M) and the mass function use Omega0_halo; matter profiles, counterterms and lensing use Omega0_m.
         p['Omega0_halo'] = p['Omega0_cb'] if self.ncdm_mode == "cb" else p['Omega0_m']
 
@@ -930,7 +856,7 @@ class Cosmology:
             z = jnp.where(in_z_bounds, z, z_max)
 
         k_grid = self._pk_grid()
-        pk_out = self.engine.pk(k, z, self._cosmo_params(), linear=linear)  # shape (Nk, Nz)
+        pk_out = self.engine.compute_pk(k, z, self._cosmo_params(), linear=linear)  # shape (Nk, Nz)
         if not self.extrapolate_k:
             in_k_bounds = (k >= k_grid[0]) & (k <= k_grid[-1])
             pk_out = jnp.where(in_k_bounds[:, None], pk_out, jnp.nan)
@@ -969,7 +895,7 @@ class Cosmology:
 
     @partial(jax.jit, static_argnums=(1,))
     def _cl_jit(self, s, l):
-        cl_out = self.engine.cl_cmb(s, jnp.atleast_1d(l), self._cosmo_params())
+        cl_out = self.engine.compute_cl_cmb(s, jnp.atleast_1d(l), self._cosmo_params())
         return jnp.squeeze(self._enforce_bounds(cl_out))
 
     # ------------------------------------------------------------------
@@ -1002,7 +928,7 @@ class Cosmology:
             - 'rs_drag' : Comoving sound horizon at baryon drag [Mpc]
         """
         p = self._cosmo_params()
-        out = self.engine.derived_parameters(p)
+        out = self.engine.compute_derived_parameters(p)
         valid = self.engine.in_bounds(p)
         return {name: jnp.where(valid, value, jnp.asarray(jnp.nan, dtype=jnp.asarray(value).dtype)) for name, value in out.items()}
 

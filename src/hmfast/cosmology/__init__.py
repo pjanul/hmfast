@@ -1,5 +1,5 @@
 from .cosmology import Cosmology
-from .engines import Engine, EmulatorEngine, AnalyticEngine
+from .engines import Engine, EmulatorEngine, AnalyticEngine, CombinedEngine
 from .emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from . import emulator_load
 from . import halofit
@@ -9,6 +9,7 @@ __all__ = [
     "Engine",
     "EmulatorEngine",
     "AnalyticEngine",
+    "CombinedEngine",
     "EmulatorLoader",
     "EmulatorLoaderPCA",
     "emulator_load",

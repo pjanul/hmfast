@@ -20,6 +20,18 @@ def _tophat(engine):
     return _TOPHATS[engine]
 
 
+# Defaults of the parameters Cosmology names; an engine only says which of them it reads.
+_FIDUCIAL_PARAMS = {"H0": 68.0, "omega_cdm": 0.12, "omega_b": 0.02246576, "A_s": 2.1053e-9, "n_s": 0.965, "tau": 0.0544,
+                    "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278, "theta_i": 1.57, "r": 0.01,
+                    "T_cmb": 2.7255}
+_CORE = ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau")  # keywords with numeric defaults in the signature
+
+
+def _named(H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb):
+    return dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau, m_ncdm=m_ncdm, N_ur=N_ur,
+                w0=w0, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r, T_cmb=T_cmb)
+
+
 def _check_params(engine, names):
     """Raise if a name is not a parameter of the engine."""
     bad = [n for n in names if n not in engine.params]
@@ -33,8 +45,10 @@ class Cosmology:
 
     Provides access to cosmological parameters and engine-based predictions for distances, Hubble parameter, power spectra, CMB spectra, and derived parameters.
     Note that using parameters outside the engine's valid domain (e.g. emulator training bounds) will result in NaN outputs.
-    The engine decides which parameters exist: ``print(engine)`` lists them with their defaults.
+    The engine decides which parameters exist; the cosmology sets their defaults.
     Parameters are passed as keywords, read as attributes (``cosmo.H0``) and changed with :meth:`update`.
+    A parameter the engine does not take is ignored at its default and raises a ``TypeError`` if set.
+    A custom engine's parameters not listed below have no default and must be passed as further keywords.
 
     Attributes
     ----------
@@ -44,8 +58,34 @@ class Cosmology:
     params : dict
         The engine's parameters and their values; these are the pytree leaves.
     H0 : float
-        Hubble constant in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`: the parameter
-        if the engine has one, else :math:`H(0)` from the engine.
+        Hubble constant in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}` (default 68.0);
+        if the engine has no ``H0`` parameter, :math:`H(0)` from the engine.
+    omega_cdm : float
+        Physical cold dark matter density, :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2` (default 0.12).
+    omega_b : float
+        Physical baryon density, :math:`\\omega_b = \\Omega_b h^2` (default 0.02246576).
+    A_s : float
+        Amplitude of the primordial scalar power spectrum (default :math:`2.1053 \\times 10^{-9}`).
+    n_s : float
+        Scalar spectral index (default 0.965).
+    tau : float
+        Optical depth to reionization (default 0.0544).
+    m_ncdm : float
+        Neutrino mass in eV (default 0.06); per state for engines with three degenerate states.
+    N_ur : float
+        Effective number of ultra-relativistic species (default 3.046).
+    w0 : float
+        Dark energy equation of state (default -1).
+    f_ede : float
+        Maximum fractional contribution of early dark energy (default 0.1).
+    z_c : float
+        Critical redshift of the early dark energy transition (default 3162.278).
+    theta_i : float
+        Initial early dark energy field displacement in radians (default 1.57).
+    r : float
+        Tensor-to-scalar ratio (default 0.01).
+    T_cmb : float
+        CMB temperature today in K (default 2.7255).
     extrapolate_z : bool
         If True, redshifts above the engine's maximum are
         extrapolated. This is less accurate for early dark
@@ -62,13 +102,25 @@ class Cosmology:
         :math:`M(R)` in :math:`\\sigma(M)` and the mass function. :math:`\\sigma(M)` always uses
         the total-matter linear spectrum, and everything else uses total matter.
     """
-    def __init__(self, engine=None, *, extrapolate_z=False, extrapolate_k=True, ncdm_mode="cb", **params):
+    def __init__(self, engine=None, *,
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,  # LCDM
+                 m_ncdm=None, N_ur=None, w0=None,                                                   # wCDM, Neff, MNU
+                 f_ede=None, z_c=None, theta_i=None, r=None,                                        # EDE
+                 T_cmb=None,                                                                        # Non-emulator
+                 extrapolate_z=False, extrapolate_k=True, ncdm_mode="cb", **params):
         engine = engine if engine is not None else EmulatorEngine("lcdm:v1")
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
-        _check_params(engine, params)
+        named = _named(H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb)
+        # A core keyword the engine lacks is only an error if moved off its default.
+        given = {n: v for n, v in named.items()
+                 if v is not None and (n in engine.params or n not in _CORE or v != _FIDUCIAL_PARAMS[n])}
+        _check_params(engine, {**given, **params})
+        missing = [n for n in engine.params if n not in _FIDUCIAL_PARAMS and n not in params]
+        if missing:
+            raise TypeError(f"{engine!r} needs {', '.join(missing)} passed explicitly: Cosmology has no default for it.")
         self.engine = engine
-        self.params = {**engine.params, **params}
+        self.params = {n: params.get(n, given.get(n, _FIDUCIAL_PARAMS.get(n))) for n in engine.params}
         self.extrapolate_z = extrapolate_z
         self.extrapolate_k = extrapolate_k
         self.ncdm_mode = ncdm_mode
@@ -106,7 +158,9 @@ class Cosmology:
         obj.params = dict(zip(obj.engine.params, children))
         return obj
 
-    def update(self, *, extrapolate_z=None, extrapolate_k=None, ncdm_mode=None, **params):
+    def update(self, *, H0=None, omega_cdm=None, omega_b=None, A_s=None, n_s=None, tau=None,
+               m_ncdm=None, N_ur=None, w0=None, f_ede=None, z_c=None, theta_i=None, r=None, T_cmb=None,
+               extrapolate_z=None, extrapolate_k=None, ncdm_mode=None, **params):
         """
         Return a new Cosmology instance with updated parameters.
 
@@ -118,14 +172,18 @@ class Cosmology:
             If not None, replaces :attr:`extrapolate_k`.
         ncdm_mode : {"cb", "m"} or None
             If not None, replaces :attr:`ncdm_mode`.
+        H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb : float or None
+            New values for the parameters listed in :class:`Cosmology`; None leaves a parameter unchanged.
         **params
-            New values for the engine's parameters; None leaves a parameter unchanged.
+            New values for a custom engine's other parameters; None leaves a parameter unchanged.
 
         Returns
         -------
         Cosmology
             New instance with updated parameters.
         """
+        named = _named(H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r, T_cmb)
+        params = {**{n: v for n, v in named.items() if v is not None}, **params}
         _check_params(self.engine, params)
         if ncdm_mode is not None and ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')

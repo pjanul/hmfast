@@ -1,6 +1,7 @@
 """Engines: the source of the background and matter power spectrum behind a Cosmology."""
 import dataclasses
 import os
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Callable, Optional
 
@@ -15,7 +16,7 @@ from hmfast.utils import Const, log_interp1d_extrap
 _C_KMS = Const._c_ / 1e3
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(64)
 
-_LCDM_PARAMS = MappingProxyType({"H0": 68.0, "omega_cdm": 0.12, "omega_b": 0.02246576, "A_s": 2.1053e-9, "n_s": 0.965})
+_LCDM_NAMES = ("H0", "omega_cdm", "omega_b", "A_s", "n_s")
 
 _REQUIRED = ("hubble_parameter", "pk_linear", "densities")
 _OPTIONAL = ("pk_nonlinear", "angular_diameter_distance", "growth_factor", "sigma8", "cl_cmb",
@@ -30,72 +31,62 @@ _DEPENDENTS = {
 @dataclasses.dataclass(frozen=True, eq=False)
 class Engine:
     """
-    Source of the background and matter power spectrum behind a :class:`~hmfast.cosmology.Cosmology`.
+    Parent engine class from which :class:`EmulatorEngine` and :class:`AnalyticEngine` inherit: the functions
+    behind a :class:`~hmfast.cosmology.Cosmology`.
 
-    An engine is a set of functions of ``p``, a dict of the engine's :attr:`params` at the cosmology's
-    values. ``Cosmology`` jits, differentiates and vmaps through them, so each must be JAX-traceable
-    and read every parameter from ``p``; a value taken from an enclosing scope is a constant with zero gradient.
-
-    Three functions are required. Each optional one left as None falls back to the default given
-    below, computed from the required ones of the same engine. On construction the required functions
-    are traced once, without being evaluated, so a parameter missing from ``params`` or a wrong
-    output shape raises a ``TypeError`` immediately.
+    Build one from your own functions, or change those of a built-in engine with :meth:`replace`. Each function
+    takes ``p``, a dict of the cosmology's values of :attr:`params`, and must be JAX-traceable. Optional
+    functions left as None are computed from the required ones. The required functions are traced once on
+    construction, so a missing parameter or a wrong output shape raises a ``TypeError`` immediately.
 
     Parameters
     ----------
-    params : dict
-        Parameter names and default values: the keywords of ``Cosmology`` and its differentiable leaves.
+    params : tuple of str
+        Parameters the engine reads. ``Cosmology`` sets the defaults of those it names; any other must be passed to it.
     hubble_parameter : callable
-        ``(z, p) -> H(z)`` in :math:`\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}`, shape :math:`(N_z,)`.
-        If ``H0`` is not in ``params``, ``Cosmology`` takes :math:`H_0 = H(0)` from it.
+        ``(z, p) -> H(z)`` in :math:`\\mathrm{km\\,s^{-1}\\,Mpc^{-1}}`, shape :math:`(N_z,)`; :math:`H_0 = H(0)` if ``H0`` is not in ``params``.
     pk_linear : callable
-        ``(k, z, p) -> P_L(k, z)`` of total matter (massive neutrinos included) in :math:`\\mathrm{Mpc}^3`,
-        shape :math:`(N_k, N_z)`, with ``k`` in :math:`\\mathrm{Mpc}^{-1}`.
+        ``(k, z, p) -> P_L(k, z)`` of total matter in :math:`\\mathrm{Mpc}^3`, shape :math:`(N_k, N_z)`, ``k`` in :math:`\\mathrm{Mpc}^{-1}`.
     densities : callable
-        ``p -> dict`` of ``Omega0_m`` (total matter), ``Omega0_cb`` (CDM + baryons) and ``Omega0_b`` today;
-        optionally ``Omega0_r`` (default 0) and ``w0`` (default -1), used by halofit and redshift extrapolation.
-        :func:`standard_densities` covers the usual case.
+        ``p -> dict`` of ``Omega0_m``, ``Omega0_cb`` and ``Omega0_b`` today, optionally ``Omega0_r`` (default 0)
+        and ``w0`` (default -1); :func:`standard_densities` covers the usual case.
     pk_nonlinear : callable, optional
-        ``(k, z, p) -> P_NL(k, z)``, as ``pk_linear``. Default: halofit (Takahashi et al. 2012; Bird et al. 2012) on ``pk_linear``.
+        As ``pk_linear``. Default: halofit (Takahashi et al. 2012; Bird et al. 2012) on ``pk_linear``.
     angular_diameter_distance : callable, optional
-        ``(z, p) -> D_A(z)`` in Mpc. Default: integral of :math:`c/H` over :math:`\\ln(1+z)`, divided by :math:`1+z` (flat).
+        ``(z, p) -> D_A(z)`` in Mpc. Default: integral of :math:`c/H` in a flat universe.
     growth_factor : callable, optional
-        ``(z, p) -> D(z)`` with :math:`D(0) = 1`. Default: :math:`\\sqrt{P_L(k_0, z)/P_L(k_0, 0)}`, :math:`k_0 = 0.01\\,\\mathrm{Mpc}^{-1}`.
+        ``(z, p) -> D(z)``, :math:`D(0) = 1`. Default: from ``pk_linear`` at :math:`k = 0.01\\,\\mathrm{Mpc}^{-1}`.
     sigma8 : callable, optional
-        ``(z, p) -> sigma_8(z)``. Default: top-hat variance of ``pk_linear`` at :math:`R = 8\\,h^{-1}\\mathrm{Mpc}`.
+        ``(z, p) -> sigma_8(z)``. Default: top-hat variance of ``pk_linear``.
     cl_cmb : callable, optional
-        ``(type, l, p) -> C_l``, shape :math:`(N_\\ell,)`, type ∈ {"TT", "EE", "TE", "PP"} (static). Default: not available.
+        ``(type, l, p) -> C_l``, type ∈ {"TT", "EE", "TE", "PP"} (static). Default: not available.
     derived_parameters : callable, optional
-        ``p -> dict`` of scalars. CMB lensing reads ``z_star`` and ``chi_star``. Default: not available,
-        so CMB-lensing tracers need ``z_source``.
+        ``p -> dict`` of scalars; CMB lensing reads ``z_star`` and ``chi_star``. Default: not available.
     in_bounds : callable, optional
-        ``p -> bool`` (scalar); ``Cosmology`` returns NaN where False. Default: always True.
+        ``p -> bool``; ``Cosmology`` returns NaN where False. Default: always True.
     k_grid : array_like, optional
-        Wavenumbers in :math:`\\mathrm{Mpc}^{-1}` for :math:`\\sigma(M)` and FFTLog (static);
-        ``Cosmology.pk`` extrapolates beyond them if ``extrapolate_k``. Default: ``np.geomspace(1e-4, 50, 500)``.
-    z_max_bg : float, optional
-        Highest redshift of ``hubble_parameter`` and ``angular_diameter_distance``; NaN above unless ``extrapolate_z``. Default: inf.
-    z_max_pk : float, optional
-        Highest redshift of the power spectra and growth; NaN above unless ``extrapolate_z``. Default: inf.
+        Wavenumbers in :math:`\\mathrm{Mpc}^{-1}` for :math:`\\sigma(M)` and FFTLog (static). Default: ``np.geomspace(1e-4, 50, 500)``.
+    z_max_bg, z_max_pk : float, optional
+        Highest redshift of the background and of the power spectra; NaN above unless ``extrapolate_z``. Default: inf.
     name : str, optional
         Label shown by ``repr``.
 
     Examples
     --------
     >>> engine = Engine(
-    ...     params={"H0": 67.7, "Omega_m": 0.31, "Omega_b": 0.049},
+    ...     params=("H0", "Omega_m", "Omega_b"),
     ...     hubble_parameter=lambda z, p: p["H0"] * jnp.sqrt(p["Omega_m"] * (1 + z) ** 3 + 1 - p["Omega_m"]),
     ...     pk_linear=my_pk,
     ...     densities=lambda p: {"Omega0_m": p["Omega_m"], "Omega0_cb": p["Omega_m"], "Omega0_b": p["Omega_b"]},
     ... )
-    >>> cosmo = Cosmology(engine, Omega_m=0.3)
+    >>> cosmo = Cosmology(engine, Omega_m=0.31, Omega_b=0.049)
 
-    Emulated background with an analytic linear spectrum, which needs two extra parameters:
+    Emulated background with an analytic linear spectrum, which reads two more parameters:
 
     >>> emu = EmulatorEngine("lcdm:v1")
-    >>> mixed = emu.replace(pk_linear=AnalyticEngine().pk_linear, params={**emu.params, "T_cmb": 2.7255, "w0": -1.0})
+    >>> mixed = emu.replace(pk_linear=AnalyticEngine().pk_linear, params=(*emu.params, "T_cmb", "w0"))
     """
-    params: dict
+    params: tuple
     hubble_parameter: Callable
     pk_linear: Callable
     densities: Callable
@@ -122,7 +113,9 @@ class Engine:
             value = getattr(self, name)
             if value is not None and not callable(value):
                 raise TypeError(f"Engine {name} must be callable or None; got {value!r}.")
-        object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
+        if isinstance(self.params, (str, Mapping)) or not all(isinstance(n, str) for n in self.params):
+            raise TypeError(f"Engine params must be a tuple of parameter names; got {self.params!r}.")
+        object.__setattr__(self, "params", tuple(self.params))
         object.__setattr__(self, "k_grid", np.asarray(self.k_grid, dtype=float))
         object.__setattr__(self, "z_max_bg", float(self.z_max_bg))
         object.__setattr__(self, "z_max_pk", float(self.z_max_pk))
@@ -131,7 +124,7 @@ class Engine:
 
     def _check(self):
         """Trace the required functions once, so a missing parameter or a wrong shape fails here."""
-        p = {n: jnp.asarray(v, dtype=float) for n, v in self.params.items()}
+        p = {n: jnp.asarray(1.0) for n in self.params}
         z, k = jnp.zeros(3), jnp.asarray(self.k_grid[:4])
         expected = {"hubble_parameter": ((z, p), (3,)), "pk_linear": ((k, z, p), (4, 3))}
         if self.pk_nonlinear is not None:
@@ -198,7 +191,7 @@ class Engine:
 
     # Engines that compare equal share jit caches, so the key holds everything that changes the output.
     def _key(self):
-        return (tuple(self.params.items()), *(getattr(self, n) for n in _REQUIRED + _OPTIONAL),
+        return (self.params, *(getattr(self, n) for n in _REQUIRED + _OPTIONAL),
                 self.k_grid.tobytes(), self.z_max_bg, self.z_max_pk)
 
     def __eq__(self, other):
@@ -209,11 +202,6 @@ class Engine:
 
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r})" if self.name else f"{type(self).__name__}()"
-
-    def __str__(self):
-        provides = [n for n in _REQUIRED + _OPTIONAL if getattr(self, n) is not None]
-        params = ", ".join(f"{k}={v:.6g}" for k, v in self.params.items())
-        return f"{self!r}\n  params  : {params}\n  provides: {', '.join(provides)}"
 
 
 # ----------------------------------------------------------------------
@@ -301,8 +289,6 @@ def standard_densities(p, *, m_ncdm=0.06, deg_ncdm=1.0, N_ur=3.046, T_cmb=2.7255
 # ----------------------------------------------------------------------
 
 _STANDARD_CONSTANTS = MappingProxyType({"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255, "deg_ncdm": 1.0})
-_EXTENSION_DEFAULTS = {"m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278,
-                       "theta_i": 1.57, "r": 0.01}
 _EDE = ("m_ncdm", "N_ur", "f_ede", "z_c", "theta_i", "r")
 _V1 = {"z_max_pk": 5.0, "grid": "v1", "log_bg": False, "n_s": (0.8, 1.2), "deg_ncdm": 1.0}
 
@@ -346,7 +332,7 @@ _Z_BG = np.linspace(0.0, 20.0, 5000)  # redshifts of the emulated background
 
 class EmulatorEngine(Engine):
     """
-    Engine from the neural-network emulators of CLASS: background, linear and nonlinear power spectra,
+    Engine that calls the cosmopower emulators of CLASS: background, linear and nonlinear :math:`P(k)`,
     :math:`\\sigma_8(z)`, CMB spectra and derived parameters. Outputs are NaN outside the training ranges.
 
     Every set takes ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s`` and ``tau``, plus:
@@ -364,9 +350,8 @@ class EmulatorEngine(Engine):
     ``ede:v2``          as ``ede:v1``                                    3                   20
     ==================  ===============================================  ==================  ==============
 
-    Constants a set does not take are :math:`m_\\nu = 0.06` eV, :math:`N_{\\rm ur} = 3.046`, :math:`w_0 = -1`
-    and :math:`T_{\\rm cmb} = 2.7255` K. The background is valid to :math:`z = 20` for every set, and
-    ``print(engine)`` lists a set's parameters, defaults and constants.
+    Parameters a set does not take are fixed at its ``constants``: :math:`m_\\nu = 0.06` eV,
+    :math:`N_{\\rm ur} = 3.046`, :math:`w_0 = -1` and :math:`T_{\\rm cmb} = 2.7255` K. The background is valid to :math:`z = 20`.
 
     Parameters
     ----------
@@ -374,12 +359,6 @@ class EmulatorEngine(Engine):
         Emulator set, one of the table above.
     pknl_mode : {"hmcode", "halofit"}
         Nonlinear :math:`P(k)` from the HMcode emulator, or halofit on the emulated linear :math:`P(k)`.
-
-    Attributes
-    ----------
-    k_grid : numpy.ndarray
-        The emulators' output wavenumbers: 500 points in :math:`[10^{-4}, 50]\\,\\mathrm{Mpc}^{-1}` (v1 sets)
-        or 1000 in :math:`[5 \\times 10^{-4}, 10]\\,\\mathrm{Mpc}^{-1}` (``ede:v2``).
 
     Examples
     --------
@@ -393,7 +372,7 @@ class EmulatorEngine(Engine):
         if pknl_mode not in ("hmcode", "halofit"):
             raise ValueError(f'pknl_mode must be "hmcode" or "halofit", got {pknl_mode!r}.')
         spec = _EMULATOR_SETS[name]
-        params = {**_LCDM_PARAMS, "tau": 0.0544, **{n: _EXTENSION_DEFAULTS[n] for n in spec["free"]}}
+        params = (*_LCDM_NAMES, "tau", *spec["free"])
         constants = {n: v for n, v in {**_STANDARD_CONSTANTS, "deg_ncdm": spec["deg_ncdm"]}.items() if n not in params}
         if spec["grid"] == "v2":
             k_grid = np.geomspace(5e-4, 10.0, 1000)
@@ -432,9 +411,6 @@ class EmulatorEngine(Engine):
 
     def __repr__(self):
         return f"EmulatorEngine({self.name!r}, pknl_mode={self.pknl_mode!r})"
-
-    def __str__(self):
-        return f"{super().__str__()}\n  constants: {', '.join(f'{k}={v:.6g}' for k, v in self.constants.items())}"
 
     def _emu(self, key):
         if (self.name, key) not in _WEIGHTS:
@@ -649,7 +625,7 @@ def eisenstein_hu(k, omega_cb, omega_b, T_cmb):
     return f_b * T_b + f_c * T_c
 
 
-_ANALYTIC_PARAMS = MappingProxyType({**_LCDM_PARAMS, "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "T_cmb": 2.7255})
+_ANALYTIC_PARAMS = (*_LCDM_NAMES, "m_ncdm", "N_ur", "w0", "T_cmb")
 
 
 def _analytic_hubble_parameter(z, p):
@@ -694,17 +670,12 @@ def _analytic_pk_linear(k, z, p):
 
 class AnalyticEngine(Engine):
     """
-    Engine for a flat :math:`w_0\\mathrm{CDM}` cosmology from analytic formulae, valid for any
-    parameter values and redshift.
+    Engine for a flat :math:`w_0\\mathrm{CDM}` cosmology from analytic formulae, valid for any parameter values and redshift.
 
-    :math:`H(z)` is the Friedmann equation with photons, ``N_ur`` massless neutrinos, massive neutrinos
-    counted as matter, and constant-:math:`w_0` dark energy. The linear :math:`P(k, z)` is
-    :math:`A_s` and :math:`n_s` times the Eisenstein & Hu (1998) transfer function and the linear
-    growth factor, without massive-neutrino suppression; the nonlinear one is halofit. There are no
-    CMB spectra or derived parameters, so CMB-lensing tracers need ``z_source``.
-
-    Its parameters are ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s``, ``m_ncdm`` (one state),
-    ``N_ur``, ``w0`` and ``T_cmb``.
+    :math:`H(z)` is the Friedmann equation with photons, ``N_ur`` massless neutrinos, massive neutrinos counted
+    as matter and constant-:math:`w_0` dark energy. The linear :math:`P(k, z)` is the Eisenstein & Hu (1998)
+    spectrum times the linear growth factor, without massive-neutrino suppression, and the nonlinear one is halofit.
+    There are no CMB spectra or derived parameters, so CMB-lensing tracers need ``z_source``.
 
     Examples
     --------
@@ -718,42 +689,3 @@ class AnalyticEngine(Engine):
 
     def __repr__(self):
         return "AnalyticEngine()"
-
-
-# ----------------------------------------------------------------------
-# Combined engine
-# ----------------------------------------------------------------------
-
-class CombinedEngine(Engine):
-    """
-    Engine with the background of one engine and the power spectrum of another; the same as
-    ``background.replace(...)`` with the power-spectrum fields of ``power``.
-
-    Its parameters are those of both engines, with ``background``'s defaults where they share a name.
-
-    Parameters
-    ----------
-    background : Engine
-        Source of :math:`H(z)`, :math:`D_A(z)`, the densities and any CMB spectra or derived parameters.
-    power : Engine
-        Source of the linear and nonlinear :math:`P(k, z)`, the growth factor and :math:`\\sigma_8(z)`.
-    """
-    _check_on_init = False
-
-    def __init__(self, background, power):
-        for attr, value in (("background", background), ("power", power)):
-            object.__setattr__(self, attr, value)
-        fields = {f.name: getattr(background, f.name) for f in dataclasses.fields(Engine)}
-        fields.update({n: getattr(power, n) for n in ("pk_linear", "pk_nonlinear", "growth_factor", "sigma8",
-                                                      "k_grid", "z_max_pk")})
-        fields.update(params={**power.params, **background.params}, in_bounds=self._both_in_bounds, name=None)
-        super().__init__(**fields)
-
-    def _both_in_bounds(self, p):
-        return self.background._call("in_bounds", p) & self.power._call("in_bounds", p)
-
-    def _key(self):
-        return (self.background, self.power)
-
-    def __repr__(self):
-        return f"CombinedEngine(background={self.background!r}, power={self.power!r})"

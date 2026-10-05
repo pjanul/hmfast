@@ -3,8 +3,8 @@ Custom extensions guide
 =======================
 
 This short guide points to the API pages for the parent classes that users
-can subclass to provide custom ingredients (cosmology engines, tracers, profiles,
-and halo-model components).
+can subclass or build to provide custom ingredients (cosmology engines, tracers,
+profiles, and halo-model components).
 
 The following list shows some of the parent classes you can implement:
 
@@ -20,7 +20,32 @@ The following list shows some of the parent classes you can implement:
 - **Subhalo mass function**: :doc:`/api/halos/massfunc` (see subhalo classes).
 
 For JAX `jit`/autodiff compatibility implement your classes as JAX pytrees
-so JAX can traverse array children while treating configuration as static.
+so JAX can traverse array children while treating configuration as static
+(engines are the exception; see `Pytrees & differentiability`_).
+
+A ``Cosmology`` takes :math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)` from its
+engine, and everything else in ``hmfast`` (growth, :math:`\sigma(M)`, the halo
+model, statistics) is built on them. An engine is just a set of functions, so you
+can define your own cosmology if you want. ``hmfast`` already provides working
+engines for the cosmopower emulators (``EmulatorEngine``) and for an analytic
+cosmology (``AnalyticEngine``), but to test a model ``hmfast`` does not support
+you can swap any of their functions with ``Engine.replace``, for example
+interchanging the linear and nonlinear spectra::
+
+  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine
+
+  emu = EmulatorEngine("lcdm:v1")
+  linear_only = emu.replace(pk_nonlinear=emu.pk_linear)  # emulated PKL wherever PKNL is used
+  mixed = emu.replace(pk_linear=AnalyticEngine().pk_linear,  # analytic P(k) on the emulated background
+                      params=(*emu.params, "T_cmb", "w0"))  # parameters the analytic P(k) also reads
+  cosmo = Cosmology(linear_only, H0=67.4)
+
+``engine.params`` names the parameters an engine reads. ``Cosmology`` supplies
+the defaults of those it knows (``H0``, ``omega_b``, ...), and any new one must
+be passed to it. Each function takes ``p``, a dict of the parameter values, and
+must be JAX-traceable; :class:`~hmfast.cosmology.Engine` lists the functions,
+their signatures and which are optional. The example below builds an engine
+from scratch.
 
 For full API details and method signatures consult the linked API pages above.
 
@@ -32,6 +57,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
 
   import jax.numpy as jnp
   from jax.tree_util import register_pytree_node_class
+  from hmfast.cosmology import Cosmology, Engine
   from hmfast.halos import HaloModel
   from hmfast.halos.massfunc import HaloMassFunction, SubHaloMassFunction
   from hmfast.halos.bias import HaloBias
@@ -45,6 +71,16 @@ Not physical — only intended as a tiny runnable example users can adapt::
   l_grid = jnp.geomspace(1, 1e3, 100)
   z_range = (0.05, 2.0)
   n_z = 32
+
+  # --- Toy cosmology engine: flat LCDM expansion and a toy linear P(k) ---
+
+  engine = Engine(
+    params=("H0", "Omega_m"),
+    hubble_parameter=lambda z, p: p["H0"] * jnp.sqrt(p["Omega_m"] * (1 + z) ** 3 + 1 - p["Omega_m"]),
+    pk_linear=lambda k, z, p: jnp.outer(1e4 * k / (1 + (k / 0.02) ** 3), 1 / (1 + z) ** 2),
+    densities=lambda p: {"Omega0_m": p["Omega_m"], "Omega0_cb": p["Omega_m"], "Omega0_b": 0.05},
+  )
+  cosmo = Cosmology(engine, Omega_m=0.31)  # H0 takes Cosmology's default; Omega_m has none, so it is required
 
   # --- Toy implementations of halo-model building blocks ---
   #
@@ -140,6 +176,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   tracer1 = NewTracer(profile=NewMatterProfile())
 
   hm = HaloModel(
+    cosmology=cosmo,
     halo_mass_function=NewHaloMassFunction(),
     halo_bias=NewHaloBias(),
     subhalo_mass_function=NewSubHaloMassFunction(),
@@ -196,73 +233,12 @@ gradient immediately after the class).
   g = jax.grad(lambda a: jnp.sum(NewHaloMassFunction(a).dndlnm(None, m, z)))(0.5)
   print(g)
 
+Engines need no registration: their functions are static and their parameters
+are the leaves of the ``Cosmology``, so a gradient goes through ``update``::
+
+  g = jax.grad(lambda om: cosmo.update(Omega_m=om).hubble_parameter(1.0))(0.31)
+
+A new engine compiles anew under ``jit``, so create it once and reuse it.
+
 See the API pages for full method signatures and optional behaviors.
-
-
-Cosmology engines
------------------
-
-A ``Cosmology`` holds the cosmological parameters; its engine computes
-:math:`H(z)`, :math:`D_A(z)` and :math:`P(k, z)` from them, and ``hmfast``
-derives everything else (growth, :math:`\sigma(M)`, halo model, statistics).
-Two engines are built in: ``EmulatorEngine`` calls the emulators (within their
-training ranges), and ``AnalyticEngine`` uses analytic formulae with the
-Eisenstein & Hu (1998) transfer function and halofit (for any parameter values).
-``CombinedEngine`` takes the background from one engine and :math:`P(k, z)` from another::
-
-  from hmfast.cosmology import Cosmology, EmulatorEngine, AnalyticEngine, CombinedEngine
-
-  cosmo_emu = Cosmology(EmulatorEngine("lcdm:v1"), H0=67.4)
-  cosmo_ana = Cosmology(AnalyticEngine(), H0=110.0, omega_cdm=0.30, w0=-0.7)
-  cosmo_mix = Cosmology(CombinedEngine(background=EmulatorEngine("wcdm:v1"), power=AnalyticEngine()), w0=-0.9)
-
-The engine decides which parameters exist. ``print(engine)`` lists the ones it
-takes (``engine.params``, with defaults) and the values it fixes (``engine.fixed``)::
-
-  >>> print(EmulatorEngine("wcdm:v1"))
-  EmulatorEngine('wcdm:v1', pknl_mode='hmcode')
-    free : H0=68, omega_cdm=0.12, omega_b=0.0224658, A_s=2.1053e-09, n_s=0.965, tau=0.0544, w0=-1
-    fixed: m_ncdm=0.06, N_ur=3.046, T_cmb=2.7255, deg_ncdm=1
-
-Parameters are passed to ``Cosmology`` as keywords, read as attributes
-(``cosmo.H0``) and changed with ``update``; setting a fixed or unknown one
-raises a ``TypeError``. A ``CombinedEngine`` fixes anything either engine fixes,
-so both always see the same cosmology.
-
-For your own engine, subclass ``Engine`` (or a built-in engine). Every
-``Cosmology`` method ``X`` that uses the engine calls ``engine.compute_X`` with the
-same arguments plus ``p``, a dict of the parameters, fixed values and densities;
-``Cosmology`` then masks values outside the engine's domain and extrapolates.
-``compute_hubble_parameter(z, p)`` and ``compute_pk(k, z, p, linear=True)`` are
-required; ``super().compute_pk(k, z, p, linear=False)`` is halofit on your linear
-spectrum, and :math:`D_A(z)` defaults to the integral of :math:`c/H`.
-``compute_sigma8``, ``compute_cl_cmb``, ``compute_derived_parameters``,
-``compute_densities`` and ``in_bounds`` are optional. New parameters go in
-``params``; the example below adds a running of the spectral index to the
-analytic engine::
-
-  import jax
-  import jax.numpy as jnp
-  from hmfast.cosmology import Cosmology, AnalyticEngine
-
-  class RunningEngine(AnalyticEngine):
-    """Analytic LCDM with a running spectral index."""
-    params = {**AnalyticEngine.params, "n_run": 0.0}
-
-    def compute_pk(self, k, z, p, linear=True):
-      if not linear:
-        return super().compute_pk(k, z, p, linear=False)  # halofit on the spectrum below
-      running = jnp.exp(0.5 * p["n_run"] * jnp.log(k / 0.05) ** 2)
-      return super().compute_pk(k, z, p) * running[:, None]
-
-  engine = RunningEngine()
-  cosmo = Cosmology(engine, H0=67.4, n_run=-0.01)
-  g = jax.grad(lambda a: cosmo.update(n_run=a).sigma8(0.0))(-0.01)
-
-To fix a parameter instead, declare it in ``fixed`` (for example
-``fixed = {**AnalyticEngine.fixed, "w0": -1.0}``); a name is never in both.
-
-Engines are static under ``jit``. Built-in engines with the same settings share
-compiled code; a custom engine shares it only with itself unless it defines
-``_key()`` to return the settings that change its output, so create one and reuse it.
 

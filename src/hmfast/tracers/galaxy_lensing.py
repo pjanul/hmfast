@@ -167,12 +167,11 @@ class GalaxyLensingTracer(Tracer):
 
             I_s(z) = \\int_z^\\infty dz_s\\, \\frac{dN}{dz}(z_s)\\, \\frac{\\chi(z_s)-\\chi(z)}{\\chi(z_s)}.
         """
-        cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z)
 
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s
         H0 = cosmology.H0  # Hubble constant in km/s/Mpc
-        Omega_m = cparams["Omega0_m"]  # Matter density parameter
+        Omega_m = cosmology.omega_x(0.0, "matter")  # Matter density parameter
 
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
         I_s = self._lensing_efficiency_integral(cosmology, z, self.dndz)
@@ -190,10 +189,8 @@ class GalaxyLensingTracer(Tracer):
         Intrinsic-alignment (NLA) term (:math:`n=-1`, :math:`a=2`: projected with :math:`f^{(2)}_\\ell\\, j_\\ell/(k\\chi)^2`) of the galaxy lensing
         kernel, controlled by ``ia_bias``.
         """
-        cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z)
         c_km_s = Const._c_ / 1e3
-        Omega_m = cparams["Omega0_m"]
 
         z_a, A_vals = self.ia_bias
         A_IA_at_z = jnp.interp(z, z_a, A_vals)  # clamp-to-edge extrapolation (A_IA is not a density)
@@ -202,8 +199,8 @@ class GalaxyLensingTracer(Tracer):
         H_grid = cosmology.hubble_parameter(z) / c_km_s
         W_density = H_grid * jnp.interp(z, z_g, phi_prime_g, left=0.0, right=0.0)
 
-        rho_crit_h2_ref = cparams["Rho_crit_0"] / cparams["h"] ** 2  # strip the h^2 baked into Rho_crit_0 back out
-        W_IA = -A_IA_at_z * (Const._C1_IA_ * rho_crit_h2_ref) * Omega_m / D_z * W_density
+        rho_m_h2_ref = cosmology.rho_x(0.0, "matter") / (cosmology.H0 / 100.0) ** 2  # Omega_m times the h = 1 critical density
+        W_IA = -A_IA_at_z * Const._C1_IA_ * rho_m_h2_ref / D_z * W_density
 
         return jnp.squeeze(W_IA)
 

@@ -143,8 +143,9 @@ class T08HaloMassFunction(HaloMassFunction):
         hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_def=mass_def).T
         dlnnu_dlnm = interp_m(dlnnu_dlnm_grid).T
 
-        cparams = cosmology._cosmo_params()
-        rho_mean_0 = cparams['Omega0_halo'] * cparams['Rho_crit_0']
+        rho_mean_0 = cosmology.rho_x(0.0, "matter")
+        if cosmology.ncdm_mode == "cb":
+            rho_mean_0 = rho_mean_0 - cosmology.rho_x(0.0, "neutrinos_massive")
         dn_dlnm = hmf * rho_mean_0 * jnp.abs(dlnnu_dlnm) / m[:, None]
 
         return jnp.squeeze(dn_dlnm)
@@ -282,8 +283,9 @@ class T10HaloMassFunction(HaloMassFunction):
         hmf = self._f_sigma(cosmology, sigma_m.T, z, mass_def=mass_def).T
         dlnnu_dlnm = interp_m(dlnnu_dlnm_grid).T
 
-        cparams = cosmology._cosmo_params()
-        rho_mean_0 = cparams['Omega0_halo'] * cparams['Rho_crit_0']
+        rho_mean_0 = cosmology.rho_x(0.0, "matter")
+        if cosmology.ncdm_mode == "cb":
+            rho_mean_0 = rho_mean_0 - cosmology.rho_x(0.0, "neutrinos_massive")
         dn_dlnm = hmf * rho_mean_0 * jnp.abs(dlnnu_dlnm) / m[:, None]
 
         return jnp.squeeze(dn_dlnm)

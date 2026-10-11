@@ -766,7 +766,6 @@ class M21CIBProfile(CIBProfile):
         """
         # Gather all relevant parameters 
         
-        cparams = halo_model.cosmology._cosmo_params()
         M_eff, sigma2_LM, eta_max, tau, z_c, f_sub = self.M_eff, self.sigma2_LM, self.eta_max, self.tau, self.z_c, self.f_sub 
         m, z = jnp.atleast_1d(m), jnp.atleast_1d(z)
     
@@ -777,7 +776,7 @@ class M21CIBProfile(CIBProfile):
         Mdot = self._m_dot(halo_model, m, z)
         logM = jnp.log(m)[:, None]
         logMeff = jnp.log(M_eff)
-        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
+        f_b = halo_model.cosmology.omega_b / (halo_model.cosmology.H0 / 100.0) ** 2 / halo_model.cosmology.omega_x(0.0, "matter")
     
         # Get SFR_c and then use that to get SFR
         sfr_c = eta_max * jnp.exp(- ((logM - logMeff)**2) / (2.0 * sigma2_lnM))

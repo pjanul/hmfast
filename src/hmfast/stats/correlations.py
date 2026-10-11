@@ -59,7 +59,7 @@ def _fftlog_interp(kind, x, f, y, nu, extrap):
     return jnp.squeeze(g.reshape(ln_y.shape + trailing))
 
 
-def corr_3d(cosmology, k, pk, r):
+def corr_3d(cosmology, k, pk, r, *, extrapolate=True):
     """
     3D correlation function of a tabulated power spectrum,
 
@@ -84,6 +84,9 @@ def corr_3d(cosmology, k, pk, r):
     r : float or jnp.ndarray
         Comoving separations in :math:`\\mathrm{Mpc}`, scalar or shape :math:`(N_r,)`.
         Only reliable well inside :math:`[1/k_{\\max}, 1/k_{\\min}]`; FFTLog rings near the edges.
+    extrapolate : bool
+        If True (default), ``pk`` is extended as a power law beyond the ends of ``k`` before the transform;
+        if False, it is padded with zeros.
 
     Returns
     -------
@@ -92,10 +95,10 @@ def corr_3d(cosmology, k, pk, r):
         dimensions get squeezed before return.
     """
     k = _log_grid(k, "k")
-    return _fftlog_interp("P2xi", k, pk, r, 0, cosmology.extrapolate_k)
+    return _fftlog_interp("P2xi", k, pk, r, 0, extrapolate)
 
 
-def corr_angular(cosmology, l, cl, theta, *, type="NN"):
+def corr_angular(cosmology, l, cl, theta, *, type="NN", extrapolate=True):
     """
     Flat-sky angular correlation function of a tabulated angular power spectrum,
 
@@ -117,9 +120,8 @@ def corr_angular(cosmology, l, cl, theta, *, type="NN"):
 
     For clustering at large ``theta``, compute :math:`C_\\ell` with
     ``l_limber > 0``, since Limber is inaccurate at low :math:`\\ell`. Shear
-    :math:`C_\\ell` vanish at :math:`\\ell \\le 1`, so if
-    :attr:`Cosmology.extrapolate_k` is True start ``l`` at :math:`\\ell \\ge 2`;
-    power-law extrapolation of a zero gives NaN.
+    :math:`C_\\ell` vanish at :math:`\\ell \\le 1`, so with ``extrapolate=True`` start ``l`` at
+    :math:`\\ell \\ge 2`; power-law extrapolation of a zero gives NaN.
 
     Parameters
     ----------
@@ -136,6 +138,9 @@ def corr_angular(cosmology, l, cl, theta, *, type="NN"):
         well inside :math:`[1/\\ell_{\\max}, 1/\\ell_{\\min}]` (radians); FFTLog rings near the edges.
     type : str, default "NN"
         Spin combination; ``type`` ∈ {"NN", "NG", "GG+", "GG-"} (static).
+    extrapolate : bool
+        If True (default), ``cl`` is extended as a power law beyond the ends of ``l`` before the transform;
+        if False, it is padded with zeros.
 
     Returns
     -------
@@ -146,4 +151,4 @@ def corr_angular(cosmology, l, cl, theta, *, type="NN"):
     if type not in _ANGULAR_NU:
         raise ValueError(f"type must be one of {sorted(_ANGULAR_NU)}; got {type!r}.")
     l = _log_grid(l, "l")
-    return _fftlog_interp("C2w", l, cl, jnp.deg2rad(theta), _ANGULAR_NU[type], cosmology.extrapolate_k)
+    return _fftlog_interp("C2w", l, cl, jnp.deg2rad(theta), _ANGULAR_NU[type], extrapolate)

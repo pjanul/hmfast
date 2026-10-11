@@ -31,8 +31,9 @@ class CMBLensingTracer(Tracer):
     profile : MatterProfile
         Matter profile used to model the CMB lensing convergence signal.
     z_source : float
-        Source-plane redshift; for last scattering, ``CosmoPowerCosmology.derived_parameters()["z_star"]``.
-        Above the cosmology's redshift range, :math:`\\chi(z_{\\rm source})` is NaN unless it has ``extrapolate_z=True``.
+        Redshift of the lensed source; for the CMB, last scattering (z ≈ 1090). CosmoPower emulators
+        provide this as ``z_star`` in ``cosmo.derived_parameters()``.
+        Where the cosmology returns NaN, e.g. above a :class:`~hmfast.cosmology.CosmoPowerCosmology`'s range without ``extrapolate_z``, so does the kernel.
     """
 
     _required_profile_type = MatterProfile
@@ -64,7 +65,7 @@ class CMBLensingTracer(Tracer):
         profile : MatterProfile, optional
             New matter profile to use for the tracer. If None, the profile is unchanged.
         z_source : float, optional
-            New source-plane redshift. If None, z_source is unchanged.
+            New redshift of the lensed source. If None, z_source is unchanged.
 
         Returns
         -------
@@ -109,12 +110,11 @@ class CMBLensingTracer(Tracer):
         """
         # Merge default parameters with input
         
-        cparams = cosmology._cosmo_params()
         z = jnp.atleast_1d(z)  # Ensure z is an array
         
         # Cosmological constants
         H0 = cosmology.H0    # Hubble constant in km/s/Mpc
-        Omega_m = cparams["Omega0_m"]  # Matter density parameter
+        Omega_m = cosmology.omega_x(0.0, "matter")  # Matter density parameter
         c_km_s = Const._c_ / 1e3  # Speed of light in km/s
         
         # Compute comoving distances in physical Mpc.

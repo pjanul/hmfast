@@ -176,9 +176,8 @@ class HaloModel:
         logm, gl_w = gauss_legendre_nodes_weights(jnp.log(self.m_range[0]), jnp.log(self.m_range[1]), self.n_m)
         m = jnp.exp(logm)
         z = jnp.atleast_1d(z)
-        cparams = self.cosmology._cosmo_params()
         # Same density as the matter profile, so the 2-halo term recovers P_lin on large scales.
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]
+        rho_mean_0 = self.cosmology.rho_x(0.0, "matter")
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # (Nm, 1)
     
     

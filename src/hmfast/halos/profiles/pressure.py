@@ -634,8 +634,7 @@ class B12PressureProfile(PressureProfile):
             Electron pressure profile with shape :math:`(N_r, N_m, N_z)`,
             where singleton dimensions get squeezed before return.
         """
-        cparams = halo_model.cosmology._cosmo_params()
-        h = cparams["h"]
+        h = halo_model.cosmology.H0 / 100.0
         alpha, gamma = 1.0, -0.3
         x_out = self.x_out
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -675,7 +674,7 @@ class B12PressureProfile(PressureProfile):
 
         # Thermal Pressure Normalization (P200c)
         H = jnp.atleast_1d(halo_model.cosmology.hubble_parameter(z))
-        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
+        f_b = halo_model.cosmology.omega_b / (halo_model.cosmology.H0 / 100.0) ** 2 / halo_model.cosmology.omega_x(0.0, "matter")
         r_200c = r_200c * h
         # Use M200c and r_200c for normalization
         P_200c = (

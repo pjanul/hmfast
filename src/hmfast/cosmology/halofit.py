@@ -2,6 +2,8 @@
 import jax
 import jax.numpy as jnp
 
+from hmfast.utils import log_interp1d_extrap
+
 
 def _gaussian_moments(ln_r, ln_k, delta2_lin):
     """Gaussian-filtered variance :math:`\\sigma^2(R)` and its first two derivatives in :math:`\\ln R`."""
@@ -75,3 +77,19 @@ def halofit(k, pk_lin, omega_m, omega_m0, w0, f_nu, h):
 
     pk_nl = (delta2_q + delta2_h) * 2.0 * jnp.pi**2 / k**3
     return jnp.where(ln_s0_grid[0] > 0.0, pk_nl, pk_lin)
+
+
+def _halofit_pk_nonlinear(k, z, p, *, hubble_parameter, pk_linear, k_grid, from_params):
+    """Halofit :math:`P_{NL}(k, z)` of shape :math:`(N_k, N_z)`, from the linear spectrum tabulated on ``k_grid``."""
+    cosmo = from_params(p)
+    omega_m0, f_nu = cosmo.omega_x(0.0, "matter"), cosmo.omega_x(0.0, "neutrinos_massive") / cosmo.omega_x(0.0, "matter")
+    k_grid = jnp.asarray(k_grid)
+
+    def one_z(z_i):
+        z_i = jnp.atleast_1d(z_i)
+        omega_m_z = omega_m0 * (1.0 + z_i[0]) ** 3 * (p["H0"] / hubble_parameter(z_i, p)[0]) ** 2
+        pk_lin = pk_linear(k_grid, z_i, p)[:, 0]
+        pk_nl = halofit(k_grid, pk_lin, omega_m_z, omega_m0, cosmo.w0, f_nu, p["H0"] / 100.0)
+        return log_interp1d_extrap(k, k_grid, pk_nl)
+
+    return jax.vmap(one_z, out_axes=1)(z)

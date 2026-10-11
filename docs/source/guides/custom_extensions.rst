@@ -46,6 +46,7 @@ Example
 Minimal working example showing how to supply toy halo-model ingredients.
 Not physical — only intended as a tiny runnable example users can adapt::
 
+  import jax
   import jax.numpy as jnp
   from jax.tree_util import register_pytree_node_class
   from hmfast.cosmology import Cosmology
@@ -62,7 +63,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   l_grid = jnp.geomspace(1, 1e3, 100)
   n_z = 32
 
-  # --- Toy cosmology: flat LCDM expansion and a toy linear P(k) ---
+  # --- Toy cosmology: flat LCDM expansion and a toy P(k) with no nonlinear correction ---
 
   def hubble(z, p):
     om = (p["omega_b"] + p["omega_cdm"]) / (p["H0"] / 100) ** 2
@@ -71,7 +72,16 @@ Not physical — only intended as a tiny runnable example users can adapt::
   def pk_linear(k, z, p):
     return p["amp"] * jnp.outer(1e4 * k / (1 + (k / 0.02) ** 3), 1 / (1 + z) ** 2)
 
-  cosmo = Cosmology(hubble, pk_linear, amp=1.0)  # amp is a new parameter; the standard ones take their defaults
+  def angular_diameter_distance(z, p):
+    zz = jnp.linspace(0.0, 1.0, 64)[:, None] * z  # integration nodes from 0 to each z
+    chi = jax.scipy.integrate.trapezoid(299792.458 / hubble(zz, p), zz, axis=0)
+    return chi / (1 + z)
+
+  def growth_factor(z, p):
+    return 1 / (1 + z)  # matches the (1 + z)^-2 scaling of pk_linear
+
+  # pk_linear doubles as the nonlinear spectrum; amp is a new parameter, the standard ones take their defaults
+  cosmo = Cosmology(hubble, pk_linear, angular_diameter_distance, pk_linear, growth_factor, amp=1.0)
 
   # --- Toy implementations of halo-model building blocks ---
   #

@@ -91,14 +91,11 @@ class NFWMatterProfile(MatterProfile):
             Real-space profile with shape :math:`(N_r, N_m, N_z)`, where
             singleton dimensions get squeezed before return.
         """
-        cparams = halo_model.cosmology._cosmo_params()
-
         r = jnp.atleast_1d(r)
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
-        #m_internal = m * cparams["h"]
 
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]  # delta_m = rho_halo / rho_m; neutrinos stay smooth
+        rho_mean_0 = halo_model.cosmology.rho_x(0.0, "matter")  # delta_m = rho_halo / rho_m; neutrinos stay smooth
         # Normalized real-space profile (unit mass)
         u_r_norm = jnp.reshape(self._u_r_nfw(halo_model, r, m, z), (len(r), len(m), len(z)))
         # Mass-weighted profile
@@ -132,15 +129,13 @@ class NFWMatterProfile(MatterProfile):
         """
 
         
-        cparams = halo_model.cosmology._cosmo_params()
-
         k, m, z = jnp.atleast_1d(k), jnp.atleast_1d(m), jnp.atleast_1d(z)
     
         # Compute u_m_k from Tracer
         _, u_m = self._u_k_nfw(halo_model, k, m, z)
         u_m = jnp.reshape(u_m, (len(k), len(m), len(z)))
         
-        rho_mean_0 = cparams["Rho_crit_0"] * cparams["Omega0_m"]  # delta_m = rho_halo / rho_m; neutrinos stay smooth
+        rho_mean_0 = halo_model.cosmology.rho_x(0.0, "matter")  # delta_m = rho_halo / rho_m; neutrinos stay smooth
         m_over_rho_mean = (m / rho_mean_0)[:, None]  # shape (N_m, 1)
         m_over_rho_mean = jnp.broadcast_to(m_over_rho_mean, u_m.shape)
 

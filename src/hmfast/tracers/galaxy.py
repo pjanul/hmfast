@@ -223,9 +223,8 @@ class GalaxyTracer(Tracer):
         s_at_source = jnp.interp(z_g, z_s, s_vals)  # s(z) at the source (own dndz) grid, clamp-to-edge
         weight = 1.0 - 2.5 * s_at_source  # magnification weighting from the mag-bias log-slope s(z)
 
-        cparams = cosmology._cosmo_params()
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
-        lensing_pref = 1.5 * cparams["Omega0_m"] * (cosmology.H0 / (Const._c_ / 1e3)) ** 2 * chi_z * (1 + z)
+        lensing_pref = 1.5 * cosmology.omega_x(0.0, "matter") * (cosmology.H0 / (Const._c_ / 1e3)) ** 2 * chi_z * (1 + z)
         W_mag = -2.0 * lensing_pref \
             * self._lensing_efficiency_integral(cosmology, z, self.dndz, weight=weight)
 

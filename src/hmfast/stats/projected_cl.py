@@ -21,45 +21,42 @@ jax.config.update("jax_enable_x64", True)
 
 # Lower end of the inferred redshift range; lensing and magnification kernels extend to z=0.
 _Z_MIN = 1e-5
+# Upper end of the inferred redshift range when no tracer kernel has a cutoff.
+_Z_MAX_DEFAULT = 10.0
+# Redshifts on which chi(z) is tabulated for inverting it.
+_Z_INVERT = jnp.linspace(0.0, 20.0, 5000)
 
 
 def _resolve_z_range(cosmology, *tracers):
-    """``(_Z_MIN, z_max)`` with z_max the lowest tracer cutoff, capped at the emulator range."""
-    z_maxes = [z for z in (t._z_max(cosmology) for t in tracers) if z is not None]
-    if not cosmology.extrapolate_z or not z_maxes:
-        z_maxes.append(cosmology._z_grid_pk()[-1])
+    """``(_Z_MIN, z_max)`` with z_max the lowest tracer cutoff, or ``_Z_MAX_DEFAULT`` if none has one."""
+    z_maxes = [z for z in (t._z_max(cosmology) for t in tracers) if z is not None] or [_Z_MAX_DEFAULT]
     z_max = z_maxes[0]
     for z in z_maxes[1:]:
         z_max = jnp.minimum(z_max, z)
     return (_Z_MIN, z_max)
 
 
-def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn):
+def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn, z_cut):
     """Shifted-grid quantities (z_lp, lp1h, lp3h, sqell) for the extended-Limber RSD
     projection (Chisari et al. 2019 Sec. 2.4.1), shared by cl_limber's and
-    cl_linear_limber's Limber engines. pk_fn(k, z) -> P(k, z) in that engine's own P(k)."""
-    z_dense = cosmology._z_grid_bg()
+    cl_linear_limber's Limber engines. pk_fn(k, z) -> P(k, z) in that engine's own P(k);
+    z_cut is the top of the redshift range, above which every kernel term vanishes."""
+    z_dense = _Z_INVERT
     chi_dense = cosmology.angular_diameter_distance(z_dense) * (1.0 + z_dense)
 
     lp1h, lp3h = l + 0.5, l + 1.5
     chi_lp = chi[:, None] * (lp3h / lp1h)[None, :]  # (Nz, Nl): same k_l, shifted chi
     z_lp_raw = jnp.interp(chi_lp.reshape(-1), chi_dense, z_dense).reshape(chi_lp.shape)
-    # Clip to the cosmology's trained P(k) grid; extrapolate_z=False cosmologies return
-    # NaN past it, so fall back to no growth correction there instead.
-    z_b = cosmology._z_grid_pk()[-1]
-    in_bounds_lp = z_lp_raw <= z_b
-    if cosmology.extrapolate_z:
-        growth_ratio_sq_lp = jnp.where(in_bounds_lp, 1.0, (cosmology.growth_factor(z_lp_raw) / cosmology.growth_factor(z_b)) ** 2)
-    else:
-        growth_ratio_sq_lp = jnp.ones_like(z_lp_raw)  # never evaluate the NaN growth_factor: masking it still leaves NaN reverse-mode gradients
-    z_lp = jnp.where(in_bounds_lp, z_lp_raw, z_b)
+    # Shifted redshifts past the range carry no kernel weight, so evaluate them at its top and zero them below.
+    in_range_lp = z_lp_raw <= z_cut
+    z_lp = jnp.where(in_range_lp, z_lp_raw, z_cut)
 
     k_l = lp1h[None, :] / chi[:, None]  # (Nz, Nl) -- the SAME k as P_grid, at the shifted z'
     pk_pair = lambda k_i, z_i: jnp.squeeze(pk_fn(jnp.atleast_1d(k_i), jnp.atleast_1d(z_i)))
-    P_lp = jax.vmap(pk_pair)(k_l.reshape(-1), z_lp.reshape(-1)).reshape(k_l.shape) * growth_ratio_sq_lp
+    P_lp = jax.vmap(pk_pair)(k_l.reshape(-1), z_lp.reshape(-1)).reshape(k_l.shape)
 
     pk_ratio = jnp.abs(P_lp / P_grid)
-    sqell = jnp.sqrt(lp1h[None, :] * pk_ratio / lp3h[None, :])
+    sqell = jnp.where(in_range_lp, jnp.sqrt(lp1h[None, :] * pk_ratio / lp3h[None, :]), 0.0)
     return z_lp, lp1h, lp3h, sqell
 
 
@@ -173,17 +170,15 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
     # Widen z_max past any CMB-lensing source plane, so the kernel's support ends inside the grid.
     for t in (tracer1, tracer2):
         if isinstance(t, CMBLensingTracer):
-            z_max = jnp.maximum(z_max, 1.05 * t._z_source(cosmology))
+            z_max = jnp.maximum(z_max, 1.05 * t.z_source)
 
     # chi_min/chi_max bound the kernels' support, deliberately non-differentiable.
     chi_min = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_min) * (1.0 + z_min))
     chi_max = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_max) * (1.0 + z_max))
 
     k_grid = cosmology._pk_grid()
-    k_lo = k_grid[0]
-    if getattr(cosmology, "extrapolate_k", False):
-        # Below the grid P(k) is extrapolated; the projection still has support there down to its turn-on.
-        k_lo = _k_lo_nonlimber(k_grid, jnp.min(l_arr), chi_max)
+    # The projection has support below the cosmology's k grid, down to its turn-on.
+    k_lo = _k_lo_nonlimber(k_grid, jnp.min(l_arr), chi_max)
     # Integrated on its own grid, not the P(k) nodes: Delta_l(k) oscillates faster than the P(k) grid resolves.
     k_fine = jnp.geomspace(k_lo, k_grid[-1], n_k)
     k_max = k_fine[-1]
@@ -196,8 +191,7 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
     chi_nodes = chi_min * jnp.exp(d_ln_chi * node_idx)
     in_support = (node_idx >= 0) & (node_idx <= n_fft - 1)
     # Invert chi(z) via interpolation on a dense z grid extended to z=1200.
-    z_bg = cosmology._z_grid_bg()
-    z_dense = jnp.concatenate([z_bg, jnp.geomspace(z_bg[-1] + 1.0, 1200.0, 500)])
+    z_dense = jnp.concatenate([_Z_INVERT, jnp.geomspace(_Z_INVERT[-1] + 1.0, 1200.0, 500)])
     chi_dense = cosmology.angular_diameter_distance(z_dense) * (1.0 + z_dense)
     z_nodes = jnp.minimum(jnp.interp(jnp.clip(chi_nodes, chi_min, chi_max), chi_dense, z_dense), z_max)
 
@@ -249,18 +243,14 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
 # ------------------------------------------------------------------
 
 def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
-    """D(k,z) = sqrt(P(k,z)/P(k,z_fid)) * mass_integral(k,z_eval); the separable
+    """D(k,z) = sqrt(P(k,z)/P(k,z_fid)) * mass_integral(k,z); the separable
     growth factor shared by the halo-model (mass_integral=I_1^1) and linear-bias
     (mass_integral=None) engines."""
     k, z = jnp.atleast_1d(k), jnp.atleast_1d(z)
-    z_b = cosmology._z_grid_pk()[-1]
-    in_bounds = z <= z_b
-    growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
-    z_eval = jnp.where(in_bounds, z, z_b)
-    P_zeval = jnp.reshape(cosmology.pk(k, z_eval, linear=linear), (len(k), len(z)))
+    P_z = jnp.reshape(cosmology.pk(k, z, linear=linear), (len(k), len(z)))
     P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (len(k), 1))
-    D = growth_ratio[None, :] * jnp.sqrt(P_zeval / P_zfid)
-    return D if mass_integral is None else D * mass_integral(k, z_eval)
+    D = jnp.sqrt(P_z / P_zfid)
+    return D if mass_integral is None else D * mass_integral(k, z)
 
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "n_k"))
@@ -344,12 +334,6 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
     z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude (e.g. to z_star)
     l = jnp.atleast_1d(l)
 
-    z_b = cosmology._z_grid_pk()[-1]
-    in_bounds = z <= z_b
-    growth_ratio = jnp.where(in_bounds, 1.0, cosmology.growth_factor(z) / cosmology.growth_factor(z_b))
-    z_eval = jnp.where(in_bounds, z, z_b)
-    growth_ratio_sq = growth_ratio**2
-
     def pk_fn(k, z):
         p = 0.0
         if include_1h:
@@ -358,12 +342,12 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
             p = p + pk_obj.pk_2h(hm, k, z, tracer1.profile, tracer2.profile)
         return p
 
-    def get_pk_slice(zi, zi_eval):
+    def get_pk_slice(zi):
         chi_i = cosmology.angular_diameter_distance(zi) * (1.0 + zi)
         ki = (l + 0.5) / chi_i
-        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi_eval))).flatten()
+        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi))).flatten()
 
-    P_grid = jax.vmap(get_pk_slice)(z, z_eval) * growth_ratio_sq[:, None]
+    P_grid = jax.vmap(get_pk_slice)(z)
     chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
 
     # Extended-Limber setup, done once here (not per-tracer) since it's tracer-independent.
@@ -372,7 +356,7 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
         or any(der_bessel > 0 for _, der_bessel, _ in tracer2._kernel_terms(cosmology, z))
     )
     if needs_extended:
-        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn)
+        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn, z_range[1])
     else:
         z_lp = lp1h = lp3h = sqell = None
 
@@ -433,7 +417,7 @@ def _cl_linear_limber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True)
         or any(der_bessel > 0 for _, der_bessel, _ in tracer2._kernel_terms(cosmology, z))
     )
     if needs_extended:
-        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn)
+        z_lp, lp1h, lp3h, sqell = _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn, z_range[1])
     else:
         z_lp = lp1h = lp3h = sqell = None
 
@@ -471,8 +455,7 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, n_z=100, l_limber=0.0,
 
     The redshift integral runs from :math:`z = 10^{-5}` to the lowest redshift at
     which a tracer kernel vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ),
-    capped at the emulator's trained range unless
-    :attr:`~hmfast.cosmology.Cosmology.extrapolate_z` is True.
+    or to :math:`z = 10` if no tracer has one.
 
     Below ``l_limber``, the 2-halo term is instead projected exactly with the
     SwiftCl algorithm (`Reymond et al. 2025 <https://arxiv.org/abs/2505.22718>`_),
@@ -572,8 +555,7 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, n_z=100, linear=True,
 
     The redshift integral runs from :math:`z = 10^{-5}` to the lowest redshift at
     which a tracer kernel vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ),
-    capped at the emulator's trained range unless
-    :attr:`~hmfast.cosmology.Cosmology.extrapolate_z` is True.
+    or to :math:`z = 10` if no tracer has one.
 
     Below ``l_limber``, the spectrum is instead projected exactly with the
     SwiftCl algorithm (`Reymond et al. 2025 <https://arxiv.org/abs/2505.22718>`_),

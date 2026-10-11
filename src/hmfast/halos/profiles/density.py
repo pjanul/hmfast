@@ -301,9 +301,7 @@ class B16DensityProfile(DensityProfile):
             Electron-density profile with shape :math:`(N_r, N_m, N_z)`,
             where singleton dimensions get squeezed before return.
         """
-        cparams = halo_model.cosmology._cosmo_params()
-        f_b = cparams["Omega_b"] / cparams["Omega0_m"]
-        h = cparams["h"]
+        f_b = halo_model.cosmology.omega_b / (halo_model.cosmology.H0 / 100.0) ** 2 / halo_model.cosmology.omega_x(0.0, "matter")
         f_free = 1.0
 
         gamma = -0.2

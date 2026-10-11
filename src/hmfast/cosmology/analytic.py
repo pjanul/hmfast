@@ -1,11 +1,16 @@
 """Flat w0CDM cosmology from analytic formulae."""
+from functools import partial
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 
-from hmfast.cosmology.cosmology import Cosmology, standard_densities
+from hmfast.cosmology.cosmology import Cosmology, _Functions
+from hmfast.cosmology.halofit import _halofit_pk_nonlinear
 from hmfast.utils import Const
 
 _C_KMS = Const._c_ / 1e3
+_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(64)
 
 
 def eisenstein_hu(k, omega_cb, omega_b, T_cmb):
@@ -71,11 +76,13 @@ def eisenstein_hu(k, omega_cb, omega_b, T_cmb):
     return f_b * T_b + f_c * T_c
 
 
+def _analytic_omega_m(p):
+    return AnalyticCosmology._from_params(p).omega_x(0.0, "matter")
+
+
 def _analytic_hubble_parameter(z, p):
-    d = standard_densities(p)
-    zp1 = 1.0 + z
-    omega_de = 1.0 - d["Omega0_m"] - d["Omega0_r"]
-    return p["H0"] * jnp.sqrt(d["Omega0_r"] * zp1**4 + d["Omega0_m"] * zp1**3 + omega_de * zp1 ** (3.0 * (1.0 + p["w0"])))
+    cosmo = AnalyticCosmology._from_params(p)
+    return p["H0"] * jnp.sqrt(cosmo.rho_x(z, "critical") / cosmo.rho_x(0.0, "critical"))
 
 
 def _analytic_growth(z, om, w, n_steps=400):
@@ -96,19 +103,53 @@ def _analytic_growth(z, om, w, n_steps=400):
         k3 = rhs(xx + 0.5 * dx, y + 0.5 * dx * k2)
         k4 = rhs(xx + dx, y + dx * k3)
         y = y + dx / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-        return y, y[0]
+        return y, y
 
     y0 = jnp.array([1e-3, 1e-3])
-    _, D = jax.lax.scan(step, y0, x[:-1])
-    return jnp.interp(-jnp.log1p(z), x, jnp.concatenate([y0[:1], D]))
+    _, Y = jax.lax.scan(step, y0, x[:-1])
+    D, dD = jnp.concatenate([y0[None], Y]).T
+    # Cubic Hermite with dD/dln a at the nodes, so D is smooth and growth_rate is its derivative.
+    xq = jnp.clip(-jnp.log1p(z), x[0], x[-1])
+    i = jnp.clip(jnp.floor((xq - x[0]) / dx).astype(int), 0, n_steps - 2)
+    t = (xq - x[i]) / dx
+    return ((2 * t**3 - 3 * t**2 + 1) * D[i] + (t**3 - 2 * t**2 + t) * dx * dD[i]
+            + (-2 * t**3 + 3 * t**2) * D[i + 1] + (t**3 - t**2) * dx * dD[i + 1])
 
 
 def _analytic_pk_linear(k, z, p):
-    om = standard_densities(p)["Omega0_m"]
+    om = _analytic_omega_m(p)
     T = eisenstein_hu(k, p["omega_cdm"] + p["omega_b"], p["omega_b"], p["T_cmb"])
     delta2 = 0.16 * p["A_s"] * (k / 0.05) ** (p["n_s"] - 1.0) * (k * _C_KMS / p["H0"]) ** 4 * T**2
     D = _analytic_growth(z, om, p["w0"]) / om
     return (2.0 * jnp.pi**2 / k**3 * delta2)[:, None] * D[None, :] ** 2
+
+
+def _analytic_angular_diameter_distance(z, p):
+    z = jnp.asarray(z)
+    x_max = jnp.log1p(z)[..., None]
+    zp1 = jnp.exp(0.5 * x_max * (_GL_NODES + 1.0))
+    integrand = _C_KMS * zp1 / _analytic_hubble_parameter(zp1 - 1.0, p)
+    return 0.5 * x_max[..., 0] * jnp.sum(_GL_WEIGHTS * integrand, axis=-1) / (1.0 + z)
+
+
+def _analytic_growth_factor(z, p):
+    om = _analytic_omega_m(p)
+    return _analytic_growth(z, om, p["w0"]) / _analytic_growth(0.0, om, p["w0"])
+
+
+_FUNCTIONS = {}  # k grid -> functions, so equal settings give equal treedefs
+
+
+def _functions(k_grid):
+    key = k_grid.tobytes()
+    if key not in _FUNCTIONS:
+        _FUNCTIONS[key] = _Functions(
+            _analytic_hubble_parameter, _analytic_pk_linear, _analytic_angular_diameter_distance,
+            partial(_halofit_pk_nonlinear, hubble_parameter=_analytic_hubble_parameter,
+                    pk_linear=_analytic_pk_linear, k_grid=k_grid,
+                    from_params=AnalyticCosmology._from_params),
+            _analytic_growth_factor)
+    return _FUNCTIONS[key]
 
 
 class AnalyticCosmology(Cosmology):
@@ -122,11 +163,13 @@ class AnalyticCosmology(Cosmology):
 
     Parameters
     ----------
-    H0, omega_cdm, omega_b, A_s, n_s, m_ncdm, deg_ncdm, N_ur, w0, T_cmb : float
+    H0, omega_cdm, omega_b, A_s, n_s, m_ncdm, N_ur, w0, T_cmb : float
         As in :class:`~hmfast.cosmology.Cosmology`.
+    Omega_k, wa : None
+        Fixed at 0: these formulae are for a flat universe with constant ``w0``, and setting one raises a ``TypeError``.
     tau, f_ede, z_c, theta_i, r : None
         Absent: these formulae do not use them, and setting one raises a ``TypeError``.
-    ncdm_mode, extrapolate_k : str, bool
+    ncdm_mode, k_range, n_k : str, tuple of float, int
         As in :class:`~hmfast.cosmology.Cosmology`.
 
     Examples
@@ -134,14 +177,19 @@ class AnalyticCosmology(Cosmology):
     >>> cosmo = AnalyticCosmology(w0=-0.9)
     """
 
-    def __init__(self, *, H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=None,
-                 m_ncdm=0.06, deg_ncdm=1.0, N_ur=3.046, w0=-1.0, T_cmb=2.7255,
+    def __init__(self, *, H0=68.0, omega_cdm=0.12, omega_b=0.02246576, Omega_k=None, A_s=2.1053e-9, n_s=0.965,
+                 tau=None, m_ncdm=0.06, N_ur=3.046, w0=-1.0, wa=None, T_cmb=2.7255,
                  f_ede=None, z_c=None, theta_i=None, r=None,
-                 ncdm_mode="cb", extrapolate_k=True):
-        absent = dict(tau=tau, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
-        super().__init__(_analytic_hubble_parameter, _analytic_pk_linear, H0=H0, omega_cdm=omega_cdm,
-                         omega_b=omega_b, A_s=A_s, n_s=n_s, m_ncdm=m_ncdm, deg_ncdm=deg_ncdm, N_ur=N_ur, w0=w0,
-                         T_cmb=T_cmb, ncdm_mode=ncdm_mode, extrapolate_k=extrapolate_k)
-        given = [n for n, v in absent.items() if v is not None]
+                 ncdm_mode="cb", k_range=(1e-4, 50.0), n_k=500):
+        not_free = dict(Omega_k=Omega_k, tau=tau, wa=wa, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
+        params = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, m_ncdm=m_ncdm,
+                      N_ur=N_ur, w0=w0, T_cmb=T_cmb)
+        k_grid = np.geomspace(*k_range, n_k)
+        self._setup(params, _functions(k_grid), k_grid, ncdm_mode)
+        self._check_functions()
+        given = [n for n, v in not_free.items() if v is not None]
         if given:
             raise TypeError(self._not_parameters(given))
+
+    def _fixed_params(self):
+        return {"Omega_k": 0.0, "wa": 0.0}

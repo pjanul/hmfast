@@ -56,16 +56,14 @@ def _check_bk_inputs(k1, k2, mu12):
 # needed elsewhere in hmfast: a fixed-order Gauss-Legendre quadrature over
 # theta in [0, pi], evaluating the tree-level trispectrum kernel of
 # Takada & Hu (2013), Eq. 30 (arXiv:1302.6994).
-_TRISPEC_N_THETA = 96
-_trispec_gl_x, _trispec_gl_w = np.polynomial.legendre.leggauss(_TRISPEC_N_THETA)
-_trispec_gl_x = jnp.asarray(_trispec_gl_x)
-_trispec_gl_w = jnp.asarray(_trispec_gl_w)
-_TRISPEC_COS_THETA = jnp.cos(0.5 * jnp.pi * (_trispec_gl_x + 1.0))
-_TRISPEC_THETA_WEIGHT = _trispec_gl_w * (jnp.pi / 2.0) / jnp.pi
+def _theta_quadrature(n_theta):
+    """cos(theta) nodes and weights (summing to 1) of an n_theta-point Gauss-Legendre average over theta in [0, pi]."""
+    x, w = np.polynomial.legendre.leggauss(n_theta)
+    return np.cos(0.5 * np.pi * (x + 1.0)), 0.5 * w
 
 
-@jax.jit
-def _X3(k, kp):
+@partial(jax.jit, static_argnums=2)
+def _X3(k, kp, n_theta):
     """
     Closed-form, angle-averaged tree-level F3-type kernel entering the
     "1113" diagram of the 4-halo trispectrum, following Eq. 30 of
@@ -76,8 +74,8 @@ def _X3(k, kp):
     this is only ever used as an internal building block of ``Tk.tk_4h``.
     """
     r = kp[None, :] / k[:, None]              # (Nk, Nkp)
-    cth = _TRISPEC_COS_THETA[None, None, :]   # (1, 1, N_theta)
-    wgt = _TRISPEC_THETA_WEIGHT[None, None, :]
+    cth, wgt = _theta_quadrature(n_theta)
+    cth, wgt = cth[None, None, :], wgt[None, None, :]   # (1, 1, N_theta)
 
     r_b = r[:, :, None]  # (Nk, Nkp, 1)
     kr = _ksum(k[:, None, None], kp[None, :, None], cth)  # (Nk, Nkp, N_theta)
@@ -94,7 +92,7 @@ def _X3(k, kp):
 
 # Shared angle-averaging helper for the Tk kernels
 
-def _kr_pkr(hm, k, kp, z_arr):
+def _kr_pkr(hm, k, kp, z_arr, cth):
     """
     Shared per-theta ``kr = |k + kp|`` and :math:`P_{\\mathrm{lin}}(k_r)`
     arrays entering every angle-averaged trispectrum kernel
@@ -103,12 +101,13 @@ def _kr_pkr(hm, k, kp, z_arr):
     evaluation of :math:`P_{\\mathrm{lin}}` across the 2h, 3h and 4h terms.
 
     ``k``, ``kp`` : (Nk,), (Nkp,) independent arrays, broadcast into an
-    (Nk, Nkp) grid of pairs. Returns ``(k_b, kp_b, kr, pkr)`` with ``k_b``
-    of shape (Nk,1,1), ``kp_b`` of shape (1,Nkp,1), ``kr`` of shape
-    (Nk,Nkp,N_theta), and ``pkr`` of shape (Nk,Nkp,N_theta,Nz).
+    (Nk, Nkp) grid of pairs; ``cth`` : (N_theta,) angle nodes. Returns
+    ``(k_b, kp_b, kr, pkr)`` with ``k_b`` of shape (Nk,1,1), ``kp_b`` of
+    shape (1,Nkp,1), ``kr`` of shape (Nk,Nkp,N_theta), and ``pkr`` of
+    shape (Nk,Nkp,N_theta,Nz).
     """
     k_b, kp_b = k[:, None, None], kp[None, :, None]
-    cth = _TRISPEC_COS_THETA[None, None, :]
+    cth = cth[None, None, :]
     kr = _ksum(k_b, kp_b, cth)  # (Nk, Nkp, N_theta)
     nz = len(z_arr)
     pkr = jnp.reshape(
@@ -547,9 +546,11 @@ class Tk:
         Whether :meth:`tk_tot` includes the 3-halo term.
     include_4h : bool
         Whether :meth:`tk_tot` includes the 4-halo term.
+    n_theta : int
+        Number of nodes in the angle average.
     """
 
-    def __init__(self, *, include_1h=True, include_2h=True, include_3h=True, include_4h=True):
+    def __init__(self, *, include_1h=True, include_2h=True, include_3h=True, include_4h=True, n_theta=96):
         """
         Parameters
         ----------
@@ -561,19 +562,22 @@ class Tk:
             Whether :meth:`tk_tot` includes the 3-halo term.
         include_4h : bool, default True
             Whether :meth:`tk_tot` includes the 4-halo term.
+        n_theta : int, default 96
+            Number of nodes in the angle average.
         """
         self.include_1h = include_1h
         self.include_2h = include_2h
         self.include_3h = include_3h
         self.include_4h = include_4h
+        self.n_theta = int(n_theta)
 
     def _tree_flatten(self):
-        return (), (self.include_1h, self.include_2h, self.include_3h, self.include_4h)
+        return (), (self.include_1h, self.include_2h, self.include_3h, self.include_4h, self.n_theta)
 
     @classmethod
     def _tree_unflatten(cls, aux_data, children):
         obj = cls.__new__(cls)
-        obj.include_1h, obj.include_2h, obj.include_3h, obj.include_4h = aux_data
+        obj.include_1h, obj.include_2h, obj.include_3h, obj.include_4h, obj.n_theta = aux_data
         return obj
 
     # ------------------------------------------------------------------
@@ -641,8 +645,9 @@ class Tk:
         (Nk, Nkp, Nz) array, not squeezed -- this is only ever used as an
         internal building block of ``tk_2h``.
         """
-        _, _, _, pkr = _kr_pkr(hm, k, kp, z_arr)
-        wgt = _TRISPEC_THETA_WEIGHT[None, None, :, None]
+        cth, wgt = _theta_quadrature(self.n_theta)
+        _, _, _, pkr = _kr_pkr(hm, k, kp, z_arr, cth)
+        wgt = wgt[None, None, :, None]
         return jnp.sum(pkr * wgt, axis=2)
 
     @jax.jit
@@ -755,8 +760,9 @@ class Tk:
         (Nk, Nkp, Nz) array, not squeezed -- this is only ever used as an
         internal building block of ``tk_3h``.
         """
-        k_b, kp_b, kr, pkr = _kr_pkr(hm, k, kp, z_arr)
-        wgt = _TRISPEC_THETA_WEIGHT[None, None, :]
+        cth, wgt = _theta_quadrature(self.n_theta)
+        k_b, kp_b, kr, pkr = _kr_pkr(hm, k, kp, z_arr, cth)
+        wgt = wgt[None, None, :]
         f2_kkp = jnp.where(kr == 0.0, 13.0 / 28.0, _F2(k_b, kr, _mu(k_b, kr, kp_b)))
         return jnp.sum(pkr * (f2_kkp * wgt)[..., None], axis=2)
 
@@ -873,8 +879,9 @@ class Tk:
         (Nk, Nkp, Nz), not squeezed -- this is only ever used as an
         internal building block of ``tk_4h``.
         """
-        k_b, kp_b, kr, pkr = _kr_pkr(hm, k, kp, z_arr)
-        wgt = _TRISPEC_THETA_WEIGHT[None, None, :]
+        cth, wgt = _theta_quadrature(self.n_theta)
+        k_b, kp_b, kr, pkr = _kr_pkr(hm, k, kp, z_arr, cth)
+        wgt = wgt[None, None, :]
 
         # F2 between leg k (or kp) and the (negative of the) internal
         # propagator -kr, whose opposite side is the other leg (kp or k).
@@ -940,8 +947,8 @@ class Tk:
         P_v = jnp.reshape(hm.cosmology.pk(k_vs, z_arr, linear=True), (1, nv, nz))
 
         # "1113" diagram (tree-level F3-type kernel), symmetrized k_u <-> k_v
-        X_uv = _X3(k_us, k_vs)[:, :, None]                            # (Nu, Nv, 1)
-        X_vu = jnp.swapaxes(_X3(k_vs, k_us), 0, 1)[:, :, None]        # (Nu, Nv, 1)
+        X_uv = _X3(k_us, k_vs, self.n_theta)[:, :, None]                            # (Nu, Nv, 1)
+        X_vu = jnp.swapaxes(_X3(k_vs, k_us, self.n_theta), 0, 1)[:, :, None]        # (Nu, Nv, 1)
         t1113 = 4.0 / 9.0 * P_u ** 2 * P_v * X_uv + 4.0 / 9.0 * P_v ** 2 * P_u * X_vu
 
         # "1122" diagram (two F2-type vertices), symmetrized k_u <-> k_v

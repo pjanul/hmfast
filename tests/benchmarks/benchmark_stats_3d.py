@@ -331,6 +331,19 @@ class TestTrispectrumCCL:
             got, want = got[NEAR_DIAGONAL], want[NEAR_DIAGONAL]
         assert rel_err(got, want) < tol
 
+    # Too few angle points miss the test_tk_mmmm accuracy (measured 3.9e-2 / 5.1e-2 / 5.2e-2 at n_theta = 32).
+    @pytest.mark.xfail(strict=True, reason="angle average unconverged at small n_theta; no accuracy control yet")
+    @pytest.mark.parametrize("term,tol", [("2h", 2.4e-3), ("3h", 2.5e-3), ("4h", 5.2e-3)])
+    def test_tk_mmmm_few_angles(self, setup, tk_mmmm, term, tol):
+        hm, _, _, profiles, _ = setup
+        nfw = profiles["m"][0]
+        got = np.asarray(getattr(Tk(n_theta=32), f"tk_{term}")(hm, jnp.asarray(K_TK), jnp.asarray(K_TK),
+                                                               jnp.array([Z_X]), nfw, nfw, nfw, nfw))
+        want = tk_mmmm[1][term]
+        if term == "4h":
+            got, want = got[NEAR_DIAGONAL], want[NEAR_DIAGONAL]
+        assert rel_err(got, want) < tol
+
     # The 4-halo term over the full plane, out to k_u / k_v = 100. Both codes evaluate the same tree-level formula to
     # 1e-5, but it nearly cancels there and amplifies the up-to-1e-3 difference between hmfast's log-linear P_lin
     # interpolation and CCL's spline of the same nodes (measured 2.4e-2).

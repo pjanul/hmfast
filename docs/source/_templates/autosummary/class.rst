@@ -12,17 +12,22 @@
 {% set excluded_members = excluded_members + ['delta', 'reference'] %}
 {% set excluded_attributes = excluded_attributes + ['delta', 'reference'] %}
 {% endif %}
+{# Ready-made cosmologies document only what they add; the rest is on Cosmology. #}
+{% set own_only = objname in ['CosmoPowerCosmology', 'AnalyticCosmology'] %}
 
 .. autoclass:: {{ objname }}
    :members:
    :undoc-members:
    :show-inheritance:
+{%- if own_only %}
+   :no-inherited-members:
+{%- endif %}
    :exclude-members: {{ excluded_members | join(', ') }}
 
    {% block methods %}
    {% set public_methods = [] %}
    {% for item in methods %}
-   {% if item != '__init__' and not item.startswith('_') %}
+   {% if item != '__init__' and not item.startswith('_') and not (own_only and item in inherited_members) %}
    {% set _ = public_methods.append(item) %}
    {% endif %}
    {% endfor %}
@@ -39,7 +44,7 @@
    {% block attributes %}
    {% set public_attributes = [] %}
    {% for item in attributes %}
-   {% if not item.startswith('_') and item not in excluded_attributes %}
+   {% if not item.startswith('_') and item not in excluded_attributes and not (own_only and item in inherited_members) %}
    {% set _ = public_attributes.append(item) %}
    {% endif %}
    {% endfor %}

@@ -57,10 +57,9 @@ Not physical — only intended as a tiny runnable example users can adapt::
   from hmfast.tracers.base_tracer import Tracer
   from hmfast.stats import Pk, cl
 
-  # Grids used for the example (mass, multipole; z is passed as a (min, max) range)
+  # Grids used for the example (mass, multipole); the z range comes from the tracer kernels
   m_grid = jnp.geomspace(1e10, 1e15, 105)
   l_grid = jnp.geomspace(1, 1e3, 100)
-  z_range = (0.05, 2.0)
   n_z = 32
 
   # --- Toy cosmology: flat LCDM expansion and a toy linear P(k) ---
@@ -150,12 +149,12 @@ Not physical — only intended as a tiny runnable example users can adapt::
 
   @register_pytree_node_class
   class NewTracer(Tracer):
-    """Simple tracer carrying a profile and a trivial kernel."""
+    """Simple tracer carrying a profile and a toy kernel."""
     def __init__(self, profile):
       super().__init__(profile=profile)
     def kernel(self, cosmology, z):
-      # one (W, der_bessel, der_angles) term: density-type (j_l, no angular prefactor), weight of 1 at every z
-      return [(jnp.ones_like(z), 0, 0)]
+      # one (W, der_bessel, der_angles) term: density-type (j_l, no angular prefactor), a smooth bump around z = 1
+      return [(jnp.exp(-((z - 1.0) / 0.3) ** 2), 0, 0)]
     def tree_flatten(self):
       return (self.profile,), None
     @classmethod
@@ -178,7 +177,7 @@ Not physical — only intended as a tiny runnable example users can adapt::
   pk_calc = Pk()
 
   # Compute a tiny toy halo-model cl (1-halo + 2-halo); with no second tracer this is the autocorrelation of tracer1.
-  cl_toy = cl(pk_calc, hm, l_grid, tracer1, z_range=z_range, n_z=n_z)
+  cl_toy = cl(pk_calc, hm, l_grid, tracer1, n_z=n_z)
 
   print("cl shape:", cl_toy.shape)   # should be (N_ell,)
   print("cl (toy values):", cl_toy)

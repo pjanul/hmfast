@@ -23,13 +23,10 @@ jax.config.update("jax_enable_x64", True)
 _Z_MIN = 1e-5
 
 
-def _resolve_z_range(cosmology, z_range, *tracers):
-    """``z_range`` if given, else ``(_Z_MIN, z_max)`` with z_max the lowest tracer cutoff, capped at the emulator range."""
-    if z_range is not None:
-        return z_range
+def _resolve_z_range(cosmology, *tracers):
+    """``(_Z_MIN, z_max)`` with z_max the lowest tracer cutoff, capped at the emulator range."""
     z_maxes = [z for z in (t._z_max(cosmology) for t in tracers) if z is not None]
-    # A cosmology without extrapolate_z is capped at its P(k) table, as with extrapolate_z=False.
-    if not getattr(cosmology, "extrapolate_z", False) or not z_maxes:
+    if not cosmology.extrapolate_z or not z_maxes:
         z_maxes.append(cosmology._z_grid_pk()[-1])
     z_max = z_maxes[0]
     for z in z_maxes[1:]:
@@ -51,7 +48,7 @@ def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn):
     # NaN past it, so fall back to no growth correction there instead.
     z_b = cosmology._z_grid_pk()[-1]
     in_bounds_lp = z_lp_raw <= z_b
-    if getattr(cosmology, "extrapolate_z", False):
+    if cosmology.extrapolate_z:
         growth_ratio_sq_lp = jnp.where(in_bounds_lp, 1.0, (cosmology.growth_factor(z_lp_raw) / cosmology.growth_factor(z_b)) ** 2)
     else:
         growth_ratio_sq_lp = jnp.ones_like(z_lp_raw)  # never evaluate the NaN growth_factor: masking it still leaves NaN reverse-mode gradients
@@ -97,6 +94,15 @@ def _dispatch_by_ell(l, l_limber, nonlimber_fn, limber_fn):
 # ------------------------------------------------------------------
 # Non-Limber core: SwiftCl-style FFTLog/Hankel transform (Reymond et al. 2025, arXiv:2505.22718)
 # ------------------------------------------------------------------
+
+# Fraction of C_l the non-Limber k integral may drop below its first node; lensing at l=2, the slowest case, falls as k^4 there.
+_K_TAIL_TOL = 1e-8
+
+
+def _k_lo_nonlimber(k_grid, l_min, chi_max):
+    """Lowest k of the non-Limber integral: _K_TAIL_TOL**(1/4) times the turn-on k = (l_min + 1/2) / chi_max, never above the P(k) grid."""
+    return jnp.minimum(_K_TAIL_TOL ** 0.25 * (l_min + 0.5) / chi_max, k_grid[0])
+
 
 def _fftlog_biased_coeffs(f_chi, chi_min, chi_max, n_fft, bias, window=0.2):
     """FFTLog-decompose f_chi(chi) ~= sum_n c_n * chi**(bias + 1j*eta_n), Hann-tapered at high n."""
@@ -149,7 +155,7 @@ def _f_ell(l, der_angles):
 
 
 def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_scale_fns, P_fid,
-                   z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+                   z_fid=0.0, n_fft=512, n_interp=200, bias=0.1, window=0.2, n_k=1024):
     """Shared non-Limber engine behind cl_2h_nonlimber/cl_linear_nonlimber.
 
     D_kz_fns[i](k, z) is tracer i's separable factor; bias_scale_fns (or None) optionally
@@ -159,32 +165,44 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
 
     l_arr = jnp.atleast_1d(jnp.asarray(l, dtype=jnp.float64))
     z_min, z_max = jnp.asarray(z_range[0]), jnp.asarray(z_range[1])
-    n_fft = n_fft if n_fft is not None else n_z
 
     # Widen z_max (never narrow) to cover each tracer's own declared support.
     z_max = jnp.max(jnp.array([z_max, *(float(t.z_max) for t in (tracer1, tracer2) if hasattr(t, "z_max")),
                                 *(jnp.max(t.dndz[0]) for t in (tracer1, tracer2) if hasattr(t, "dndz"))]))
 
-    # Widen z_max past any CMB-lensing source plane; the margin gives the taper room past chi_s.
+    # Widen z_max past any CMB-lensing source plane, so the kernel's support ends inside the grid.
     for t in (tracer1, tracer2):
         if isinstance(t, CMBLensingTracer):
             z_max = jnp.maximum(z_max, 1.05 * t._z_source(cosmology))
 
-    # chi_min/chi_max are the FFTLog grid's own boundary, deliberately non-differentiable.
+    # chi_min/chi_max bound the kernels' support, deliberately non-differentiable.
     chi_min = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_min) * (1.0 + z_min))
     chi_max = jax.lax.stop_gradient(cosmology.angular_diameter_distance(z_max) * (1.0 + z_max))
 
-    k_fine = cosmology._pk_grid()
-    k_min, k_max = k_fine[0], k_fine[-1]
+    k_grid = cosmology._pk_grid()
+    k_lo = k_grid[0]
+    if getattr(cosmology, "extrapolate_k", False):
+        # Below the grid P(k) is extrapolated; the projection still has support there down to its turn-on.
+        k_lo = _k_lo_nonlimber(k_grid, jnp.min(l_arr), chi_max)
+    # Integrated on its own grid, not the P(k) nodes: Delta_l(k) oscillates faster than the P(k) grid resolves.
+    k_fine = jnp.geomspace(k_lo, k_grid[-1], n_k)
+    k_max = k_fine[-1]
 
-    chi_nodes = jnp.geomspace(chi_min, chi_max, n_fft)
+    # Zero-pad n_fft//4 nodes on each side, as SwiftCl does, so FFTLog's periodic wrap never meets a non-zero kernel edge.
+    n_pad = n_fft // 4
+    n_tot = n_fft + 2 * n_pad
+    d_ln_chi = jnp.log(chi_max / chi_min) / (n_fft - 1)
+    node_idx = jnp.arange(n_tot) - n_pad
+    chi_nodes = chi_min * jnp.exp(d_ln_chi * node_idx)
+    in_support = (node_idx >= 0) & (node_idx <= n_fft - 1)
     # Invert chi(z) via interpolation on a dense z grid extended to z=1200.
     z_bg = cosmology._z_grid_bg()
     z_dense = jnp.concatenate([z_bg, jnp.geomspace(z_bg[-1] + 1.0, 1200.0, 500)])
     chi_dense = cosmology.angular_diameter_distance(z_dense) * (1.0 + z_dense)
-    z_nodes = jnp.minimum(jnp.interp(chi_nodes, chi_dense, z_dense), z_max)
+    z_nodes = jnp.minimum(jnp.interp(jnp.clip(chi_nodes, chi_min, chi_max), chi_dense, z_dense), z_max)
 
-    k_anchors = jnp.geomspace(k_min, k_max, n_interp)
+    # D(k, z) is flat below the P(k) grid, so the anchors stay on it and the interpolation below holds the end value.
+    k_anchors = jnp.geomspace(k_grid[0], k_max, n_interp)
     log_ka, log_kf = jnp.log(k_anchors), jnp.log(k_fine)
 
     # Every kernel() term of every tracer gets its own row, tagged by tracer, der_bessel and der_angles.
@@ -195,13 +213,14 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
             weight = jnp.atleast_1d(weight)
             if bias_scale_fns is not None:
                 weight = bias_scale_fns[t_idx](weight, der_bessel, z_nodes)
+            weight = jnp.where(in_support, weight, 0.0)
             f_chi_list.append(weight[None, :] * D_kz_t)
             term_tracer_idx.append(t_idx)
             term_der_bessel.append(der_bessel)
             term_der_angles.append(der_angles)
 
-    f_chi_stack = jnp.stack(f_chi_list)  # (n_terms, n_interp, n_fft)
-    c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_min, chi_max, n_fft, bias, window=window)
+    f_chi_stack = jnp.stack(f_chi_list)  # (n_terms, n_interp, n_tot)
+    c_n_stack, eta_n = _fftlog_biased_coeffs(f_chi_stack, chi_nodes[0], chi_nodes[-1], n_tot, bias, window=window)
 
     interp_col = lambda col: jnp.interp(log_kf, log_ka, col)
     interp_batched = jax.vmap(jax.vmap(interp_col, in_axes=1, out_axes=1))
@@ -219,13 +238,8 @@ def _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_s
         )
     Delta1, Delta2 = Delta_per_tracer[0], Delta_per_tracer[-1]  # Delta2 is Delta1 when n_tracers == 1
 
-    # Delta_l(k) is only trustworthy where its Bessel turning point (l+0.5)/k falls within [chi_min, chi_max].
-    resonant_chi = (l_arr[None, :] + 0.5) / k_fine[:, None]
-    # Written as a negated out-of-range test so a NaN chi_max (z past the emulator range) stays NaN, not 0.
-    validity_mask = ~((resonant_chi < chi_min) | (resonant_chi > chi_max))
-
     P_fid_vals = P_fid(k_fine)
-    integrand = k_fine[:, None] ** 2 * P_fid_vals[:, None] * Delta1 * Delta2 * validity_mask
+    integrand = k_fine[:, None] ** 2 * P_fid_vals[:, None] * Delta1 * Delta2
     Cl = (2.0 / jnp.pi) * jnp.trapezoid(integrand * k_fine[:, None], x=log_kf, axis=0)
     return jnp.squeeze(Cl)
 
@@ -249,8 +263,9 @@ def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
     return D if mass_integral is None else D * mass_integral(k, z_eval)
 
 
-@partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window"))
-def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z_range, n_z, z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+@partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "n_k"))
+def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z_range, n_z, z_fid=0.0, n_fft=512, n_interp=200, bias=0.1, window=0.2,
+                     n_k=1024):
     """Non-Limber 2-halo Cl via _nonlimber_cl; backs cl below l_limber. l/z_range may both be traced."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
@@ -265,7 +280,7 @@ def _cl_2h_nonlimber(halo_model, tracer1, tracer2, l, z_range, n_z, z_fid=0.0, n
     ]
     P_fid = lambda k: jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=True), (k.shape[0],))
     return _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, None, P_fid,
-                          z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)
+                          z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window, n_k=n_k)
 
 
 def _effective_kernel_limber(tracer, cosmology, z, l, z_lp, lp1h, lp3h, sqell, bias=None):
@@ -375,9 +390,9 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
 # Linear-bias Cl (backs cl_linbias below)
 # ------------------------------------------------------------------
 
-@partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "linear"))
+@partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "linear", "n_k"))
 def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True,
-                          z_fid=0.0, n_fft=None, n_interp=200, bias=0.1, window=0.2):
+                          z_fid=0.0, n_fft=512, n_interp=200, bias=0.1, window=0.2, n_k=1024):
     """Non-Limber linearly-biased Cl via _nonlimber_cl; helper behind cl_linbias below l_limber."""
     tracer2 = tracer1 if tracer2 is None else tracer2
     tracers = (tracer1,) if tracer2 is tracer1 else (tracer1, tracer2)
@@ -390,7 +405,7 @@ def _cl_linear_nonlimber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=Tr
     D_kz_fns = [lambda k, z: _D_kz(cosmology, k, z, z_fid=z_fid, linear=linear) for _ in tracers]
     P_fid = lambda k: jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (k.shape[0],))
     return _nonlimber_cl(cosmology, tracer1, tracer2, l, z_range, n_z, D_kz_fns, bias_scale_fns, P_fid,
-                          z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window)
+                          z_fid=z_fid, n_fft=n_fft, n_interp=n_interp, bias=bias, window=window, n_k=n_k)
 
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("linear",))
@@ -438,9 +453,9 @@ def _cl_linear_limber(cosmology, tracer1, tracer2, l, z_range, n_z, linear=True)
 # Public entry points
 # ------------------------------------------------------------------
 
-@partial(jax.jit, static_argnames=("n_z", "l_limber", "n_fft", "n_interp", "fftlog_bias", "window"))
-def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_limber=0.0,
-       z_fid=0.0, n_fft=None, n_interp=200, fftlog_bias=0.1, window=0.2):
+@partial(jax.jit, static_argnames=("n_z", "l_limber", "n_fft", "n_interp", "fftlog_bias", "window", "n_k"))
+def cl(pk, halo_model, l, tracer1, tracer2=None, *, n_z=100, l_limber=0.0,
+       z_fid=0.0, n_fft=512, n_interp=200, fftlog_bias=0.1, window=0.2, n_k=1024):
     """
     Halo-model angular power spectrum :math:`C_\\ell` between two tracers.
 
@@ -454,6 +469,11 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
     where :math:`W_i` are the tracer kernels and :math:`P = P_{1h} + P_{2h}`
     is the halo-model power spectrum, with the terms selected by ``pk``.
 
+    The redshift integral runs from :math:`z = 10^{-5}` to the lowest redshift at
+    which a tracer kernel vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ),
+    capped at the emulator's trained range unless
+    :attr:`~hmfast.cosmology.Cosmology.extrapolate_z` is True.
+
     Below ``l_limber``, the 2-halo term is instead projected exactly with the
     SwiftCl algorithm (`Reymond et al. 2025 <https://arxiv.org/abs/2505.22718>`_),
     which factorises the unequal-time 2-halo power spectrum as
@@ -465,8 +485,8 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
     with :math:`D_i(k, z)` absorbing the growth and the tracer's large-scale
     bias. Each tracer's line-of-sight integral against :math:`j_\\ell(k\\chi)`
     then becomes a single FFTLog transform, avoiding the double integral over
-    oscillating Bessel functions. The 1-halo term is Limber only, so it
-    contributes nothing below ``l_limber``.
+    oscillating Bessel functions. The 1-halo term is projected with Limber at
+    every multipole: it is flat in :math:`k` on the scales where Limber fails.
 
     Parameters
     ----------
@@ -480,22 +500,18 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
         First tracer object.
     tracer2 : Tracer or None, default None
         Second tracer object. If None, defaults to ``tracer1``.
-    z_range : tuple or None, default None
-        ``(z_min, z_max)`` of the redshift integration. If None, ``z_min`` is
-        :math:`10^{-5}` and ``z_max`` is the lowest redshift at which a tracer kernel
-        vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ), capped at the
-        emulator's trained range unless :attr:`CosmoPowerCosmology.extrapolate_z` is True.
     n_z : int, default 100
-        Number of redshift nodes (static).
+        Number of redshift nodes of the Limber projection: the 1-halo term,
+        and the 2-halo term at and above ``l_limber``.
     l_limber : float, default 0.0
         Multipoles below this use SwiftCl for the 2-halo term; at or above it,
         Limber. The default uses Limber everywhere.
     z_fid : float, default 0.0
         SwiftCl parameter, only used below ``l_limber``. Fiducial redshift
         :math:`z_{\\rm fid}` of the factorisation above.
-    n_fft : int or None, default None
+    n_fft : int, default 512
         SwiftCl parameter, only used below ``l_limber``. Number of FFTLog
-        nodes; defaults to ``n_z``.
+        nodes.
     n_interp : int, default 200
         SwiftCl parameter, only used below ``l_limber``. Number of wavenumbers
         at which :math:`D_i(k, z)` is evaluated before interpolation.
@@ -505,6 +521,9 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
     window : float, default 0.2
         SwiftCl parameter, only used below ``l_limber``. Fraction of
         high-frequency FFTLog modes tapered to suppress ringing.
+    n_k : int, default 1024
+        SwiftCl parameter, only used below ``l_limber``. Number of
+        log-spaced wavenumbers in the :math:`k` integral.
 
     Returns
     -------
@@ -513,22 +532,30 @@ def cl(pk, halo_model, l, tracer1, tracer2=None, *, z_range=None, n_z=100, l_lim
         dimensions get squeezed before return.
     """
     tracer2 = tracer1 if tracer2 is None else tracer2
-    z_range = _resolve_z_range(halo_model.cosmology, z_range, tracer1, tracer2)
+    z_range = _resolve_z_range(halo_model.cosmology, tracer1, tracer2)
+
+    def cl_low(l_low):
+        # Only the 2-halo term goes non-Limber; the 1-halo term stays Limber at every multipole.
+        out = jnp.zeros_like(jnp.atleast_1d(l_low))
+        if pk.include_2h:
+            out = out + jnp.atleast_1d(_cl_2h_nonlimber(halo_model, tracer1, tracer2, l_low, z_range, n_z, z_fid=z_fid,
+                                                        n_fft=n_fft, n_interp=n_interp, bias=fftlog_bias, window=window,
+                                                        n_k=n_k))
+        if pk.include_1h:
+            out = out + jnp.atleast_1d(_cl_limber(pk, halo_model, tracer1, tracer2, l_low, z_range, n_z,
+                                                  include_1h=True, include_2h=False))
+        return out
+
     return _dispatch_by_ell(
-        l, l_limber,
-        lambda l_low: (
-            _cl_2h_nonlimber(halo_model, tracer1, tracer2, l_low, z_range, n_z, z_fid=z_fid,
-                              n_fft=n_fft, n_interp=n_interp, bias=fftlog_bias, window=window)
-            if pk.include_2h else jnp.zeros_like(jnp.atleast_1d(l_low))
-        ),
+        l, l_limber, cl_low,
         lambda l_high: _cl_limber(pk, halo_model, tracer1, tracer2, l_high, z_range, n_z,
                                    include_1h=pk.include_1h, include_2h=pk.include_2h),
     )
 
 
-@partial(jax.jit, static_argnames=("n_z", "linear", "l_limber", "n_fft", "n_interp", "fftlog_bias", "window"))
-def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, linear=True,
-               l_limber=0.0, z_fid=0.0, n_fft=None, n_interp=200, fftlog_bias=0.1, window=0.2):
+@partial(jax.jit, static_argnames=("n_z", "linear", "l_limber", "n_fft", "n_interp", "fftlog_bias", "window", "n_k"))
+def cl_linbias(cosmology, l, tracer1, tracer2=None, *, n_z=100, linear=True,
+               l_limber=0.0, z_fid=0.0, n_fft=512, n_interp=200, fftlog_bias=0.1, window=0.2, n_k=1024):
     """
     Angular power spectrum :math:`C_\\ell` between two linearly biased tracers.
 
@@ -542,6 +569,11 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
     where :math:`P_m` is the linear or nonlinear matter power spectrum and
     :math:`W_i` are the tracer kernels, with the density term scaled by the
     tracer's ``bias`` :math:`b_i(z)` (unbiased if the tracer has none).
+
+    The redshift integral runs from :math:`z = 10^{-5}` to the lowest redshift at
+    which a tracer kernel vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ),
+    capped at the emulator's trained range unless
+    :attr:`~hmfast.cosmology.Cosmology.extrapolate_z` is True.
 
     Below ``l_limber``, the spectrum is instead projected exactly with the
     SwiftCl algorithm (`Reymond et al. 2025 <https://arxiv.org/abs/2505.22718>`_),
@@ -566,13 +598,9 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
         First tracer object.
     tracer2 : Tracer or None, default None
         Second tracer object. If None, defaults to ``tracer1``.
-    z_range : tuple or None, default None
-        ``(z_min, z_max)`` of the redshift integration. If None, ``z_min`` is
-        :math:`10^{-5}` and ``z_max`` is the lowest redshift at which a tracer kernel
-        vanishes (e.g. the top of ``dndz``, or ``z_max`` for tSZ), capped at the
-        emulator's trained range unless :attr:`CosmoPowerCosmology.extrapolate_z` is True.
     n_z : int, default 100
-        Number of redshift nodes (static).
+        Number of redshift nodes of the Limber projection, used at and above
+        ``l_limber``.
     linear : bool, default True
         If True, use the linear matter power spectrum; if False, the nonlinear one.
     l_limber : float, default 0.0
@@ -581,9 +609,9 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
     z_fid : float, default 0.0
         SwiftCl parameter, only used below ``l_limber``. Fiducial redshift
         :math:`z_{\\rm fid}` of the factorisation above.
-    n_fft : int or None, default None
+    n_fft : int, default 512
         SwiftCl parameter, only used below ``l_limber``. Number of FFTLog
-        nodes; defaults to ``n_z``.
+        nodes.
     n_interp : int, default 200
         SwiftCl parameter, only used below ``l_limber``. Number of wavenumbers
         at which :math:`D(k, z)` is evaluated before interpolation.
@@ -593,6 +621,9 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
     window : float, default 0.2
         SwiftCl parameter, only used below ``l_limber``. Fraction of
         high-frequency FFTLog modes tapered to suppress ringing.
+    n_k : int, default 1024
+        SwiftCl parameter, only used below ``l_limber``. Number of
+        log-spaced wavenumbers in the :math:`k` integral.
 
     Returns
     -------
@@ -601,11 +632,11 @@ def cl_linbias(cosmology, l, tracer1, tracer2=None, *, z_range=None, n_z=100, li
         dimensions get squeezed before return.
     """
     tracer2 = tracer1 if tracer2 is None else tracer2
-    z_range = _resolve_z_range(cosmology, z_range, tracer1, tracer2)
+    z_range = _resolve_z_range(cosmology, tracer1, tracer2)
     return _dispatch_by_ell(
         l, l_limber,
         lambda l_low: _cl_linear_nonlimber(cosmology, tracer1, tracer2, l_low, z_range, n_z, linear=linear,
                                             z_fid=z_fid, n_fft=n_fft, n_interp=n_interp,
-                                            bias=fftlog_bias, window=window),
+                                            bias=fftlog_bias, window=window, n_k=n_k),
         lambda l_high: _cl_linear_limber(cosmology, tracer1, tracer2, l_high, z_range, n_z, linear=linear),
     )

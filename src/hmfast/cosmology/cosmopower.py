@@ -7,10 +7,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from hmfast.cosmology.cosmology import Cosmology, _Functions, _unknown, standard_densities
+from hmfast.cosmology.cosmology import Cosmology, _Functions
 from hmfast.cosmology.emulator_load import EmulatorLoader, EmulatorLoaderPCA
 from hmfast.download import _get_default_data_path
-from hmfast.utils import Const, dopri5_integrate, log_interp1d_extrap
+from hmfast.utils import Const, log_interp1d_extrap
 
 _C_KMS = Const._c_ / 1e3
 
@@ -34,7 +34,6 @@ _EMULATOR_SETS = {
 # Defaults of every parameter a set can take.
 _FIDUCIAL_PARAMS = {"H0": 68.0, "omega_cdm": 0.12, "omega_b": 0.02246576, "A_s": 2.1053e-9, "n_s": 0.965, "tau": 0.0544,
                     "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "f_ede": 0.1, "z_c": 3162.278, "theta_i": 1.57, "r": 0.01}
-_CORE = ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau")  # keywords with numeric defaults in the signature
 
 # Training ranges in hmfast parameter names; n_s comes from the set.
 _BOUNDS = {"A_s": (np.exp(2.5) / 1e10, np.exp(3.5) / 1e10), "omega_cdm": (0.08, 0.20), "omega_b": (0.01933, 0.02533),
@@ -150,10 +149,9 @@ class CosmoPowerCosmology(Cosmology):
     """
     Cosmology from the CosmoPower emulators of CLASS: background, linear and nonlinear :math:`P(k)`,
     :math:`\\sigma_8(z)`, CMB spectra and derived parameters. Outputs are NaN outside the training ranges.
-    Inherits from :class:`~hmfast.cosmology.Cosmology`, with the emulators as its functions; parameters
-    are read as attributes (``cosmo.H0``) and changed with :meth:`update`.
+    Inherits from :class:`~hmfast.cosmology.Cosmology`, with the emulators as its functions.
 
-    Every set takes ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s`` and ``tau``, plus:
+    Every set varies ``H0``, ``omega_cdm``, ``omega_b``, ``A_s``, ``n_s`` and ``tau``, plus:
 
     ==================  ===============================================  ==================  ==============
     Set                 Extra parameters                                 Massive states      ``z_max_pk``
@@ -168,9 +166,7 @@ class CosmoPowerCosmology(Cosmology):
     ``ede:v2``          as ``ede:v1``                                    3                   20
     ==================  ===============================================  ==================  ==============
 
-    Parameters a set does not take are fixed at :math:`m_\\nu = 0.06` eV, :math:`N_{\\rm ur} = 3.046`,
-    :math:`w_0 = -1` and :math:`T_{\\rm cmb} = 2.7255` K. The background is valid to :math:`z = 20`.
-    The remaining parameters are as in :class:`~hmfast.cosmology.Cosmology`.
+    The background is valid to :math:`z = 20`.
 
     Parameters
     ----------
@@ -178,23 +174,15 @@ class CosmoPowerCosmology(Cosmology):
         Emulator set, one of the table above (default ``"lcdm:v1"``).
     pknl_mode : {"hmcode", "halofit"}
         Nonlinear :math:`P(k)` from the HMcode emulator, or halofit on the emulated linear :math:`P(k)`.
-    tau : float
-        Optical depth to reionization (default 0.0544).
-    m_ncdm : float
-        Neutrino mass in eV per massive state, with the number of states set by the emulator set
-        (default 0.06); fixed at 0.06 for sets that do not take it.
-    N_ur : float
-        Effective number of ultra-relativistic species (default 3.046); fixed for sets that do not take it.
-    w0 : float
-        Dark energy equation of state (default -1); fixed for sets that do not take it.
-    f_ede : float
-        Maximum fractional contribution of early dark energy (default 0.1).
-    z_c : float
-        Critical redshift of the early dark energy transition (default 3162.278).
-    theta_i : float
-        Initial early dark energy field displacement in radians (default 1.57).
-    r : float
-        Tensor-to-scalar ratio (default 0.01).
+    H0, omega_cdm, omega_b, A_s, n_s, tau : float
+        As in :class:`~hmfast.cosmology.Cosmology`; ``tau`` defaults to 0.0544.
+    m_ncdm, deg_ncdm, N_ur, w0, T_cmb, f_ede, z_c, theta_i, r : float or None
+        As in :class:`~hmfast.cosmology.Cosmology`. None takes the set's value: the fiducial value if the set
+        varies the parameter (``m_ncdm`` 0.06, ``N_ur`` 3.046, ``w0`` -1, ``f_ede`` 0.1, ``z_c`` 3162.278,
+        ``theta_i`` 1.57, ``r`` 0.01); otherwise it is fixed (``m_ncdm`` 0.06, ``deg_ncdm`` from the table,
+        ``N_ur`` 3.046, ``w0`` -1, ``T_cmb`` 2.7255) or absent, and setting it raises a ``TypeError``.
+    ncdm_mode, extrapolate_k : str, bool
+        As in :class:`~hmfast.cosmology.Cosmology`.
     extrapolate_z : bool
         If True, redshifts above the emulators' maximum are
         extrapolated. This is less accurate for early dark
@@ -206,32 +194,29 @@ class CosmoPowerCosmology(Cosmology):
     --------
     >>> cosmo = CosmoPowerCosmology("ede:v2", f_ede=0.08)
     """
-    _STATIC = Cosmology._STATIC + ("emulator_set", "pknl_mode", "extrapolate_z")
-    _SETTINGS = Cosmology._SETTINGS + ("extrapolate_z",)
+    _STATIC = Cosmology._STATIC + ("emulator_set", "pknl_mode")
 
     def __init__(self, emulator_set="lcdm:v1", *, pknl_mode="hmcode",
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,  # LCDM
-                 m_ncdm=None, N_ur=None, w0=None,                                                   # wCDM, Neff, MNU
-                 f_ede=None, z_c=None, theta_i=None, r=None,                                        # EDE
-                 extrapolate_z=False, extrapolate_k=True, ncdm_mode="cb"):
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,
+                 m_ncdm=None, deg_ncdm=None, N_ur=None, w0=None, T_cmb=None,
+                 f_ede=None, z_c=None, theta_i=None, r=None,
+                 ncdm_mode="cb", extrapolate_k=True, extrapolate_z=False):
         if emulator_set not in _EMULATOR_SETS:
             raise ValueError(f"Unknown emulator set {emulator_set!r}. Allowed: {', '.join(_EMULATOR_SETS)}.")
         if pknl_mode not in ("hmcode", "halofit"):
             raise ValueError(f'pknl_mode must be "hmcode" or "halofit", got {pknl_mode!r}.')
-        names = _param_names(emulator_set)
-        named = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau, m_ncdm=m_ncdm,
-                     N_ur=N_ur, w0=w0, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
-        # A core keyword the set lacks is only an error if moved off its default.
-        given = {n: v for n, v in named.items()
-                 if v is not None and (n in names or n not in _CORE or v != _FIDUCIAL_PARAMS[n])}
-        unknown = [n for n in given if n not in names]
-        if unknown:
-            raise TypeError(_unknown(unknown, names, repr(emulator_set)))
         self.emulator_set = emulator_set
         self.pknl_mode = pknl_mode
-        self.extrapolate_z = extrapolate_z
-        self._setup({n: given.get(n, _FIDUCIAL_PARAMS[n]) for n in names}, _functions(emulator_set, pknl_mode),
-                    _grid(emulator_set)[0], ncdm_mode, extrapolate_k)
+        names = _param_names(emulator_set)
+        named = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau, m_ncdm=m_ncdm,
+                     deg_ncdm=deg_ncdm, N_ur=N_ur, w0=w0, T_cmb=T_cmb, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
+        given = {n: v for n, v in named.items() if v is not None}
+        self.params = {n: given.get(n, _FIDUCIAL_PARAMS[n]) for n in names}
+        unknown = [n for n in given if n not in names]
+        if unknown:
+            raise TypeError(self._not_parameters(unknown))
+        self._setup(self.params, _functions(emulator_set, pknl_mode), _grid(emulator_set)[0], ncdm_mode,
+                    extrapolate_k, extrapolate_z)
 
         if os.environ.get("READTHEDOCS") != "True":
             for key in ("HZ", "DAZ", "S8Z", "PKL", "PKNL", "DER"):
@@ -252,20 +237,12 @@ class CosmoPowerCosmology(Cosmology):
         pknl_mode : {"hmcode", "halofit"} or None
             New source of the nonlinear :math:`P(k)`; None leaves it unchanged.
         **changes
-            New values, by name, for any parameter of the emulator set (e.g. ``H0=70.0``, ``f_ede=0.08``),
-            or for the settings ``extrapolate_z``, ``extrapolate_k`` and ``ncdm_mode``; None leaves a value unchanged.
+            As in :meth:`Cosmology.update`, for the parameters the emulator set varies.
 
         Returns
         -------
         CosmoPowerCosmology
             New instance with the same emulator set.
-
-        Raises
-        ------
-        TypeError
-            If a name is not a parameter of the emulator set, e.g. ``m_ncdm`` for ``lcdm:v1``.
-        ValueError
-            If ``pknl_mode`` or ``ncdm_mode`` is not one of its allowed values.
 
         Examples
         --------
@@ -279,8 +256,11 @@ class CosmoPowerCosmology(Cosmology):
             obj._functions = _functions(obj.emulator_set, pknl_mode)
         return obj
 
-    def _densities(self):
-        return standard_densities(self.params, **_constants(self.emulator_set))
+    def _fixed_params(self):
+        return _constants(self.emulator_set)
+
+    def _label(self):
+        return repr(self.emulator_set)
 
     @property
     def _z_max_bg(self):
@@ -290,287 +270,12 @@ class CosmoPowerCosmology(Cosmology):
     def _z_max_pk(self):
         return _EMULATOR_SETS[self.emulator_set]["z_max_pk"]
 
-    def _z_grid_bg(self):
-        return jnp.linspace(0.0, self._z_max_bg, 5000, dtype=jnp.float64)
-
-    def _z_grid_pk(self):
-        return jnp.linspace(0.0, self._z_max_pk, 100, dtype=jnp.float64)
-
-    # ------------------------------------------------------------------
-    # Background, growth and P(k), extrapolated above the emulators' range if extrapolate_z
-    # ------------------------------------------------------------------
-
-    def _hz_flrw_calibrated(self, z_max):
-        """Closed-form flat-FLRW H(z), rescaled to match the emulator's H(z_max) exactly."""
-        def hz_flrw(z):
-            p = self._cosmo_params()
-            zp1 = 1.0 + z
-            return p['H0'] * jnp.sqrt(
-                p['Omega0_m'] * zp1 ** 3
-                + p['Omega0_r'] * zp1 ** 4
-                + p['Omega_Lambda'] * zp1 ** (3.0 * (1.0 + p['w0']))
-            )
-        # Force the non-extrapolated path to avoid recursing into this method via jnp.where's eager evaluation.
-        correction = (self.update(extrapolate_z=False).hubble_parameter(z_max) / hz_flrw(z_max)) ** 2
-        return lambda z: hz_flrw(z) * jnp.sqrt(correction)
-
-    @jax.jit
-    def hubble_parameter(self, z):
-        """
-        Hubble parameter :math:`H(z)` at redshift :math:`z`, NaN above :math:`z = 20` unless ``extrapolate_z``.
-
-        Parameters
-        ----------
-        z : float or jnp.ndarray
-            Redshift(s)
-
-        Returns
-        -------
-        jnp.ndarray
-            Hubble parameter(s) in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`
-        """
-
-        z_arr = jnp.atleast_1d(z)
-        z_max = self._z_max_bg
-        Hz = self._call("hubble_parameter", jnp.minimum(z_arr, z_max))
-        fill = self._hz_flrw_calibrated(z_max)(z_arr) if self.extrapolate_z else jnp.nan
-        Hz = jnp.where(z_arr > z_max, fill, Hz)
-
-        return self._squeeze_single(Hz)
-
-    @jax.jit
-    def angular_diameter_distance(self, z):
-        """
-        Angular diameter distance :math:`D_A(z)` at redshift :math:`z`, NaN above :math:`z = 20` unless ``extrapolate_z``.
-
-        Parameters
-        ----------
-        z : float or jnp.ndarray
-            Redshift(s)
-
-        Returns
-        -------
-        jnp.ndarray
-            Angular diameter distance(s) in :math:`\\mathrm{Mpc}`.
-        """
-
-        z_arr = jnp.atleast_1d(z)
-        z_max = self._z_max_bg
-        DA = self._call("angular_diameter_distance", jnp.minimum(z_arr, z_max))
-        if not self.extrapolate_z:
-            DA = jnp.where(z_arr > z_max, jnp.nan, DA)
-
-        if self.extrapolate_z:
-            # Same recursion hazard as _hz_flrw_calibrated -- force the non-extrapolated path for this boundary-anchor call.
-            chi_max = self.update(extrapolate_z=False).angular_diameter_distance(z_max) * (1.0 + z_max)
-
-            Hz_fn = self._hz_flrw_calibrated(z_max)
-            x_max = jnp.log1p(z_max)
-
-            def dchi_dx(x, chi):
-                z = jnp.expm1(x)
-                return (Const._c_ / 1e3) * (1.0 + z) / Hz_fn(z)
-
-            # Integrate to each z independently -- a shared trajectory would be too sparse to interpolate safely.
-            def chi_at(z_target):
-                _, chi_traj = dopri5_integrate(dchi_dx, chi_max, x_max, jnp.log1p(z_target), rtol=1e-4, atol=1e-7, max_steps=16)
-                return chi_traj[-1]
-
-            DA = jnp.where(z_arr > z_max, jax.vmap(chi_at)(z_arr) / (1.0 + z_arr), DA)
-
-        return self._squeeze_single(DA)
-
-    @jax.jit
-    def sigma8(self, z):
-        """
-        :math:`\\sigma_8(z)` at redshift :math:`z` from its own emulator.
-
-        Parameters
-        ----------
-        z : float or jnp.ndarray
-            Redshift(s)
-
-        Returns
-        -------
-        jnp.ndarray
-            Dimensionless :math:`\\sigma_8` value(s)
-        """
+    def _sigma8(self, z):
         s8 = _emu(self.emulator_set, "S8Z").predictions(_inputs(self.params))
         if _EMULATOR_SETS[self.emulator_set]["log_bg"]:
             s8 = 10.0 ** s8
         s8 = jnp.interp(jnp.atleast_1d(z), _Z_BG, s8, left=jnp.nan, right=jnp.nan)
         return self._squeeze_single(_mask(self.emulator_set, self.params, s8))
-
-    def _growth_ode(self, z, z_max):
-        """
-        Extend both the linear growth factor and the linear growth rate past the
-        emulator's ``z_max`` by integrating the growth-rate Riccati equation forward
-        (the numerically stable direction) from a deep-matter-domination seed via
-        :func:`hmfast.utils.dopri5_integrate`, then calibrating the growth-factor branch
-        to :meth:`growth_factor` at ``z_max``.
-
-        The growth-rate branch needs no analogous calibration: the growth-factor
-        calibration below is an additive shift to ``ln D``, and :math:`f = d\\ln D/d\\ln a`
-        is a derivative, so it's invariant to that shift. ``f``'s own accuracy instead
-        comes from the background dynamics (``H(z)``) already being calibrated via
-        :meth:`_hz_flrw_calibrated`.
-
-        Returns
-        -------
-        D : jnp.ndarray
-            Extrapolated growth factor at ``z``, calibrated to :meth:`growth_factor` at ``z_max``.
-        f : jnp.ndarray
-            Extrapolated growth rate at ``z``, from the same ODE trajectory (uncalibrated --
-            none is needed, see above).
-        """
-        Hz_fn = self._hz_flrw_calibrated(z_max)
-        z_arr = jnp.atleast_1d(z)
-
-        # Seed well past any requested z so D~a has room to relax onto the growing mode.
-        z_start = 4.0 * jnp.maximum(jnp.max(z_arr), z_max)
-        x_start = jnp.log(1.0 / (1.0 + z_start))
-        x_max = jnp.log(1.0 / (1.0 + z_max))
-
-        p = self._cosmo_params()
-        Om0_m = p['Omega0_m_nonu'] + p['Omega0_ncdm']
-
-        def ln_hubble(x):
-            return jnp.log(Hz_fn(jnp.expm1(-x)))
-
-        def growth_rhs(x, y):
-            _, f = y
-            dlnH_dx = jax.grad(ln_hubble)(x)
-            z = jnp.expm1(-x)
-            Om_a = Om0_m * (1.0 + z) ** 3 * self.H0 ** 2 / Hz_fn(z) ** 2
-            return f, -f ** 2 - (2.0 + dlnH_dx) * f + 1.5 * Om_a
-
-        # D_seed=1 (arbitrary norm), f_seed=1; max_h caps node spacing so batched interior queries interpolate safely.
-        x_traj, (lnD_traj, f_traj) = dopri5_integrate(growth_rhs, (jnp.array(0.0), jnp.array(1.0)), x_start, x_max, rtol=1e-4, atol=1e-7, max_steps=64, max_h=0.3)
-
-        # Force the non-extrapolated path to avoid recursing back into this method.
-        norm = jnp.log(self.update(extrapolate_z=False).growth_factor(z_max)) - jnp.interp(x_max, x_traj, lnD_traj)
-
-        x_target = jnp.log(1.0 / (1.0 + z_arr))
-        lnD_target = jnp.interp(x_target, x_traj, lnD_traj) + norm
-        f_target = jnp.interp(x_target, x_traj, f_traj)
-        return jnp.exp(lnD_target), f_target
-
-    @jax.jit
-    def growth_factor(self, z):
-        """
-        Linear growth factor :math:`D(z)`, normalized to :math:`D(0)=1`, from the linear power spectrum at
-        :math:`k = 0.01\\,\\mathrm{Mpc}^{-1}`. NaN above ``z_max_pk`` unless
-        ``extrapolate_z``, in which case the growth ODE continues it.
-
-        Parameters
-        ----------
-        z : float or jnp.ndarray
-            Redshift(s)
-
-        Returns
-        -------
-        jnp.ndarray
-            Dimensionless linear growth factor at :math:`z`, with shape
-            :math:`(N_z,)`, where singleton dimensions get squeezed before
-            return.
-        """
-
-        z = jnp.atleast_1d(z)
-
-        # Clamp to the emulator's range before calling it, so the masked values cannot poison gradients.
-        z_max = self._z_max_pk
-        D = self._call("growth_factor", jnp.minimum(z, z_max))
-        D = jnp.where(z > z_max, jnp.nan, D)
-
-        if self.extrapolate_z:
-            D_ext, _ = self._growth_ode(z, z_max)
-            D = jnp.where(z > z_max, D_ext, D)
-
-        return jnp.squeeze(D)
-
-    @jax.jit
-    def growth_rate(self, z):
-        """
-        Linear growth rate
-
-        .. math::
-
-            f(z) = \\frac{d \\ln D}{d \\ln a}
-
-        Without ``extrapolate_z``, NaN beyond the emulator's trained z-grid (matches
-        ``growth_factor``'s convention). With ``extrapolate_z=True``, beyond the grid
-        this reuses the same growth-rate ODE trajectory :meth:`growth_factor`'s own
-        extrapolation branch already integrates (see :meth:`_growth_ode`) -- both a
-        growth factor and a growth rate fall out of that single integration, so this
-        doesn't integrate a second time.
-
-        .. warning::
-            When extrapolating beyond the emulator's redshift range, this assumes
-            massive neutrinos behave as fully non-relativistic matter at every ``z``,
-            and does not account for their transition to (semi-)relativistic behavior
-            at the high redshifts this extrapolation reaches (e.g. approaching
-            recombination).
-
-        Parameters
-        ----------
-        z : float or jnp.ndarray
-            Redshift(s)
-
-        Returns
-        -------
-        jnp.ndarray
-            Dimensionless linear growth rate at :math:`z`, with shape
-            :math:`(N_z,)`, where singleton dimensions get squeezed before
-            return.
-        """
-
-        z = jnp.atleast_1d(z)
-        f = self._growth_rate_tabulated(z)
-
-        if self.extrapolate_z:
-            z_max = self._z_max_pk
-            _, f_ext = self._growth_ode(z, z_max)
-            f = jnp.where(z > z_max, f_ext, f)
-
-        return jnp.squeeze(f)
-
-    @partial(jax.jit, static_argnames=("linear",))
-    def pk(self, k, z, *, linear=True):
-        """
-        Get the matter power spectrum :math:`P(k, z)` interpolated at
-        requested wavenumbers `k` and redshifts `z`. NaN above ``z_max_pk`` unless
-        ``extrapolate_z``, in which case it is scaled by the squared growth factor.
-
-        Parameters
-        ----------
-        k : float or jnp.ndarray
-            Wavenumber(s) in :math:`\\mathrm{Mpc}^{-1}` to evaluate the power spectrum at.
-        z : float or jnp.ndarray
-            Redshift(s) at which to evaluate the power spectrum.
-        linear : bool
-            True for linear :math:`P(k)`, False for nonlinear :math:`P(k)` (HMcode or halofit, set by ``pknl_mode``).
-
-        Returns
-        -------
-        P : jnp.ndarray
-            Power spectrum values with shape :math:`(N_k, N_z)`, where singleton
-            dimensions get squeezed before return.
-        """
-        k = jnp.atleast_1d(k)
-        z = jnp.atleast_1d(z)
-
-        z_max = self._z_max_pk
-        in_z_bounds = z <= z_max
-        if self.extrapolate_z:
-            growth_ratio_sq = jnp.where(in_z_bounds, 1.0, (self.growth_factor(z) / self.growth_factor(z_max)) ** 2)
-
-        # Clamp to the emulator's range before calling it, so the masked values cannot poison gradients.
-        pk_out = self._pk_k_masked(k, jnp.where(in_z_bounds, z, z_max), linear)
-        if self.extrapolate_z:
-            pk_out = pk_out * growth_ratio_sq[None, :]
-        else:
-            pk_out = jnp.where(in_z_bounds[None, :], pk_out, jnp.nan)
-        return jnp.squeeze(pk_out)
 
     # ------------------------------------------------------------------
     # CMB angular power spectra and derived parameters

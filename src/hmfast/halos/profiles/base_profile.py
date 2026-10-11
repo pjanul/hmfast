@@ -153,6 +153,12 @@ class HaloProfile(ABC):
         u_k_val = prefactor[None, :, :] * u_k_native * jnp.sqrt(jnp.pi / (2.0 * q_native))
         u_k_zero = prefactor * jnp.log(self.x_grid[1] / self.x_grid[0]) * jnp.sum(w * self.x_grid[:, None, None] ** 3 * real_profile, axis=0)
 
+        # Below q = 1 / x_s FFTLog loses accuracy, so those native nodes take direct quadrature of the same samples (u_k_zero is its q = 0 case).
+        x_s = jnp.max(jnp.where(w > 0, self.x_grid[:, None, None], 0.0), axis=0)
+        sinc = jnp.sinc(k_native[:, None] * self.x_grid[None, :] / jnp.pi)
+        u_direct = prefactor * jnp.log(self.x_grid[1] / self.x_grid[0]) * jnp.einsum("qx,xmz->qmz", sinc, w * self.x_grid[:, None, None] ** 3 * real_profile)
+        u_k_val = jnp.where(q_native <= 1.0 / x_s, u_direct, u_k_val)
+
         q_native = jnp.concatenate([jnp.zeros((1, len(m), len(z))), q_native], axis=0)
         u_k_val = jnp.concatenate([u_k_zero[None, :, :], u_k_val], axis=0)
 

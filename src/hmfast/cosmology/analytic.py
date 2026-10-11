@@ -118,17 +118,30 @@ class AnalyticCosmology(Cosmology):
     :math:`H(z)` is the Friedmann equation with photons, ``N_ur`` massless neutrinos, massive neutrinos counted
     as matter and constant-:math:`w_0` dark energy. The linear :math:`P(k, z)` is the Eisenstein & Hu (1998)
     spectrum times the linear growth factor, without massive-neutrino suppression, and the nonlinear one is halofit.
-    There are no CMB spectra or derived parameters, so CMB-lensing tracers need ``z_source``.
-    Inherits from :class:`~hmfast.cosmology.Cosmology`, with these formulae as its functions and the same
-    parameters; parameters are read as attributes (``cosmo.H0``) and changed with :meth:`update`.
+    Inherits from :class:`~hmfast.cosmology.Cosmology`, with these formulae as its functions.
+
+    Parameters
+    ----------
+    H0, omega_cdm, omega_b, A_s, n_s, m_ncdm, deg_ncdm, N_ur, w0, T_cmb : float
+        As in :class:`~hmfast.cosmology.Cosmology`.
+    tau, f_ede, z_c, theta_i, r : None
+        Absent: these formulae do not use them, and setting one raises a ``TypeError``.
+    ncdm_mode, extrapolate_k : str, bool
+        As in :class:`~hmfast.cosmology.Cosmology`.
 
     Examples
     --------
     >>> cosmo = AnalyticCosmology(w0=-0.9)
     """
 
-    def __init__(self, *, H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965,
-                 m_ncdm=0.06, N_ur=3.046, w0=-1.0, T_cmb=2.7255, ncdm_mode="cb", extrapolate_k=True):
+    def __init__(self, *, H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=None,
+                 m_ncdm=0.06, deg_ncdm=1.0, N_ur=3.046, w0=-1.0, T_cmb=2.7255,
+                 f_ede=None, z_c=None, theta_i=None, r=None,
+                 ncdm_mode="cb", extrapolate_k=True):
+        absent = dict(tau=tau, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
         super().__init__(_analytic_hubble_parameter, _analytic_pk_linear, H0=H0, omega_cdm=omega_cdm,
-                         omega_b=omega_b, A_s=A_s, n_s=n_s, m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, T_cmb=T_cmb,
-                         ncdm_mode=ncdm_mode, extrapolate_k=extrapolate_k)
+                         omega_b=omega_b, A_s=A_s, n_s=n_s, m_ncdm=m_ncdm, deg_ncdm=deg_ncdm, N_ur=N_ur, w0=w0,
+                         T_cmb=T_cmb, ncdm_mode=ncdm_mode, extrapolate_k=extrapolate_k)
+        given = [n for n, v in absent.items() if v is not None]
+        if given:
+            raise TypeError(self._not_parameters(given))

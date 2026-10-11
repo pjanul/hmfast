@@ -282,8 +282,8 @@ def swiftcl_cache(tmp_path_factory):
     return os.environ.get("SWIFTCL_CACHE") or str(tmp_path_factory.mktemp("swiftcl"))
 
 
-def swiftcl_cl(s, cache, tracer, z_max, D_kz, bias=None, n_chi=512, n_k=400):
-    """SwiftCl's FFTLog C_ell of `tracer`'s kernel terms with growth D(k, z), on hmfast's own background."""
+def swiftcl_cl(s, cache, tracer, z_max, D_kz, bias=None, n_chi=512, n_k=400, tracer2=None, D_kz2=None, n_fft=512):
+    """SwiftCl's FFTLog C_ell of `tracer` (x `tracer2` if given) with growth D(k, z), on hmfast's own background."""
     swiftcl = pytest.importorskip("swiftcl")
     z_of_a = (1.0 / s.a_bg - 1.0)[::-1]
     chi_of_z = s.chi_bg[::-1]
@@ -291,26 +291,43 @@ def swiftcl_cl(s, cache, tracer, z_max, D_kz, bias=None, n_chi=512, n_k=400):
     z_nodes = np.interp(chi, chi_of_z, z_of_a)
     k_tab = np.asarray(s.cosmo._pk_grid()[0])
     k = np.geomspace(k_tab[0], k_tab[-1], n_k)
-    key = (cache, float(z_max), n_chi, n_k)
+    key = (cache, float(z_max), n_chi, n_k, n_fft)
     if key not in s.swiftcl_comps:
         s.swiftcl_comps[key] = swiftcl.ClComp(z1=z_nodes, z2=z_nodes, l=ELL_NL.astype(int), k=k, contr1="intjl",
-                                              contr2="intjl", path=cache)
+                                              contr2="intjl", path=cache, N=n_fft)
     cc = s.swiftcl_comps[key]
-    D = np.asarray(D_kz(jnp.asarray(k), jnp.asarray(z_nodes))).T  # (N_chi, N_k)
-    delta = 0.0
-    for W, n, a in tracer.kernel(s.cosmo, jnp.asarray(z_nodes)):
-        W = np.asarray(W) * (np.interp(z_nodes, *bias) if bias is not None and n == 0 else 1.0)
-        it = swiftcl.interpolate.interp(l=cc.c["l"], N=cc.c["N"], x=chi, xmin=cc.c["xmin1"], xmax=cc.c["xmax1"],
-                                        f=W[:, None] * D, a=k, b=cc.c["bias"], g_r=cc.c["g_r_1"][BESSEL_ROW[n]],
-                                        N_interp=cc.c["N_interp"])
-        if n == 0:
-            delta = delta + np.asarray(it.int_jl())
-        elif n == 2:
-            delta = delta + np.asarray(it.int_ddjl())
-        else:
-            delta = delta + np.asarray(it.int_k()) * F_ELL[a](ELL_NL)[:, None] / k[None, :] ** 2
+
+    def delta_of(t, D_kz):
+        D = np.asarray(D_kz(jnp.asarray(k), jnp.asarray(z_nodes))).T  # (N_chi, N_k)
+        delta = 0.0
+        for W, n, a in t.kernel(s.cosmo, jnp.asarray(z_nodes)):
+            W = np.asarray(W) * (np.interp(z_nodes, *bias) if bias is not None and n == 0 else 1.0)
+            it = swiftcl.interpolate.interp(l=cc.c["l"], N=cc.c["N"], x=chi, xmin=cc.c["xmin1"], xmax=cc.c["xmax1"],
+                                            f=W[:, None] * D, a=k, b=cc.c["bias"], g_r=cc.c["g_r_1"][BESSEL_ROW[n]],
+                                            N_interp=cc.c["N_interp"])
+            if n == 0:
+                delta = delta + np.asarray(it.int_jl())
+            elif n == 2:
+                delta = delta + np.asarray(it.int_ddjl())
+            else:
+                delta = delta + np.asarray(it.int_k()) * F_ELL[a](ELL_NL)[:, None] / k[None, :] ** 2
+        return delta
+
+    delta1 = delta_of(tracer, D_kz)
+    delta2 = delta1 if tracer2 is None else delta_of(tracer2, D_kz2)
     P_fid = np.ravel(s.cosmo.pk(jnp.asarray(k), jnp.array([0.0]), linear=True))
-    return 2.0 / np.pi * np.trapezoid(k**2 * delta**2 * P_fid, x=k, axis=1)
+    return 2.0 / np.pi * np.trapezoid(k**2 * delta1 * delta2 * P_fid, x=k, axis=1)
+
+
+def halo_D_kz(s, profile):
+    """D(k, z) of the halo-model 2-halo term, carrying the profile's I_1^1(k, z)."""
+    def D_kz(k, z):
+        def I11(k, z):
+            return jnp.reshape(s.hm.mass_integral(k, z, profile, bias_order=1), (len(k), len(z)))
+
+        return _D_kz(s.cosmo, k, z, z_fid=0.0, linear=True, mass_integral=I11)
+
+    return D_kz
 
 
 NONLIMBER_LIN = {
@@ -343,21 +360,18 @@ class TestNonLimber:
                                    lambda k, z: _D_kz(s.cosmo, k, z, z_fid=0.0, linear=True), bias=bias)
         return out
 
-    # Non-Limber cl_linbias against SwiftCl, the same decomposition through independent integrals, 3 <= l <= 200
-    # (measured 1.8e-4, 1.9e-4, 2.9e-4, 1.1e-3); l = 2 below.
+    # Non-Limber cl_linbias against SwiftCl, 3 <= l <= 200 (measured 1.8e-4, 1.9e-4, 2.1e-4, 2.4e-4); l = 2 below.
     @pytest.mark.parametrize("name,tol", [("galaxy b(z)", 4e-4), ("galaxy b(z) + mag + RSD", 4e-4), ("shear", 6e-4),
-                                          ("CMB lensing", 2.2e-3)])
+                                          ("CMB lensing", 5e-4)])
     def test_linbias_vs_swiftcl(self, linbias_spectra, swiftcl_linbias, name, tol):
         assert rel_err(linbias_spectra[name][0][1:], swiftcl_linbias[name][1:]) < tol
 
-    # l = 2 against SwiftCl. hmfast's FFTLog chi grid spans exactly [chi(z_min), chi(z_max)], where SwiftCl pads it by
-    # ~3 decades below; that padding is what l = 2 needs (with z_min = 1e-7 hmfast agrees to 0.1% / 0.5%). Measured
-    # 2.0e-4 / 1.1e-4 for galaxies, 4.3e-3 / 5.3e-2 for shear / CMB lensing, held to the l >= 3 tolerances.
+    # l = 2 against SwiftCl, which needs the zero-padded chi grid (measured 2.0e-4, 1.1e-4, 2.3e-4, 2.2e-4).
     @pytest.mark.parametrize("name,tol", [
         ("galaxy b(z)", 4e-4),
         ("galaxy b(z) + mag + RSD", 2.5e-4),
-        pytest.param("shear", 6e-4, marks=pytest.mark.xfail(strict=True, reason="FFTLog chi grid not padded")),
-        pytest.param("CMB lensing", 2.2e-3, marks=pytest.mark.xfail(strict=True, reason="FFTLog chi grid not padded")),
+        ("shear", 6e-4),
+        ("CMB lensing", 5e-4),
     ])
     def test_linbias_l2_vs_swiftcl(self, linbias_spectra, swiftcl_linbias, name, tol):
         assert rel_err(linbias_spectra[name][0][0], swiftcl_linbias[name][0]) < tol
@@ -379,14 +393,26 @@ class TestNonLimber:
     def test_halo_model_vs_swiftcl(self, s, swiftcl_cache, make, profile, tol):
         t = getattr(s, make)()[0]
         got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t, z_range=Z_RANGE, n_z=N_Z, l_limber=L_LIMBER)
+        assert rel_err(got[1:], swiftcl_cl(s, swiftcl_cache, t, Z_RANGE[1], halo_D_kz(s, profile))[1:]) < tol
 
-        def D_kz(k, z):
-            def I11(k, z):
-                return jnp.reshape(s.hm.mass_integral(k, z, profile, bias_order=1), (len(k), len(z)))
-
-            return _D_kz(s.cosmo, k, z, z_fid=0.0, linear=True, mass_integral=I11)
-
-        assert rel_err(got[1:], swiftcl_cl(s, swiftcl_cache, t, Z_RANGE[1], D_kz)[1:]) < tol
+    # Edge kernels vs SwiftCl, measured l=2 / l>=3: y 1.7e-5/4.7e-3, CIB 4.7e-3/2.3e-2, y x kCMB 3.7e-4/1.4e-3
+    @pytest.mark.parametrize("make1,make2,n_fft,sw_n_fft,tol_l2,tol", [
+        ("tsz", None, None, 2048, 4e-5, 1e-2),
+        ("cib", None, 2000, 4096, 1e-2, 4.5e-2),
+        ("tsz", "cmb_lensing", None, 2048, 8e-4, 3e-3),
+    ])
+    def test_edge_kernels_vs_swiftcl(self, s, swiftcl_cache, make1, make2, n_fft, sw_n_fft, tol_l2, tol):
+        t1 = getattr(s, make1)()[0]
+        t2 = None if make2 is None else getattr(s, make2)()[0]
+        z_hi = Z_RANGE[1] if t2 is None else s.z_star
+        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t1, t2, z_range=(Z_RANGE[0], z_hi), n_z=N_Z, l_limber=L_LIMBER,
+                 n_fft=n_fft)
+        profile = {"tsz": GNFW, "cib": CIB, "cmb_lensing": NFW}
+        want = swiftcl_cl(s, swiftcl_cache, t1, z_hi if t2 is None else 1.05 * z_hi, halo_D_kz(s, profile[make1]),
+                          tracer2=t2, D_kz2=None if t2 is None else halo_D_kz(s, profile[make2]), n_fft=sw_n_fft,
+                          n_k=4000)
+        assert rel_err(got[0], want[0]) < tol_l2
+        assert rel_err(got[1:], want[1:]) < tol
 
     # Non-Limber halo-model 2-halo shear against CCL's FKEM on CCL's own 2-halo P(k), 3 <= l <= 200 (measured 7.8e-3).
     def test_halo_model_shear_vs_ccl_fkem(self, s):

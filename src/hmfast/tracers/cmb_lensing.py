@@ -23,30 +23,26 @@ class CMBLensingTracer(Tracer):
         \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,
         \\frac{\\chi_s - \\chi(z)}{\\chi_s}
 
-    for :math:`\\chi(z) < \\chi_s` and zero beyond, where :math:`\\chi_s` is the comoving
-    distance to the source plane: :math:`\\chi(z_{\\rm source})` if ``z_source`` is given,
-    otherwise the last-scattering distance :math:`\\chi_*` from the emulator's derived
-    parameters. See :meth:`kernel` for how this is returned.
+    for :math:`\\chi(z) < \\chi_s` and zero beyond, where :math:`\\chi_s = \\chi(z_{\\rm source})` is the
+    comoving distance to the source plane. See :meth:`kernel` for how this is returned.
 
     Attributes
     ----------
     profile : MatterProfile
         Matter profile used to model the CMB lensing convergence signal.
-    z_source : float or None
-        Source-plane redshift. If None (default), the source plane is the last-scattering
-        surface, with :math:`\\chi_s = \\chi_*` and :math:`z_*` read from the emulator's derived
-        parameters. Above the background emulator's redshift range (:math:`z=20`),
-        :math:`\\chi(z_{\\rm source})` is NaN unless the cosmology has ``extrapolate_z=True``.
+    z_source : float
+        Source-plane redshift; for last scattering, ``CosmoPowerCosmology.derived_parameters()["z_star"]``.
+        Above the cosmology's redshift range, :math:`\\chi(z_{\\rm source})` is NaN unless it has ``extrapolate_z=True``.
     """
 
     _required_profile_type = MatterProfile
 
-    def __init__(self, profile=None, *, z_source=None):
+    def __init__(self, profile=None, *, z_source):
         super().__init__(profile=profile or NFWMatterProfile())
         self.z_source = z_source
 
     def _tree_flatten(self):
-        # z_source is a leaf (None is an empty subtree), so it can be traced and differentiated.
+        # z_source is a leaf, so it can be traced and differentiated.
         leaves = (self.profile, self.z_source)
         aux_data = None
         return (leaves, aux_data)
@@ -80,27 +76,9 @@ class CMBLensingTracer(Tracer):
         new_z_source = z_source if z_source is not None else old_z_source
         return self._tree_unflatten(aux, (new_profile, new_z_source))
 
-    @staticmethod
-    def _derived(cosmology, name):
-        """A derived parameter of the cosmology, for the last-scattering source plane."""
-        if not hasattr(cosmology, "derived_parameters"):
-            raise TypeError(f"{type(cosmology).__name__} has no derived parameters, so CMBLensingTracer needs z_source.")
-        return cosmology.derived_parameters()[name]
-
-    def _z_source(self, cosmology):
-        """Source-plane redshift: z_source, or the derived z_star if z_source is None."""
-        return self._derived(cosmology, "z_star") if self.z_source is None else jnp.asarray(self.z_source)
-
     def _z_max(self, cosmology):
         """Redshift above which every kernel term vanishes: the source plane."""
-        return self._z_source(cosmology)
-
-    def _chi_source(self, cosmology):
-        """Comoving distance to the source plane: chi(z_source), or the derived chi_star if z_source is None."""
-        if self.z_source is None:
-            return self._derived(cosmology, "chi_star")
-        z_s = jnp.asarray(self.z_source)
-        return cosmology.angular_diameter_distance(z_s) * (1.0 + z_s)
+        return jnp.asarray(self.z_source)
 
 
     def _kernel_primary(self, cosmology, z):
@@ -115,7 +93,7 @@ class CMBLensingTracer(Tracer):
                 W_{\\kappa_{\\mathrm{CMB}}}(\\chi) = \\frac{3}{2} \\Omega_m \\left(\\frac{H_0}{c}\\right)^2 \\chi(z)\\,(1+z)\\,\\frac{\\chi_s - \\chi(z)}{\\chi_s}
 
         for :math:`\\chi(z) < \\chi_s` and zero beyond, where :math:`\\chi_s` is the comoving
-        distance to the source plane (:math:`\\chi_*` unless ``z_source`` is given).
+        distance to the source plane at ``z_source``.
     
         Parameters
         ----------
@@ -143,7 +121,7 @@ class CMBLensingTracer(Tracer):
         chi_z = cosmology.angular_diameter_distance(z) * (1 + z)
         
         # Comoving distance to the source plane in physical Mpc.
-        chi_s = self._chi_source(cosmology)
+        chi_s = cosmology.angular_diameter_distance(self.z_source) * (1.0 + self.z_source)
 
         # Compute the CMB lensing kernel
         W_kappa_cmb = (

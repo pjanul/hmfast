@@ -173,7 +173,7 @@ def _dPk_response(halo_model, k, z, profile1, profile2=None, include_1h=True, in
 # ------------------------------------------------------------------
 
 @partial(jax.jit, static_argnames=("n_z",))
-def cov_cng(tk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4=None, *, z_range=None, n_z=100,
+def cov_cng(tk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4=None, *, n_z=100,
             f_sky=1.0):
     """
     Connected non-Gaussian covariance between two angular power spectra
@@ -211,11 +211,9 @@ def cov_cng(tk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4
         First tracer of the :math:`C_{\\ell_2}` pair. If None, defaults to ``tracer1``.
     tracer4 : Tracer or None, default None
         Second tracer of the :math:`C_{\\ell_2}` pair. If None, defaults to (the resolved) ``tracer3``.
-    z_range : tuple or None, default None
-        ``(z_min, z_max)`` of the redshift integration. If None, inferred from all
-        four tracers as in :func:`~hmfast.stats.cl`.
     n_z : int, default 100
-        Number of redshift nodes (static).
+        Number of redshift nodes, over the range inferred from all four tracers
+        as in :func:`~hmfast.stats.cl`.
     f_sky : float, default 1.0
         Observed sky fraction.
 
@@ -230,7 +228,7 @@ def cov_cng(tk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4
     tracer2 = tracer2 if tracer2 is not None else tracer1
     tracer3 = tracer3 if tracer3 is not None else tracer1
     tracer4 = tracer4 if tracer4 is not None else tracer3
-    z_range = _cl._resolve_z_range(hm.cosmology, z_range, tracer1, tracer2, tracer3, tracer4)
+    z_range = _cl._resolve_z_range(hm.cosmology, tracer1, tracer2, tracer3, tracer4)
     logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
     z = jnp.exp(logz)
     z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude
@@ -348,7 +346,7 @@ def sigma2_b_disc(cosmology, z, *, f_sky=1.0):
 
 
 @partial(jax.jit, static_argnames=("n_z", "counterterms"))
-def cov_ssc(pk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4=None, *, z_range=None, n_z=100,
+def cov_ssc(pk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4=None, *, n_z=100,
             f_sky=1.0, sigma2_b=None, counterterms=None):
     """
     Super-sample covariance between two angular power spectra
@@ -398,11 +396,9 @@ def cov_ssc(pk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4
         First tracer of the :math:`C_{\\ell_2}` pair. If None, defaults to ``tracer1``.
     tracer4 : Tracer or None, default None
         Second tracer of the :math:`C_{\\ell_2}` pair. If None, defaults to (the resolved) ``tracer3``.
-    z_range : tuple or None, default None
-        ``(z_min, z_max)`` of the redshift integration. If None, inferred from all
-        four tracers as in :func:`~hmfast.stats.cl`.
     n_z : int, default 100
-        Number of redshift nodes (static).
+        Number of redshift nodes, over the range inferred from all four tracers
+        as in :func:`~hmfast.stats.cl`.
     f_sky : float, default 1.0
         Observed sky fraction, used only by the default ``sigma2_b``.
     sigma2_b : tuple of jnp.ndarray or None, default None
@@ -426,7 +422,7 @@ def cov_ssc(pk, halo_model, l1, l2, tracer1, tracer2=None, tracer3=None, tracer4
     tracer2 = tracer2 if tracer2 is not None else tracer1
     tracer3 = tracer3 if tracer3 is not None else tracer1
     tracer4 = tracer4 if tracer4 is not None else tracer3
-    z_range = _cl._resolve_z_range(hm.cosmology, z_range, tracer1, tracer2, tracer3, tracer4)
+    z_range = _cl._resolve_z_range(hm.cosmology, tracer1, tracer2, tracer3, tracer4)
     logz, z_gl_w = gauss_legendre_nodes_weights(jnp.log(z_range[0]), jnp.log(z_range[1]), n_z)
     z = jnp.exp(logz)
     z_gl_w = z_gl_w * z  # Gauss-Legendre in ln(z); z spans orders of magnitude

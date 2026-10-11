@@ -4,12 +4,11 @@ from functools import partial
 
 import jax
 import jax.numpy as jnp
-import jax.scipy as jscipy
 import numpy as np
 from mcfit import TophatVar
 
 from hmfast.cosmology.halofit import halofit
-from hmfast.utils import Const, log_interp1d_extrap
+from hmfast.utils import Const, dopri5_integrate, log_interp1d_extrap
 
 jax.config.update("jax_enable_x64", True)
 
@@ -20,6 +19,9 @@ _Z_TAB_BG, _Z_TAB_PK = 20.0, 10.0  # top of the background and P(k) tables of a 
 
 _FUNCTION_NAMES = ("hubble_parameter", "pk_linear", "angular_diameter_distance", "pk_nonlinear", "growth_factor")
 _Functions = namedtuple("_Functions", _FUNCTION_NAMES)
+# Cosmological parameters every cosmology class lists; each is free, fixed or absent (None) in a given class.
+_PARAM_NAMES = ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau", "m_ncdm", "deg_ncdm", "N_ur", "w0", "T_cmb",
+                "f_ede", "z_c", "theta_i", "r")
 
 
 class _KGrid:
@@ -101,8 +103,13 @@ class Cosmology:
     raises a ``TypeError`` immediately. They must be valid at every redshift the calculation reaches.
 
     Parameters are passed as keywords, read as attributes (``cosmo.H0``) and changed with :meth:`update`.
-    The densities today follow from ``H0``, ``omega_b``, ``omega_cdm``, ``m_ncdm``, ``N_ur``, ``w0`` and
-    ``T_cmb`` for a flat universe; any further keyword becomes a parameter that the functions can read.
+    The densities today follow from ``H0``, ``omega_b``, ``omega_cdm``, ``m_ncdm``, ``deg_ncdm``, ``N_ur``,
+    ``w0`` and ``T_cmb`` for a flat universe; any further keyword becomes a parameter that the functions can read.
+
+    Every cosmology class takes the parameters below. In a given class each one is free (changed with
+    :meth:`update`), fixed by the class (read-only) or absent (``None``); for instance
+    ``CosmoPowerCosmology("lcdm:v1")`` fixes ``m_ncdm`` at 0.06 and has no ``f_ede``. Here a parameter
+    left at ``None`` is absent, and one given a value is free.
 
     Parameters
     ----------
@@ -128,14 +135,26 @@ class Cosmology:
         Amplitude of the primordial scalar power spectrum (default :math:`2.1053 \\times 10^{-9}`).
     n_s : float
         Scalar spectral index (default 0.965).
+    tau : float or None
+        Optical depth to reionization (default None).
     m_ncdm : float
-        Neutrino mass in eV, as a single massive state (default 0.06).
+        Neutrino mass in eV per massive state (default 0.06).
+    deg_ncdm : float
+        Number of degenerate massive neutrino states (default 1).
     N_ur : float
         Effective number of ultra-relativistic species (default 3.046).
     w0 : float
         Dark energy equation of state (default -1).
     T_cmb : float
         CMB temperature today in K (default 2.7255).
+    f_ede : float or None
+        Maximum fractional contribution of early dark energy (default None).
+    z_c : float or None
+        Critical redshift of the early dark energy transition (default None).
+    theta_i : float or None
+        Initial early dark energy field displacement in radians (default None).
+    r : float or None
+        Tensor-to-scalar ratio (default None).
     ncdm_mode : {"cb", "m"}
         Mean density, :math:`\\bar\\rho_{cb}` (default) or :math:`\\bar\\rho_m`, used for
         :math:`M(R)` in :math:`\\sigma(M)` and the mass function. :math:`\\sigma(M)` always uses
@@ -151,7 +170,11 @@ class Cosmology:
     Attributes
     ----------
     params : dict
-        Parameter names and values; these are the pytree leaves.
+        Names and values of the free parameters; these are the pytree leaves.
+    extrapolate_z : bool
+        If True, quantities above the redshift range of a cosmology that has one are extrapolated
+        with a flat FLRW :math:`H(z)` and the linear growth equation; if False (default), they are NaN.
+        Set it with :meth:`update`, or on construction where the class takes it.
 
     Examples
     --------
@@ -160,13 +183,16 @@ class Cosmology:
     ...     return p["H0"] * jnp.sqrt(om * (1 + z) ** 3 + 1 - om)
     >>> cosmo = Cosmology(hubble, my_pk, H0=70.0)
     """
-    _STATIC = ("_functions", "_grid", "ncdm_mode", "extrapolate_k")
-    _SETTINGS = ("ncdm_mode", "extrapolate_k")
+    _STATIC = ("_functions", "_grid", "ncdm_mode", "extrapolate_k", "extrapolate_z")
+    _SETTINGS = ("ncdm_mode", "extrapolate_k", "extrapolate_z")
+    _z_max_bg = None  # top of the valid background redshift range; None for no limit
+    _z_max_pk = None  # top of the valid P(k) and growth redshift range; None for no limit
 
     def __init__(self, hubble_parameter=None, pk_linear=None, *, angular_diameter_distance=None, pk_nonlinear=None,
                  growth_factor=None, k_grid=None,
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965,
-                 m_ncdm=0.06, N_ur=3.046, w0=-1.0, T_cmb=2.7255,
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=None,
+                 m_ncdm=0.06, deg_ncdm=1.0, N_ur=3.046, w0=-1.0, T_cmb=2.7255,
+                 f_ede=None, z_c=None, theta_i=None, r=None,
                  ncdm_mode="cb", extrapolate_k=True, **params):
         if hubble_parameter is None or pk_linear is None:
             raise TypeError("Cosmology needs hubble_parameter and pk_linear; "
@@ -175,13 +201,14 @@ class Cosmology:
         for name, f in zip(_FUNCTION_NAMES, functions):
             if f is not None and not callable(f):
                 raise TypeError(f"{name} must be callable or None; got {f!r}.")
-        standard = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, m_ncdm=m_ncdm, N_ur=N_ur,
-                        w0=w0, T_cmb=T_cmb)
+        standard = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau, m_ncdm=m_ncdm,
+                        deg_ncdm=deg_ncdm, N_ur=N_ur, w0=w0, T_cmb=T_cmb, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
+        standard = {n: v for n, v in standard.items() if v is not None}
         self._setup({**standard, **params}, functions,
                     np.geomspace(1e-4, 50.0, 500) if k_grid is None else k_grid, ncdm_mode, extrapolate_k)
         self._check_functions()
 
-    def _setup(self, params, functions, k_grid, ncdm_mode, extrapolate_k):
+    def _setup(self, params, functions, k_grid, ncdm_mode, extrapolate_k, extrapolate_z=False):
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
         self.params = dict(params)
@@ -189,6 +216,23 @@ class Cosmology:
         self._grid = _k_grid(k_grid)
         self.ncdm_mode = ncdm_mode
         self.extrapolate_k = extrapolate_k
+        self.extrapolate_z = extrapolate_z
+
+    def _fixed_params(self):
+        """Parameters the class fixes, by name; they enter the densities but are not leaves."""
+        return {}
+
+    def _label(self):
+        """How errors name this cosmology."""
+        return type(self).__name__
+
+    def _not_parameters(self, names):
+        """Message for names that cannot be set: fixed by the class, absent, or unknown."""
+        fixed = self._fixed_params()
+        for n in names:
+            if n in fixed:
+                return f"{n!r} is fixed at {fixed[n]:g} in {self._label()}, whose free parameters are {', '.join(self.params)}."
+        return _unknown(names, tuple(self.params), self._label())
 
     def _check_functions(self):
         """Trace the given functions once, so a missing parameter or a wrong shape fails here."""
@@ -218,6 +262,8 @@ class Cosmology:
             raise AttributeError(name)
         if name in self.params:
             return self.params[name]
+        if name in _PARAM_NAMES:
+            return self._fixed_params().get(name)
         raise AttributeError(f"{type(self).__name__!r} has no attribute {name!r}")
 
     def __repr__(self):
@@ -257,7 +303,7 @@ class Cosmology:
         ----------
         **changes
             New values, by name, for any parameter in :attr:`params` (e.g. ``H0=70.0``), or for the
-            settings ``ncdm_mode`` and ``extrapolate_k``; None leaves a value unchanged.
+            settings ``ncdm_mode``, ``extrapolate_k`` and ``extrapolate_z``; None leaves a value unchanged.
 
         Returns
         -------
@@ -267,7 +313,7 @@ class Cosmology:
         Raises
         ------
         TypeError
-            If a name is not a parameter of this cosmology.
+            If a name is not a free parameter of this cosmology.
 
         Examples
         --------
@@ -278,7 +324,7 @@ class Cosmology:
         params = {n: v for n, v in changes.items() if v is not None}
         unknown = [n for n in params if n not in self.params]
         if unknown:
-            raise TypeError(_unknown(unknown, tuple(self.params), type(self).__name__))
+            raise TypeError(self._not_parameters(unknown))
         if settings.get("ncdm_mode") not in (None, "cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {settings["ncdm_mode"]!r}.')
         children, aux_data = self._tree_flatten()
@@ -299,7 +345,7 @@ class Cosmology:
         return f(*args, self.params) if f is not None else getattr(self, "_default_" + name)(*args)
 
     def _densities(self):
-        return standard_densities(self.params)
+        return standard_densities({**self._fixed_params(), **self.params})
 
     def _default_angular_diameter_distance(self, z):
         z = jnp.asarray(z)
@@ -332,10 +378,10 @@ class Cosmology:
     # ------------------------------------------------------------------
 
     def _z_grid_bg(self):
-        return jnp.linspace(0.0, _Z_TAB_BG, 5000, dtype=jnp.float64)
+        return jnp.linspace(0.0, _Z_TAB_BG if self._z_max_bg is None else self._z_max_bg, 5000, dtype=jnp.float64)
 
     def _z_grid_pk(self):
-        return jnp.linspace(0.0, _Z_TAB_PK, 100, dtype=jnp.float64)
+        return jnp.linspace(0.0, _Z_TAB_PK if self._z_max_pk is None else self._z_max_pk, 100, dtype=jnp.float64)
 
     def _pk_grid(self):
         # numpy, not jnp: fixed by the cosmology's class, so it stays concrete for mcfit to plan on.
@@ -346,29 +392,28 @@ class Cosmology:
         return self._grid.tophat
 
     @partial(jax.jit, static_argnums=(0,))
-    def _compute_sigma_grid(self):
+    def _compute_sigma_grid(self, z):
         """
-        Compute the interpolation grid for :math:`\\sigma(M, z)`.
+        Compute :math:`\\sigma(M, z)` at the requested redshifts, on a mass grid
+        for interpolation in mass only.
 
         The interpolation mass grid returned here is in physical
         :math:`M_\\odot`.
 
         Returns
         -------
-        ln_x : array_like
-            :math:`\\ln(1+z)` grid.
         ln_M : array_like
             :math:`\\ln M` grid.
         sigma_grid : array_like
-            :math:`\\sigma(M, z)` values.
+            :math:`\\sigma(M, z)` values, shape :math:`(N_z, N_M)`.
         """
 
-        z_grid = self._z_grid_pk()
+        z_grid = jnp.atleast_1d(z)
         cparams = self._cosmo_params()
 
-        # Power spectra for all redshifts, shape: (n_k, n_z)
+        # Power spectra at the requested redshifts, shape: (n_k, n_z)
         k_grid = self._pk_grid()
-        pk_grid = self.pk(k_grid, z_grid, linear=True)
+        pk_grid = jnp.reshape(self.pk(k_grid, z_grid, linear=True), (len(k_grid), len(z_grid)))
 
         # Compute σ²(R, z) using the cached top-hat helper.
         R_grid, var = jax.vmap(self._tophat_instance, in_axes=1, out_axes=(0, 0))(pk_grid)
@@ -381,9 +426,8 @@ class Cosmology:
         # Lagrangian mass of the field halos form from (set by ncdm_mode).
         M_grid = 4.0 * jnp.pi / 3.0 * cparams['Omega0_halo'] * rho_crit_0 * (R_grid ** 3)
 
-        ln_x = jnp.log1p(z_grid)
         ln_M = jnp.log(M_grid)
-        return ln_x, ln_M, sigma_grid
+        return ln_M, sigma_grid
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -421,13 +465,11 @@ class Cosmology:
         m = jnp.atleast_1d(m)
         z = jnp.atleast_1d(z)
 
-        ln_x_grid, ln_M_grid, sigma_grid = self._compute_sigma_grid()
-        sigma_interp = jscipy.interpolate.RegularGridInterpolator((ln_x_grid, ln_M_grid), jnp.log(sigma_grid))
+        # σ is computed at each requested z, so only the mass is interpolated.
+        ln_M_grid, sigma_grid = self._compute_sigma_grid(z)
+        ln_sigma = jax.vmap(lambda row: jnp.interp(jnp.log(m), ln_M_grid, row, left=jnp.nan, right=jnp.nan))(jnp.log(sigma_grid))
 
-        mm, zz = jnp.meshgrid(m, z, indexing='ij')
-        pts = jnp.stack([jnp.log1p(zz), jnp.log(mm)], axis=-1)
-
-        return jnp.squeeze(jnp.exp(sigma_interp(pts)))
+        return jnp.squeeze(jnp.exp(ln_sigma.T))
 
 
     @partial(jax.jit, static_argnums=(0,))
@@ -484,10 +526,25 @@ class Cosmology:
     # Cosmology
     # ------------------------------------------------------------------
 
+    def _hz_flrw_calibrated(self, z_max):
+        """Closed-form flat-FLRW H(z), rescaled to match the cosmology's H(z_max) exactly."""
+        def hz_flrw(z):
+            p = self._cosmo_params()
+            zp1 = 1.0 + z
+            return p['H0'] * jnp.sqrt(
+                p['Omega0_m'] * zp1 ** 3
+                + p['Omega0_r'] * zp1 ** 4
+                + p['Omega_Lambda'] * zp1 ** (3.0 * (1.0 + p['w0']))
+            )
+        # Force the non-extrapolated path to avoid recursing into this method via jnp.where's eager evaluation.
+        correction = (self.update(extrapolate_z=False).hubble_parameter(z_max) / hz_flrw(z_max)) ** 2
+        return lambda z: hz_flrw(z) * jnp.sqrt(correction)
+
     @jax.jit
     def hubble_parameter(self, z):
         """
-        Hubble parameter :math:`H(z)` at redshift :math:`z`.
+        Hubble parameter :math:`H(z)` at redshift :math:`z`, NaN above the cosmology's redshift range
+        unless :attr:`extrapolate_z`.
 
         Parameters
         ----------
@@ -499,12 +556,22 @@ class Cosmology:
         jnp.ndarray
             Hubble parameter(s) in :math:`\\mathrm{km} \\, \\mathrm{s}^{-1} \\, \\mathrm{Mpc}^{-1}`
         """
-        return self._squeeze_single(self._call("hubble_parameter", jnp.atleast_1d(z)))
+
+        z_arr = jnp.atleast_1d(z)
+        z_max = self._z_max_bg
+        if z_max is None:
+            return self._squeeze_single(self._call("hubble_parameter", z_arr))
+        Hz = self._call("hubble_parameter", jnp.minimum(z_arr, z_max))
+        fill = self._hz_flrw_calibrated(z_max)(z_arr) if self.extrapolate_z else jnp.nan
+        Hz = jnp.where(z_arr > z_max, fill, Hz)
+
+        return self._squeeze_single(Hz)
 
     @jax.jit
     def angular_diameter_distance(self, z):
         """
-        Angular diameter distance :math:`D_A(z)` at redshift :math:`z`.
+        Angular diameter distance :math:`D_A(z)` at redshift :math:`z`, NaN above the cosmology's redshift
+        range unless :attr:`extrapolate_z`.
 
         Parameters
         ----------
@@ -516,12 +583,39 @@ class Cosmology:
         jnp.ndarray
             Angular diameter distance(s) in :math:`\\mathrm{Mpc}`.
         """
-        return self._squeeze_single(self._call("angular_diameter_distance", jnp.atleast_1d(z)))
+
+        z_arr = jnp.atleast_1d(z)
+        z_max = self._z_max_bg
+        if z_max is None:
+            return self._squeeze_single(self._call("angular_diameter_distance", z_arr))
+        DA = self._call("angular_diameter_distance", jnp.minimum(z_arr, z_max))
+        if not self.extrapolate_z:
+            DA = jnp.where(z_arr > z_max, jnp.nan, DA)
+
+        if self.extrapolate_z:
+            # Same recursion hazard as _hz_flrw_calibrated -- force the non-extrapolated path for this boundary-anchor call.
+            chi_max = self.update(extrapolate_z=False).angular_diameter_distance(z_max) * (1.0 + z_max)
+
+            Hz_fn = self._hz_flrw_calibrated(z_max)
+            x_max = jnp.log1p(z_max)
+
+            def dchi_dx(x, chi):
+                z = jnp.expm1(x)
+                return (Const._c_ / 1e3) * (1.0 + z) / Hz_fn(z)
+
+            # Integrate to each z independently -- a shared trajectory would be too sparse to interpolate safely.
+            def chi_at(z_target):
+                _, chi_traj = dopri5_integrate(dchi_dx, chi_max, x_max, jnp.log1p(z_target), rtol=1e-4, atol=1e-7, max_steps=16)
+                return chi_traj[-1]
+
+            DA = jnp.where(z_arr > z_max, jax.vmap(chi_at)(z_arr) / (1.0 + z_arr), DA)
+
+        return self._squeeze_single(DA)
 
     @jax.jit
     def sigma8(self, z):
         """
-        :math:`\\sigma_8(z)` at redshift :math:`z`, from :meth:`sigma_r`.
+        :math:`\\sigma_8(z)` at redshift :math:`z`, from :meth:`sigma_r`, or from its own emulator in :class:`~hmfast.cosmology.CosmoPowerCosmology`.
 
         :math:`\\sigma_8(z)` is the dimensionless root-mean-square linear
         matter fluctuation amplitude in spheres of radius
@@ -537,6 +631,9 @@ class Cosmology:
         jnp.ndarray
             Dimensionless :math:`\\sigma_8` value(s)
         """
+        return self._sigma8(z)
+
+    def _sigma8(self, z):
         return self.sigma_r(8.0 / self._cosmo_params()["h"], z)
 
     @jax.jit
@@ -687,13 +784,68 @@ class Cosmology:
             f"{prescription!r}. Allowed values are: 'EdS', 'EdS_approx', 'NS97'."
         )
 
+    def _growth_ode(self, z, z_max):
+        """
+        Extend both the linear growth factor and the linear growth rate past
+        ``z_max`` by integrating the growth-rate Riccati equation forward
+        (the numerically stable direction) from a deep-matter-domination seed via
+        :func:`hmfast.utils.dopri5_integrate`, then calibrating the growth-factor branch
+        to :meth:`growth_factor` at ``z_max``.
+
+        The growth-rate branch needs no analogous calibration: the growth-factor
+        calibration below is an additive shift to ``ln D``, and :math:`f = d\\ln D/d\\ln a`
+        is a derivative, so it's invariant to that shift. ``f``'s own accuracy instead
+        comes from the background dynamics (``H(z)``) already being calibrated via
+        :meth:`_hz_flrw_calibrated`.
+
+        Returns
+        -------
+        D : jnp.ndarray
+            Extrapolated growth factor at ``z``, calibrated to :meth:`growth_factor` at ``z_max``.
+        f : jnp.ndarray
+            Extrapolated growth rate at ``z``, from the same ODE trajectory (uncalibrated --
+            none is needed, see above).
+        """
+        Hz_fn = self._hz_flrw_calibrated(z_max)
+        z_arr = jnp.atleast_1d(z)
+
+        # Seed well past any requested z so D~a has room to relax onto the growing mode.
+        z_start = 4.0 * jnp.maximum(jnp.max(z_arr), z_max)
+        x_start = jnp.log(1.0 / (1.0 + z_start))
+        x_max = jnp.log(1.0 / (1.0 + z_max))
+
+        p = self._cosmo_params()
+        Om0_m = p['Omega0_m_nonu'] + p['Omega0_ncdm']
+
+        def ln_hubble(x):
+            return jnp.log(Hz_fn(jnp.expm1(-x)))
+
+        def growth_rhs(x, y):
+            _, f = y
+            dlnH_dx = jax.grad(ln_hubble)(x)
+            z = jnp.expm1(-x)
+            Om_a = Om0_m * (1.0 + z) ** 3 * self.H0 ** 2 / Hz_fn(z) ** 2
+            return f, -f ** 2 - (2.0 + dlnH_dx) * f + 1.5 * Om_a
+
+        # D_seed=1 (arbitrary norm), f_seed=1; max_h caps node spacing so batched interior queries interpolate safely.
+        x_traj, (lnD_traj, f_traj) = dopri5_integrate(growth_rhs, (jnp.array(0.0), jnp.array(1.0)), x_start, x_max, rtol=1e-4, atol=1e-7, max_steps=64, max_h=0.3)
+
+        # Force the non-extrapolated path to avoid recursing back into this method.
+        norm = jnp.log(self.update(extrapolate_z=False).growth_factor(z_max)) - jnp.interp(x_max, x_traj, lnD_traj)
+
+        x_target = jnp.log(1.0 / (1.0 + z_arr))
+        lnD_target = jnp.interp(x_target, x_traj, lnD_traj) + norm
+        f_target = jnp.interp(x_target, x_traj, f_traj)
+        return jnp.exp(lnD_target), f_target
+
     @jax.jit
     def growth_factor(self, z):
         """
         Linear growth factor :math:`D(z)`, normalized to :math:`D(0)=1`.
 
         From the ``growth_factor`` function, or by default from the linear power spectrum at
-        :math:`k = 0.01\\,\\mathrm{Mpc}^{-1}`.
+        :math:`k = 0.01\\,\\mathrm{Mpc}^{-1}`. NaN above the cosmology's redshift range unless
+        :attr:`extrapolate_z`, in which case the linear growth equation continues it.
 
         Parameters
         ----------
@@ -707,7 +859,21 @@ class Cosmology:
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        return jnp.squeeze(self._call("growth_factor", jnp.atleast_1d(z)))
+
+        z = jnp.atleast_1d(z)
+        z_max = self._z_max_pk
+        if z_max is None:
+            return jnp.squeeze(self._call("growth_factor", z))
+
+        # Clamp to the valid range before calling the function, so the masked values cannot poison gradients.
+        D = self._call("growth_factor", jnp.minimum(z, z_max))
+        D = jnp.where(z > z_max, jnp.nan, D)
+
+        if self.extrapolate_z:
+            D_ext, _ = self._growth_ode(z, z_max)
+            D = jnp.where(z > z_max, D_ext, D)
+
+        return jnp.squeeze(D)
 
     def _growth_rate_tabulated(self, z):
         """:math:`f(z)` from finite differences of :meth:`growth_factor` on the P(k) redshift table; NaN above it."""
@@ -736,7 +902,12 @@ class Cosmology:
 
             f(z) = \\frac{d \\ln D}{d \\ln a}
 
-        from finite differences of :meth:`growth_factor` on the P(k) redshift table, NaN above it.
+        from finite differences of :meth:`growth_factor` on the P(k) redshift table, NaN above it
+        unless :attr:`extrapolate_z`, in which case the linear growth equation continues it.
+
+        .. warning::
+            When extrapolating, this assumes massive neutrinos behave as fully non-relativistic
+            matter at every :math:`z`.
 
         Parameters
         ----------
@@ -750,7 +921,16 @@ class Cosmology:
             :math:`(N_z,)`, where singleton dimensions get squeezed before
             return.
         """
-        return jnp.squeeze(self._growth_rate_tabulated(jnp.atleast_1d(z)))
+
+        z = jnp.atleast_1d(z)
+        f = self._growth_rate_tabulated(z)
+
+        if self.extrapolate_z and self._z_max_pk is not None:
+            z_max = self._z_max_pk
+            _, f_ext = self._growth_ode(z, z_max)
+            f = jnp.where(z > z_max, f_ext, f)
+
+        return jnp.squeeze(f)
 
     @jax.jit
     def velocity_dispersion(self, z):
@@ -837,7 +1017,8 @@ class Cosmology:
     def pk(self, k, z, *, linear=True):
         """
         Get the matter power spectrum :math:`P(k, z)` interpolated at
-        requested wavenumbers `k` and redshifts `z`.
+        requested wavenumbers `k` and redshifts `z`. NaN above the cosmology's redshift range unless
+        :attr:`extrapolate_z`, in which case it is scaled by the squared growth factor.
 
         Parameters
         ----------
@@ -854,7 +1035,23 @@ class Cosmology:
             Power spectrum values with shape :math:`(N_k, N_z)`, where singleton
             dimensions get squeezed before return.
         """
-        return jnp.squeeze(self._pk_k_masked(jnp.atleast_1d(k), jnp.atleast_1d(z), linear))
+        k = jnp.atleast_1d(k)
+        z = jnp.atleast_1d(z)
+
+        z_max = self._z_max_pk
+        if z_max is None:
+            return jnp.squeeze(self._pk_k_masked(k, z, linear))
+        in_z_bounds = z <= z_max
+        if self.extrapolate_z:
+            growth_ratio_sq = jnp.where(in_z_bounds, 1.0, (self.growth_factor(z) / self.growth_factor(z_max)) ** 2)
+
+        # Clamp to the valid range before calling the function, so the masked values cannot poison gradients.
+        pk_out = self._pk_k_masked(k, jnp.where(in_z_bounds, z, z_max), linear)
+        if self.extrapolate_z:
+            pk_out = pk_out * growth_ratio_sq[None, :]
+        else:
+            pk_out = jnp.where(in_z_bounds[None, :], pk_out, jnp.nan)
+        return jnp.squeeze(pk_out)
 
 
 jax.tree_util.register_pytree_node(Cosmology, lambda obj: obj._tree_flatten(), Cosmology._tree_unflatten)

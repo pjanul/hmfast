@@ -46,6 +46,11 @@ class TestCl:
         c = lambda pk: cl(pk, HM, L_GRID, GLENS_TRACER, None, z_range=Z_RANGE, n_z=N_Z)  # noqa: E731
         np.testing.assert_allclose(c(PK_1H) + c(PK_2H), c(PK), rtol=1e-12)
 
+    # Below l_limber only the 2-halo term goes non-Limber; the 1-halo term stays the Limber one at every multipole.
+    def test_l_limber_keeps_1h(self):
+        c = lambda pk, **kw: cl(pk, HM, L_GRID, GLENS_TRACER, None, z_range=Z_RANGE, n_z=N_Z, **kw)  # noqa: E731
+        np.testing.assert_allclose(c(PK, l_limber=100.0) - c(PK_2H, l_limber=100.0), c(PK_1H), rtol=1e-12)
+
     # On large scales the 2-halo matter spectrum reduces to the linear-bias spectrum with b = 1.
     def test_2h_matches_linear_bias_on_large_scales(self):
         c_2h = cl(PK_2H, HM, L_LOW, GLENS_TRACER, None, z_range=Z_RANGE, n_z=N_Z)

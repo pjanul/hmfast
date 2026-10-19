@@ -8,8 +8,8 @@ The covariance reference is assembled directly from CCL rather than through its 
 which are unconverged at practical resolution for cNG (13% at 50 x 30 nodes, 8% at 100 x 60) and whose integrator
 fails here: at each of hmfast's own redshift nodes, CCL's halo-model trispectrum or SSC response is evaluated at
 exactly k = (l + 1/2) / chi, multiplied by CCL's tracer kernels and summed with the same quadrature weights. Sharing the
-nodes tests the integrand (kernels, weights, trispectrum or response), not quadrature convergence. The comparison starts
-at z = 0.01, below which k runs far past the emulator's range and CCL's 4-halo term slows to minutes per node.
+nodes tests the integrand (kernels, weights, trispectrum or response), not quadrature convergence. The nodes span the
+redshift range hmfast takes from the tracers.
 
 Every comparison runs hmfast with ncdm_mode="m" against a CCL CosmologyCalculator fed hmfast's background, growth and
 P(k). To stay within a few minutes (each tracer compiles its own covariance, 30-80 s), the cases cover distinct code
@@ -33,6 +33,7 @@ from scipy.special import j1
 
 from hmfast.stats import Pk, Tk, cov_cng, cov_ssc, sigma2_b_disc
 from hmfast.stats.covariance import _dPk_response
+from hmfast.stats.projected_cl import _resolve_z_range
 from hmfast.utils import gauss_legendre_nodes_weights
 
 from .._shared import peak_err, rel_err
@@ -45,7 +46,7 @@ from .benchmark_stats_projected import HOD, NFW, Setup  # noqa: E402
 C_KM_S = 299792.458
 F_SKY = 0.1
 ELL = np.geomspace(20, 2000, 5)
-Z_RANGE, N_Z = (0.01, 3.0), 20
+N_Z = 20
 TK_1H_4H = Tk(include_2h=False, include_3h=False)
 TRACERS = {  # name: (Setup method, CCL profile key)
     "shear": ("shear", "m"),
@@ -59,9 +60,10 @@ def s(fixed_cosmology_m):
     return Setup(fixed_cosmology_m, halo_pk2d=False)
 
 
-def z_nodes():
+def z_nodes(s, tracer):
     """hmfast's covariance quadrature: Gauss-Legendre in ln z, weights including the dz / dln z Jacobian."""
-    logz, w = gauss_legendre_nodes_weights(np.log(Z_RANGE[0]), np.log(Z_RANGE[1]), N_Z)
+    z_min, z_max = (float(z) for z in _resolve_z_range(s.cosmo, tracer))
+    logz, w = gauss_legendre_nodes_weights(np.log(z_min), np.log(z_max), N_Z)
     z = np.exp(np.asarray(logz))
     return z, np.asarray(w) * z
 
@@ -106,9 +108,9 @@ def ccl_response(s, key, k, a, slope=None):
     return response
 
 
-def direct_covariance(s, tracer_ccl, key, kind, terms=("1h", "2h", "3h", "4h")):
-    """The Limber covariance on hmfast's z nodes from CCL's T or response at k = (l + 1/2) / chi."""
-    z, w = z_nodes()
+def direct_covariance(s, tracer, tracer_ccl, key, kind, terms=("1h", "2h", "3h", "4h")):
+    """The Limber covariance on hmfast's z nodes for `tracer` from CCL's T or response at k = (l + 1/2) / chi."""
+    z, w = z_nodes(s, tracer)
     cov = 0.0
     for z_i, w_i in zip(z, w):
         a = 1.0 / (1.0 + z_i)
@@ -159,7 +161,7 @@ class TestSSCResponseCCL:
     def test_response(self, s, key, tol):
         profile = {"m": NFW, "g": HOD}[key]
         k = np.geomspace(5e-3, 10.0, 40)
-        k_grid = np.asarray(s.cosmo._pk_grid()[0])
+        k_grid = np.asarray(s.cosmo._pk_grid())
         for z in (0.3, 1.0):
             za = jnp.array([z])
             p_grid = np.ravel(s.cosmo.pk(jnp.asarray(k_grid), za, linear=True))
@@ -185,8 +187,8 @@ class TestCovSSC:
     # the counter-term drives the response through zero, sets the error (measured 1.6e-2).
     def test_cov_ssc_galaxy(self, s):
         t, tc = tracer_pair(s, "galaxy")
-        got = cov_ssc(Pk(), s.hm, jnp.asarray(ELL), jnp.asarray(ELL), t, z_range=Z_RANGE, n_z=N_Z, f_sky=F_SKY)
-        assert rel_err(got, direct_covariance(s, tc, "g", "ssc")) < 3.2e-2
+        got = cov_ssc(Pk(), s.hm, jnp.asarray(ELL), jnp.asarray(ELL), t, n_z=N_Z, f_sky=F_SKY)
+        assert rel_err(got, direct_covariance(s, t, tc, "g", "ssc")) < 3.2e-2
 
 
 class TestCovCNG:
@@ -202,5 +204,5 @@ class TestCovCNG:
     ])
     def test_cov_cng_1h_4h(self, s, name, tol):
         t, tc = tracer_pair(s, name)
-        got = cov_cng(TK_1H_4H, s.hm, jnp.asarray(ELL), jnp.asarray(ELL), t, z_range=Z_RANGE, n_z=N_Z, f_sky=F_SKY)
-        assert rel_err(got, direct_covariance(s, tc, TRACERS[name][1], "cng", terms=("1h", "4h"))) < tol
+        got = cov_cng(TK_1H_4H, s.hm, jnp.asarray(ELL), jnp.asarray(ELL), t, n_z=N_Z, f_sky=F_SKY)
+        assert rel_err(got, direct_covariance(s, t, tc, TRACERS[name][1], "cng", terms=("1h", "4h"))) < tol

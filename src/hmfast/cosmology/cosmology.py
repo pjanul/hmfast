@@ -7,16 +7,26 @@ import jax.numpy as jnp
 import numpy as np
 from mcfit import TophatVar
 
-from hmfast.utils import Const
+from hmfast.utils import Const, gauss_legendre_nodes_weights
 
 jax.config.update("jax_enable_x64", True)
 
 
 _FUNCTION_NAMES = ("hubble_parameter", "pk_linear", "angular_diameter_distance", "pk_nonlinear", "growth_factor")
 _Functions = namedtuple("_Functions", _FUNCTION_NAMES)
+# Gauss-Legendre nodes in ln(p / T_nu) over 1e-5 < p / T_nu < 50, where the neutrino energy integrand is non-negligible.
+_LN_X_NODES, _LN_X_WEIGHTS = (np.asarray(v) for v in gauss_legendre_nodes_weights(np.log(1e-5), np.log(50.0), 96))
 # Cosmological parameters every cosmology class lists; each is free, fixed or absent (None) in a given class.
-_PARAM_NAMES = ("H0", "omega_cdm", "omega_b", "Omega_k", "A_s", "n_s", "tau", "m_ncdm", "N_ur", "w0", "wa", "T_cmb",
-                "f_ede", "z_c", "theta_i", "r")
+_PARAM_NAMES = ("H0", "omega_cdm", "omega_b", "A_s", "n_s", "tau", "Omega_k", "m_ncdm", "N_ur", "w0", "wa", "T_cmb",
+                "T_ncdm", "f_ede", "z_c", "theta_i", "r")
+
+
+def _fermi_dirac_energy(y):
+    """Energy density of a Fermi-Dirac neutrino of mass y (in units of its temperature), relative to a massless one."""
+    x = np.exp(_LN_X_NODES)
+    y = jnp.asarray(y)[..., None]
+    integrand = x**3 * jnp.sqrt(x**2 + y**2) / (jnp.exp(x) + 1.0)
+    return 120.0 / (7.0 * np.pi**4) * jnp.sum(_LN_X_WEIGHTS * integrand, axis=-1)
 
 
 def _unknown(names, known, what):
@@ -31,8 +41,9 @@ def _unknown(names, known, what):
 
 class Cosmology:
     """
-    General cosmology class: cosmological parameters plus your own functions for :math:`H(z)`, the linear
-    :math:`P(k, z)`, :math:`D_A(z)`, the nonlinear :math:`P(k, z)` and :math:`D(z)`.
+    Parent cosmology class, which every hmfast cosmology inherits from: cosmological parameters plus your own
+    functions for :math:`H(z)`, the linear :math:`P(k, z)`, :math:`D_A(z)`, the nonlinear :math:`P(k, z)` and
+    :math:`D(z)`.
     Everything else in hmfast (:math:`\\sigma(M)`, the halo model, statistics) is built on them.
 
     Use it to define a cosmology hmfast does not provide. Each function takes ``p``,
@@ -44,11 +55,12 @@ class Cosmology:
 
     Parameters are passed as keywords, read as attributes (``cosmo.H0``) and changed with :meth:`update`.
     The densities follow from ``H0``, ``omega_b``, ``omega_cdm``, ``Omega_k``, ``m_ncdm``, ``N_ur``, ``w0``,
-    ``wa`` and ``T_cmb`` (see :meth:`rho_x`); any further keyword becomes a parameter that the functions can read.
+    ``wa``, ``T_cmb`` and ``T_ncdm`` (see :meth:`rho_x`); any further keyword becomes a parameter that the
+    functions can read.
 
-    Every cosmology class takes the parameters below. In a given class each one is free (changed with
-    :meth:`update`), fixed by the class (read-only) or absent (``None``); for instance
-    ``CosmoPowerCosmology("lcdm:v1")`` fixes ``m_ncdm`` at 0.06 and has no ``f_ede``. Here a parameter
+    In a given cosmology class each parameter below is free (changed with :meth:`update`), fixed by the class
+    (read-only) or absent (``None``); for instance ``CosmoPowerCosmology("lcdm:v1")`` fixes ``m_ncdm`` at 0.06
+    and has no ``f_ede``. Here a parameter
     left at ``None`` is absent, and one given a value is free.
 
     Parameters
@@ -69,15 +81,15 @@ class Cosmology:
         Physical cold dark matter density, :math:`\\omega_{\\mathrm{cdm}} = \\Omega_{\\mathrm{cdm}} h^2` (default 0.12).
     omega_b : float
         Physical baryon density, :math:`\\omega_b = \\Omega_b h^2` (default 0.02246576).
-    Omega_k : float
-        Curvature density parameter today, positive for an open universe (default 0). Distances extrapolated
-        beyond the redshift range and the projected statistics assume a flat geometry.
     A_s : float
         Amplitude of the primordial scalar power spectrum (default :math:`2.1053 \\times 10^{-9}`).
     n_s : float
         Scalar spectral index (default 0.965).
     tau : float or None
         Optical depth to reionization (default None).
+    Omega_k : float
+        Curvature density parameter today, positive for an open universe (default 0). Distances extrapolated
+        beyond the redshift range and the projected statistics assume a flat geometry.
     m_ncdm : float
         Mass in eV of the massive neutrino state; this class has one (default 0.06).
     N_ur : float
@@ -88,6 +100,9 @@ class Cosmology:
         Rate of change of the dark energy equation of state, :math:`w(a) = w_0 + w_a (1 - a)` (default 0).
     T_cmb : float
         CMB temperature today in K (default 2.7255).
+    T_ncdm : float
+        Temperature of the massive neutrinos in units of ``T_cmb`` (default 0.71611, for which each massive state
+        adds 1.0132 to :math:`N_\\mathrm{eff}`).
     f_ede : float or None
         Maximum fractional contribution of early dark energy (default None).
     z_c : float or None
@@ -104,6 +119,10 @@ class Cosmology:
         Range in :math:`\\mathrm{Mpc}^{-1}` of the wavenumber grid used for :math:`\\sigma(M)` and other k integrals (default (1e-4, 50)).
     n_k : int
         Number of log-spaced points in that grid (default 500).
+    z_max_pk : float or None
+        Highest redshift at which projected statistics evaluate the halo model directly (default None, every
+        redshift). Above it, the halo model power spectrum is evaluated at ``z_max_pk`` and scaled by the linear
+        growth factor, :math:`P(k, z) = P(k, z_{\\max}) \\, [D(z) / D(z_{\\max})]^2`.
     **params
         Further parameters the functions read, e.g. ``f_R0=1e-5``.
 
@@ -119,32 +138,34 @@ class Cosmology:
     ...     return p["H0"] * jnp.sqrt(om * (1 + z) ** 3 + 1 - om)
     >>> cosmo = Cosmology(hubble, my_pk, my_da, my_pknl, my_growth, H0=70.0)
     """
-    _STATIC = ("_functions", "_k", "ncdm_mode")
+    _STATIC = ("_functions", "_k", "ncdm_mode", "z_max_pk")
     _SETTINGS = ("ncdm_mode",)
     _deg_ncdm = 1  # number of massive neutrino states of mass m_ncdm each
 
     def __init__(self, hubble_parameter, pk_linear, angular_diameter_distance, pk_nonlinear, growth_factor, *,
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, Omega_k=0.0, A_s=2.1053e-9, n_s=0.965, tau=None,
-                 m_ncdm=0.06, N_ur=3.046, w0=-1.0, wa=0.0, T_cmb=2.7255,
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=None, Omega_k=0.0,
+                 m_ncdm=0.06, N_ur=3.046, w0=-1.0, wa=0.0, T_cmb=2.7255, T_ncdm=0.71611,
                  f_ede=None, z_c=None, theta_i=None, r=None,
-                 ncdm_mode="cb", k_range=(1e-4, 50.0), n_k=500, **params):
+                 ncdm_mode="cb", k_range=(1e-4, 50.0), n_k=500, z_max_pk=None, **params):
         functions = _Functions(hubble_parameter, pk_linear, angular_diameter_distance, pk_nonlinear, growth_factor)
         for name, f in zip(_FUNCTION_NAMES, functions):
             if not callable(f):
                 raise TypeError(f"{name} must be callable; got {f!r}.")
-        standard = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, Omega_k=Omega_k, A_s=A_s, n_s=n_s, tau=tau,
-                        m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, wa=wa, T_cmb=T_cmb, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
+        standard = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau, Omega_k=Omega_k,
+                        m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, wa=wa, T_cmb=T_cmb, T_ncdm=T_ncdm, f_ede=f_ede, z_c=z_c,
+                        theta_i=theta_i, r=r)
         standard = {n: v for n, v in standard.items() if v is not None}
-        self._setup({**standard, **params}, functions, np.geomspace(*k_range, n_k), ncdm_mode)
+        self._setup({**standard, **params}, functions, np.geomspace(*k_range, n_k), ncdm_mode, z_max_pk)
         self._check_functions()
 
-    def _setup(self, params, functions, k_grid, ncdm_mode):
+    def _setup(self, params, functions, k_grid, ncdm_mode, z_max_pk=None):
         if ncdm_mode not in ("cb", "m"):
             raise ValueError(f'ncdm_mode must be "cb" or "m", got {ncdm_mode!r}.')
         self.params = dict(params)
         self._functions = functions
         self._k = tuple(np.asarray(k_grid, dtype=float))  # static, so equal grids give equal treedefs
         self.ncdm_mode = ncdm_mode
+        self.z_max_pk = None if z_max_pk is None else float(z_max_pk)
 
     def _fixed_params(self):
         """Parameters the class fixes, by name; they enter the densities but are not leaves."""
@@ -514,9 +535,10 @@ class Cosmology:
         """
         Physical (not comoving) density of a species at redshift :math:`z`, from the cosmological parameters.
 
-        Matter (massive neutrinos included) dilutes as :math:`(1+z)^3`, photons and massless neutrinos as
-        :math:`(1+z)^4` and curvature as :math:`(1+z)^2`; dark energy follows :math:`w(a) = w_0 + w_a (1 - a)`
-        and closes the budget today.
+        Baryons and cold dark matter dilute as :math:`(1+z)^3`, photons and massless neutrinos as
+        :math:`(1+z)^4` and curvature as :math:`(1+z)^2`. Massive neutrinos keep their relic Fermi-Dirac momentum
+        distribution, so they dilute like radiation while relativistic and like matter after. Dark energy follows
+        :math:`w(a) = w_0 + w_a (1 - a)` and closes the budget today.
 
         Parameters
         ----------
@@ -536,26 +558,31 @@ class Cosmology:
         sigma_B, c, M_sun, Mpc = Const._sigma_B_, Const._c_, Const._M_sun_, Const._Mpc_over_m_
         rho_crit_100 = 3.0e10 * Mpc / (8.0 * np.pi * Const._G_ * M_sun)  # critical density for H0 = 100 km/s/Mpc
         rho_crit_0 = rho_crit_100 * (p["H0"] / 100.0) ** 2
-        rho_photons = 4.0 * sigma_B * p.get("T_cmb", 0.0) ** 4 / c**3 * Mpc**3 / M_sun
-        rho_nu = self._deg_ncdm * p.get("m_ncdm", 0.0) / 93.14 * rho_crit_100
-        rho_matter = (p["omega_b"] + p["omega_cdm"]) * rho_crit_100 + rho_nu
+        T_cmb = p.get("T_cmb", 0.0)
+        rho_photons = 4.0 * sigma_B * T_cmb**4 / c**3 * Mpc**3 / M_sun
+        rho_cb = (p["omega_b"] + p["omega_cdm"]) * rho_crit_100
         rho_ur = p.get("N_ur", 0.0) * 7.0 / 8.0 * (4.0 / 11.0) ** (4.0 / 3.0) * rho_photons
         rho_k = p.get("Omega_k", 0.0) * rho_crit_0
         w0, wa = p.get("w0", -1.0), p.get("wa", 0.0)
+        has_nu = all(n in p for n in ("m_ncdm", "T_ncdm", "T_cmb"))  # massive neutrinos need a mass and a temperature
+
+        def rho_nu(zp1):
+            if not has_nu:
+                return 0.0 * zp1
+            y = p["m_ncdm"] * Const._eV_ / (Const._k_B_ * p["T_ncdm"] * T_cmb * zp1)
+            return self._deg_ncdm * 7.0 / 8.0 * p["T_ncdm"] ** 4 * rho_photons * zp1**4 * _fermi_dirac_energy(y)
 
         zp1 = 1.0 + jnp.asarray(z)
-        # Each species as (density today, dilution with redshift).
-        components = {"matter": (rho_matter, zp1**3), "neutrinos_massive": (rho_nu, zp1**3),
-                      "radiation": (rho_photons, zp1**4), "neutrinos_rel": (rho_ur, zp1**4), "curvature": (rho_k, zp1**2),
-                      "dark_energy": (rho_crit_0 - rho_matter - rho_photons - rho_ur - rho_k,
-                                      zp1 ** (3.0 * (1.0 + w0 + wa)) * jnp.exp(-3.0 * wa * (1.0 - 1.0 / zp1)))}
+        rho_de_0 = rho_crit_0 - rho_cb - rho_nu(1.0) - rho_photons - rho_ur - rho_k
+        components = {"matter": rho_cb * zp1**3 + rho_nu(zp1), "neutrinos_massive": rho_nu(zp1),
+                      "radiation": rho_photons * zp1**4, "neutrinos_rel": rho_ur * zp1**4, "curvature": rho_k * zp1**2,
+                      "dark_energy": rho_de_0 * zp1 ** (3.0 * (1.0 + w0 + wa)) * jnp.exp(-3.0 * wa * (1.0 - 1.0 / zp1))}
 
         if species == "critical":
-            return sum(rho_0 * f for name, (rho_0, f) in components.items() if name != "neutrinos_massive")
+            return sum(rho for name, rho in components.items() if name != "neutrinos_massive")
         if species not in components:
             raise ValueError(f"species must be one of {', '.join([*components, 'critical'])}; got {species!r}.")
-        rho_0, f = components[species]
-        return rho_0 * f
+        return components[species]
 
     def omega_x(self, z, species):
         """
@@ -702,8 +729,11 @@ class Cosmology:
         .. math::
 
             \\frac{1}{3} \\frac{v_\\mathrm{rms}^2}{c^2}
+            = \\frac{1}{3} \\left[\\frac{f(z)\\, H(z)}{c\\,(1+z)}\\right]^2
+              \\int \\frac{dk}{2\\pi^2}\\, P_\\mathrm{L}(k, z),
 
-        from the linear growth factor and matter power spectrum.
+        where :math:`f(z)` is the linear growth rate (:meth:`growth_rate`) and :math:`P_\\mathrm{L}` the linear
+        matter power spectrum (:meth:`pk`), integrated over the cosmology's wavenumber grid.
 
         Parameters
         ----------

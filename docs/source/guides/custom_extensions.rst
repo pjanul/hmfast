@@ -25,9 +25,9 @@ so JAX can traverse array children while treating configuration as static
 
 A ``Cosmology`` takes :math:`H(z)` and :math:`P(k, z)` from functions, and
 everything else in ``hmfast`` (distances, growth, :math:`\sigma(M)`, the halo
-model, statistics) is built on them. ``hmfast`` provides two ready-made
-cosmologies, ``CosmoPowerCosmology`` (emulators) and ``AnalyticCosmology``
-(analytic formulae); to test a model ``hmfast`` does not support, pass your own
+model, statistics) is built on them. ``hmfast`` provides one ready-made
+cosmology, ``CosmoPowerCosmology`` (emulators), a subclass of the parent class
+``Cosmology``; to test a model ``hmfast`` does not support, pass your own
 functions to ``Cosmology`` itself.
 
 Each function takes ``p``, the dict of the cosmology's parameter values, as its

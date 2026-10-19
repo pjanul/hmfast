@@ -97,8 +97,7 @@ class TestNFWMatterProfileCCL:
         nfw_ccl = pyccl.halos.HaloProfileNFW(mass_def=md_ccl, concentration=pyccl.halos.ConcentrationDuffy08(
             mass_def=md_ccl), truncated=True, fourier_analytic=True)
         a = 1.0 / (1.0 + z)
-        p = cosmo._cosmo_params()
-        rho_m = p["Rho_crit_0"] * p["Omega0_m"]
+        rho_m = cosmo.rho_x(0.0, "matter")
         nfw = NFWMatterProfile()
 
         real_ccl = nfw_ccl.real(cosmo_ccl, R_GRID, m, a)
@@ -264,8 +263,7 @@ class TestB12PressureProfileClassSZ:
         b12 = B12PressureProfile(**shape)
         m, z = 1e14, 0.3
         h = cosmo.H0 / 100.0
-        p = cosmo._cosmo_params()
-        f_b = p["Omega_b"] / p["Omega0_m"]
+        f_b = cosmo.omega_b / h**2 / cosmo.omega_x(0.0, "matter")
         r200c = float(md.r_delta(cosmo, m, z))
         p_200c = (m / (r200c * h)) * f_b * 2.61051e-18 * float(cosmo.hubble_parameter(z)) ** 2
         csz = classy_sz.Class()
@@ -308,9 +306,8 @@ class TestManiyarMdotSFR:
         m21 = M21CIBProfile(nu=100)
         m = np.geomspace(1e11, 1e15, 6)
         z = np.array([0.0, 0.5, 1.0, 2.0])
-        p = cosmo._cosmo_params()
-        Om0 = float(p["Omega0_m"])
-        f_b = float(p["Omega_b"] / p["Omega0_m"])
+        Om0 = float(cosmo.omega_x(0.0, "matter"))
+        f_b = float(cosmo.omega_b / (cosmo.H0 / 100.0) ** 2 / Om0)
         assert rel_err(m21._m_dot(hm, jnp.asarray(m), jnp.asarray(z)), _ref_mdot(m, z, Om0, 1.0 - Om0)) < 7e-4
         want = _ref_sfr(m, z, Om0, 1.0 - Om0, f_b, m21.eta_max, m21.M_eff, m21.sigma2_LM, m21.tau, m21.z_c)
         assert rel_err(m21._sfr(hm, jnp.asarray(m), jnp.asarray(z)), want) < 7e-4

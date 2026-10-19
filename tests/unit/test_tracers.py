@@ -27,6 +27,8 @@ from hmfast.tracers import (
 )
 
 _SYNTHETIC_DNDZ = (jnp.linspace(0.0, 2.0, 20), jnp.ones(20))
+# CMB lensing source plane inside the emulated background (z <= 20), so kernels are finite without extrapolate_z.
+_Z_SOURCE = 10.0
 
 # Each tracer paired with a profile from a genuinely incompatible family.
 _WRONG_PROFILE_CASES = [
@@ -53,6 +55,8 @@ def _build(tracer_cls, profile):
     """Construct a tracer with a valid profile, supplying dndz explicitly where needed."""
     if tracer_cls in (GalaxyTracer, GalaxyLensingTracer):
         return tracer_cls(profile=profile, dndz=_SYNTHETIC_DNDZ)
+    if tracer_cls is CMBLensingTracer:
+        return tracer_cls(profile=profile, z_source=_Z_SOURCE)
     return tracer_cls(profile=profile)
 
 
@@ -60,6 +64,8 @@ def _build_default(tracer_cls, **kwargs):
     """Construct a tracer with its default profile, supplying dndz explicitly where needed."""
     if tracer_cls in (GalaxyTracer, GalaxyLensingTracer):
         return tracer_cls(dndz=_SYNTHETIC_DNDZ, **kwargs)
+    if tracer_cls is CMBLensingTracer:
+        return tracer_cls(z_source=_Z_SOURCE, **kwargs)
     return tracer_cls(**kwargs)
 
 
@@ -185,7 +191,7 @@ class TestTracerUpdateAndPytree:
     # update(profile=...) swaps in the new profile and leaves the original tracer untouched.
     def test_update_cmb_lensing_swaps_profile(self):
         original_profile = NFWMatterProfile()
-        tracer = CMBLensingTracer(profile=original_profile)
+        tracer = CMBLensingTracer(profile=original_profile, z_source=_Z_SOURCE)
         new_profile = NFWMatterProfile()
         tracer2 = tracer.update(profile=new_profile)
         assert tracer2.profile is new_profile

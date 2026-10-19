@@ -12,7 +12,8 @@ import functools
 import jax.numpy as jnp
 import numpy as np
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
+from hmfast.cosmology.cosmopower import _EMULATOR_SETS, _Z_BG
 from hmfast.halos import HaloModel
 from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import D08Concentration
@@ -45,14 +46,29 @@ def shared(cls, *args, **kwargs):
 
 
 # Built once; other cosmologies are derived with .update() so they share its emulator objects.
-FIXED_COSMOLOGY = Cosmology(
-    emulator_set="lcdm:v1",
+FIXED_COSMOLOGY = CosmoPowerCosmology(
+    "lcdm:v1",
     H0=67.5,
     omega_cdm=0.12,
     omega_b=0.022,
     A_s=2.1e-9,
     n_s=0.965,
 )
+
+
+def emulator_z_max_bg(cosmology):
+    """Top of a CosmoPowerCosmology's emulated background."""
+    return float(_Z_BG[-1])
+
+
+def emulator_z_max_pk(cosmology):
+    """Top of a CosmoPowerCosmology's emulated P(k) and growth."""
+    return float(_EMULATOR_SETS[cosmology.emulator_set]["z_max_pk"])
+
+
+def emulator_z_grid_pk(cosmology):
+    """100 redshifts spanning a CosmoPowerCosmology's emulated P(k)."""
+    return jnp.linspace(0.0, emulator_z_max_pk(cosmology), 100)
 
 
 def halo_model(cosmology=FIXED_COSMOLOGY, **kwargs):
@@ -116,15 +132,17 @@ KSZ_TRACER = kSZTracer(profile=B16, z_max=2.0)
 GAL_TRACER = GalaxyTracer(profile=HOD)
 GAL_TRACER_BIASED = GalaxyTracer(profile=HOD, bias=(Z_BIAS, 1.0 + 0.5 * Z_BIAS))
 GLENS_TRACER = GalaxyLensingTracer(profile=NFW)
-CMBLENS_TRACER = CMBLensingTracer(profile=NFW)
+# Source plane at last scattering; chi(z_star) lies beyond the emulated background, so kernels there need extrapolate_z.
+Z_STAR = float(FIXED_COSMOLOGY.derived_parameters()["z_star"])
+CMBLENS_TRACER = CMBLensingTracer(profile=NFW, z_source=Z_STAR)
 CIB_TRACER = CIBTracer(profile=CIB)
 
 PK, BK, TK = Pk(), Bk(), Tk()
 
 
-def cosmo(p, pknl_mode=None):
+def cosmo(p):
     """Cosmology rebuilt from a parameter vector (H0, omega_cdm, omega_b, A_s, n_s)."""
-    return BASE_COSMO.update(H0=p[0], omega_cdm=p[1], omega_b=p[2], A_s=p[3], n_s=p[4], pknl_mode=pknl_mode)
+    return BASE_COSMO.update(H0=p[0], omega_cdm=p[1], omega_b=p[2], A_s=p[3], n_s=p[4])
 
 
 def stats_halo_model(p=PARAMS, mass_def=MD_200M):
@@ -149,17 +167,17 @@ def ccl_cosmology(cosmology, *, pk_linear=False, pk_nonlin=False, **kwargs):
     """
     import pyccl
 
-    p = cosmology._cosmo_params()
-    m_ncdm = float(p["m_ncdm"])
+    h = cosmology.H0 / 100.0
+    m_ncdm = float(cosmology.m_ncdm)
     m_nu = [m_ncdm] * 3 if cosmology.emulator_set == "mnu-3states:v1" else [0.0, 0.0, m_ncdm]
     params = dict(
-        Omega_c=float(p["Omega_cdm"]), Omega_b=float(p["Omega_b"]), h=float(p["h"]),
+        Omega_c=float(cosmology.omega_cdm / h**2), Omega_b=float(cosmology.omega_b / h**2), h=float(h),
         A_s=float(cosmology.A_s), n_s=float(cosmology.n_s), m_nu=m_nu, mass_split="list",
-        w0=float(p["w0_fld"]), Neff=float(cosmology.derived_parameters()["Neff"]), **kwargs,
+        w0=float(cosmology.w0), Neff=float(cosmology.derived_parameters()["Neff"]), **kwargs,
     )
     if not pk_linear:
         return pyccl.Cosmology(**{"transfer_function": "boltzmann_class", **params})
-    k, z = cosmology._pk_grid()[0], cosmology._z_grid_pk()
+    k, z = cosmology._pk_grid(), emulator_z_grid_pk(cosmology)
     a = np.asarray(1.0 / (1.0 + z))[::-1]
 
     def table(linear):

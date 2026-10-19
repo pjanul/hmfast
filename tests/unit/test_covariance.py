@@ -1,5 +1,5 @@
 """
-Unit tests for the angular covariances: cov_cng, cov_ssc and sigma2_b_disc.
+Unit tests for the angular covariances: cov_g, cov_cng, cov_ssc and sigma2_b_disc.
 
 Internal contracts only -- output shapes, symmetries, f_sky scaling and additivity over
 trispectrum terms. The connected covariance is sourced from single-term Tk objects, whose
@@ -7,14 +7,16 @@ compiles are far cheaper than the full trispectrum's. Comparisons against CCL ar
 tests/benchmarks/benchmark_covariance.py, jittability in test_jax_transforms.py.
 """
 
+import itertools
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from hmfast.stats import Pk, Tk, cov_cng, cov_ssc, sigma2_b_disc
+from hmfast.stats import Pk, Tk, cov_cng, cov_g, cov_ssc, sigma2_b_disc
 
-from .._shared import GAL_TRACER_BIASED, GLENS_TRACER, L_GRID, N_Z, TK, Z_GRID, Z_RANGE, stats_halo_model
+from .._shared import GAL_TRACER_BIASED, GLENS_TRACER, L_GRID, N_Z, TK, Z_GRID, stats_halo_model
 
 HM = stats_halo_model()
 PK = Pk()
@@ -37,11 +39,56 @@ L_SHAPES = [
 
 
 def _cng(tk, t1, t2, t3, t4, l1=L_GRID, l2=L_GRID, f_sky=F_SKY):
-    return np.asarray(cov_cng(tk, HM, l1, l2, t1, t2, t3, t4, z_range=Z_RANGE, n_z=N_Z, f_sky=f_sky))
+    return np.asarray(cov_cng(tk, HM, l1, l2, t1, t2, t3, t4, n_z=N_Z, f_sky=f_sky))
 
 
 def _ssc(t1, t2, t3, t4, f_sky=F_SKY):
-    return np.asarray(cov_ssc(PK, HM, L_GRID, L_GRID, t1, t2, t3, t4, z_range=Z_RANGE, n_z=N_Z, f_sky=f_sky))
+    return np.asarray(cov_ssc(PK, HM, L_GRID, L_GRID, t1, t2, t3, t4, n_z=N_Z, f_sky=f_sky))
+
+
+# Random positive-definite 4x4 C_l matrices on a few multipoles, spanning orders of magnitude.
+_RNG = np.random.default_rng(0)
+L_G = jnp.array([2.0, 30.0, 500.0])
+_A = _RNG.normal(size=(3, 4, 4)) * np.logspace(-1, 1, 4)
+C_G = jnp.asarray((_A @ np.swapaxes(_A, 1, 2) + 0.1 * np.eye(4)) * np.asarray(L_G)[:, None, None] ** -2)
+
+
+def _g(a, b, c, d, **kw):
+    # Cov(C^{ab}, C^{cd}) from the tracer indices into C_G.
+    return np.asarray(cov_g(L_G, C_G[:, a, c], C_G[:, b, d], C_G[:, a, d], C_G[:, b, c], **kw))
+
+
+class TestCovG:
+    @pytest.mark.parametrize("l,expected_shape", [(200.0, ()), (jnp.array([200.0]), ()), (L_G, (3, 3))])
+    def test_shape_matrix(self, l, expected_shape):
+        assert cov_g(l, 1.0).shape == expected_shape
+
+    # The Gaussian covariance couples no two different multipoles.
+    def test_diagonal(self):
+        cov = _g(0, 1, 2, 3)
+        np.testing.assert_array_equal(cov - np.diag(np.diag(cov)), 0.0)
+
+    # Omitted spectra default so that one spectrum gives the auto covariance 2 C^2 / ((2l + 1) f_sky dl).
+    def test_auto_default(self):
+        c, dl = C_G[:, 0, 0], jnp.array([1.0, 5.0, 21.0])
+        expected = np.diag(2 * c**2 / ((2 * L_G + 1) * F_SKY * dl))
+        np.testing.assert_allclose(cov_g(L_G, c, f_sky=F_SKY, delta_l=dl), expected, rtol=1e-14)
+
+    # Exchanging the two C_l pairs leaves the covariance unchanged.
+    def test_pair_exchange(self):
+        np.testing.assert_allclose(_g(0, 1, 2, 3), _g(2, 3, 0, 1), rtol=1e-14)
+
+    # Matches the covariance of full-sky Gaussian fields, (E[y_a y_b y_c y_d] - C^{ab} C^{cd}) / (2l + 1),
+    # with the fourth moment from 3-point Gauss-Hermite quadrature, exact for this degree.
+    def test_gaussian_fourth_moment(self):
+        x, w = np.polynomial.hermite_e.hermegauss(3)
+        z = np.array(list(itertools.product(x, repeat=4)))  # (81, 4) standard-normal nodes
+        wz = np.prod(np.array(list(itertools.product(w, repeat=4))), axis=1) / (2 * np.pi) ** 2
+        y = np.einsum("lij,nj->lni", np.linalg.cholesky(np.asarray(C_G)), z)  # (N_l, 81, 4) with covariance C_G
+        M4 = np.einsum("n,lna,lnb,lnc,lnd->labcd", wz, y, y, y, y)
+        for a, b, c, d in itertools.product(range(4), repeat=4):
+            exact = (M4[:, a, b, c, d] - C_G[:, a, b] * C_G[:, c, d]) / (2 * L_G + 1)
+            np.testing.assert_allclose(np.diag(_g(a, b, c, d)), exact, rtol=1e-10)
 
 
 class TestCovCng:
@@ -49,7 +96,7 @@ class TestCovCng:
     @pytest.mark.parametrize("l1,l2,expected_shape", L_SHAPES)
     def test_shape_matrix(self, l1, l2, expected_shape):
         g = GLENS_TRACER
-        out = jax.eval_shape(lambda: cov_cng(TK, HM, l1, l2, g, g, g, g, z_range=Z_RANGE, n_z=N_Z, f_sky=F_SKY))
+        out = jax.eval_shape(lambda: cov_cng(TK, HM, l1, l2, g, g, g, g, n_z=N_Z, f_sky=F_SKY))
         assert out.shape == expected_shape
 
     # An auto covariance on a shared l grid is a symmetric matrix.
@@ -89,7 +136,7 @@ class TestCovSsc:
     @pytest.mark.parametrize("l1,l2,expected_shape", L_SHAPES)
     def test_shape_matrix(self, l1, l2, expected_shape):
         g = GLENS_TRACER
-        out = jax.eval_shape(lambda: cov_ssc(PK, HM, l1, l2, g, g, g, g, z_range=Z_RANGE, n_z=N_Z, f_sky=F_SKY))
+        out = jax.eval_shape(lambda: cov_ssc(PK, HM, l1, l2, g, g, g, g, n_z=N_Z, f_sky=F_SKY))
         assert out.shape == expected_shape
 
     # An auto covariance on a shared l grid is a symmetric matrix.

@@ -20,7 +20,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
 from hmfast.halos.massdef import MassDefinition
 from hmfast.halos.profiles import GNFWPressureProfile, NFWMatterProfile, S12CIBProfile, Z07GalaxyHODProfile
 from hmfast.stats import Bk, Pk, Tk, corr_3d
@@ -124,7 +124,7 @@ class TestPowerSpectrumCCL:
     # Matter P(k) with 0.3 eV neutrinos, whose neutrino fraction exposes any Omega_cb/Omega_m mix-up (measured 8.6e-4).
     def test_pk_mm_massive_neutrinos(self, fixed_cosmology):
         f = fixed_cosmology
-        cosmo = Cosmology(emulator_set="mnu:v1", H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
+        cosmo = CosmoPowerCosmology("mnu:v1", H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
                           n_s=f.n_s, m_ncdm=0.3, ncdm_mode="m")
         setup = make_setup(cosmo)
         for z in (0.0, 1.0):

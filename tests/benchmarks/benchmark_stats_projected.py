@@ -20,6 +20,7 @@ accuracy improves. Errors are maximum relative errors unless stated otherwise.
 
 import os
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -39,6 +40,26 @@ M_MIN, M_MAX = 1e10, 1e16
 Z_RANGE, N_Z = (1e-4, 3.0), 200
 ELL = np.geomspace(10, 5000, 30)
 PK_1H, PK_2H = Pk(include_2h=False, k_damp=0.0), Pk(include_1h=False)
+
+
+class _CMBLensingCut(CMBLensingTracer):
+    """CMB lensing projected only up to z_cut, the hmfast side of the CCL kernel cut in Setup.cmb_lensing."""
+
+    def __init__(self, profile=None, *, z_source, z_cut):
+        super().__init__(profile, z_source=z_source)
+        self.z_cut = z_cut
+
+    def _z_max(self, cosmology):
+        return jnp.asarray(self.z_cut)
+
+
+def _unflatten_cut(z_cut, leaves):
+    t = _CMBLensingCut._tree_unflatten(None, leaves)
+    t.z_cut = z_cut
+    return t
+
+
+jax.tree_util.register_pytree_node(_CMBLensingCut, lambda t: (t._tree_flatten()[0], t.z_cut), _unflatten_cut)
 
 NFW = NFWMatterProfile()
 GNFW = GNFWPressureProfile(x_range=(1e-5, 1e5), n_x=128, P0=8.13, c500=1.156, alpha=1.062, beta=5.4807, gamma=0.3292,
@@ -97,14 +118,14 @@ class Setup:
 
     def _ccl(self):
         c = self.cosmo
-        p = c._cosmo_params()
+        h = c.H0 / 100.0
         a_tab = np.sort(1.0 / (1.0 + np.linspace(0.0, 3.0, 60)))
-        k_tab = np.asarray(c._pk_grid()[0])
+        k_tab = np.asarray(c._pk_grid())
         z_tab = jnp.asarray(1.0 / a_tab - 1.0)
         pk = {lin: np.asarray(c.pk(jnp.asarray(k_tab), z_tab, linear=lin)).T for lin in (True, False)}
         return pyccl.CosmologyCalculator(
-            Omega_c=float(p["Omega_cdm"]), Omega_b=float(p["Omega_b"]), h=float(p["h"]), A_s=c.A_s, n_s=c.n_s,
-            m_nu=[0.0, 0.0, float(p["m_ncdm"])], mass_split="list",
+            Omega_c=float(c.omega_cdm / h**2), Omega_b=float(c.omega_b / h**2), h=float(h), A_s=c.A_s, n_s=c.n_s,
+            m_nu=[0.0, 0.0, float(c.m_ncdm)], mass_split="list",
             background={"a": self.a_bg, "chi": self.chi_bg, "h_over_h0": self.hz_bg / self.hz_bg[-1]},
             growth={"a": self.a_bg, "growth_factor": self.D_bg / self.D_bg[-1], "growth_rate": self.f_bg},
             pk_linear={"a": a_tab, "k": k_tab, "delta_matter:delta_matter": pk[True]},
@@ -136,13 +157,15 @@ class Setup:
     def cmb_lensing(self, z_max=3.0, lin=False):
         c = self.ccl_lin if lin else self.ccl
         tc = pyccl.CMBLensingTracer(c, z_source=self.z_star)
+        t = CMBLensingTracer(profile=NFW, z_source=self.z_star)
         if z_max is not None:
             z = np.geomspace(1e-5, z_max, 3000)
             chi = pyccl.comoving_radial_distance(c, 1.0 / (1.0 + z))
             cut = pyccl.Tracer()
             cut.add_tracer(c, kernel=(chi, tc.get_kernel(chi)[0]), der_bessel=-1, der_angles=1)
             tc = cut
-        return CMBLensingTracer(profile=NFW), tc
+            t = _CMBLensingCut(profile=NFW, z_source=self.z_star, z_cut=z_max)
+        return t, tc
 
     def tsz(self):
         return tSZTracer(profile=GNFW, z_max=3.0), pyccl.tSZTracer(self.ccl, z_max=3.0)
@@ -152,7 +175,7 @@ class Setup:
 
     # Spectra.
     def hm_cl(self, t1, t2=None, ell=ELL, **kw):
-        kw = {"z_range": Z_RANGE, "n_z": N_Z, **kw}
+        kw = {"n_z": N_Z, **kw}
         c1 = np.asarray(cl(PK_1H, self.hm, jnp.asarray(ell), t1, t2, **kw))
         c2 = np.asarray(cl(PK_2H, self.hm, jnp.asarray(ell), t1, t2, **kw))
         return {"1h": c1, "2h": c2, "1h+2h": c1 + c2}
@@ -248,7 +271,7 @@ class TestLinearBiasCl:
     @pytest.mark.parametrize("name", LINBIAS)
     def test_cl_linbias(self, s, name, linear, tol):
         t, tc = linbias_pair(s, name)
-        got = cl_linbias(s.cosmo, jnp.asarray(ELL), t, z_range=Z_RANGE, n_z=N_Z, linear=linear)
+        got = cl_linbias(s.cosmo, jnp.asarray(ELL), t, n_z=N_Z, linear=linear)
         p_of_k_a = s.ccl_lin.get_linear_power() if linear else s.ccl_lin.get_nonlin_power()
         assert rel_err(got, pyccl.angular_cl(s.ccl_lin, tc, tc, ELL, p_of_k_a=p_of_k_a)) < tol
 
@@ -263,8 +286,8 @@ class TestLinearBiasCl:
             t_lin = t.update(bias=(jnp.asarray(s.z_g), jnp.asarray(b_eff)))
         else:
             t_lin = t
-        got = cl(PK_2H, s.hm, jnp.asarray(ell), t, z_range=Z_RANGE, n_z=N_Z)
-        assert rel_err(got, cl_linbias(s.cosmo, jnp.asarray(ell), t_lin, z_range=Z_RANGE, n_z=N_Z)) < tol
+        got = cl(PK_2H, s.hm, jnp.asarray(ell), t, n_z=N_Z)
+        assert rel_err(got, cl_linbias(s.cosmo, jnp.asarray(ell), t_lin, n_z=N_Z)) < tol
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -289,7 +312,7 @@ def swiftcl_cl(s, cache, tracer, z_max, D_kz, bias=None, n_chi=512, n_k=400, tra
     chi_of_z = s.chi_bg[::-1]
     chi = np.geomspace(np.interp(1e-4, z_of_a, chi_of_z), np.interp(z_max, z_of_a, chi_of_z), n_chi)
     z_nodes = np.interp(chi, chi_of_z, z_of_a)
-    k_tab = np.asarray(s.cosmo._pk_grid()[0])
+    k_tab = np.asarray(s.cosmo._pk_grid())
     k = np.geomspace(k_tab[0], k_tab[-1], n_k)
     key = (cache, float(z_max), n_chi, n_k, n_fft)
     if key not in s.swiftcl_comps:
@@ -346,7 +369,7 @@ class TestNonLimber:
         for name, z_max in NONLIMBER_LIN.items():
             t, tc = linbias_pair(s, name, z_max=z_max)
             z_hi = s.z_star if z_max is None else z_max
-            c = np.asarray(cl_linbias(s.cosmo, jnp.asarray(ELL_NL), t, z_range=(1e-4, z_hi), n_z=N_Z,
+            c = np.asarray(cl_linbias(s.cosmo, jnp.asarray(ELL_NL), t, n_z=N_Z,
                                       l_limber=L_LIMBER))
             out[name] = (c, t, tc, z_hi, (s.z_g, 1.0 + s.z_g) if name.startswith("galaxy") else None)
         return out
@@ -392,7 +415,7 @@ class TestNonLimber:
     @pytest.mark.parametrize("make,profile,tol", [("galaxy", HOD, 4e-4), ("shear", NFW, 6e-4)])
     def test_halo_model_vs_swiftcl(self, s, swiftcl_cache, make, profile, tol):
         t = getattr(s, make)()[0]
-        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t, z_range=Z_RANGE, n_z=N_Z, l_limber=L_LIMBER)
+        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t, n_z=N_Z, l_limber=L_LIMBER)
         assert rel_err(got[1:], swiftcl_cl(s, swiftcl_cache, t, Z_RANGE[1], halo_D_kz(s, profile))[1:]) < tol
 
     # Edge kernels vs SwiftCl, measured l=2 / l>=3: y 1.7e-5/4.7e-3, CIB 4.7e-3/2.3e-2, y x kCMB 3.7e-4/1.4e-3
@@ -403,10 +426,10 @@ class TestNonLimber:
     ])
     def test_edge_kernels_vs_swiftcl(self, s, swiftcl_cache, make1, make2, n_fft, sw_n_fft, tol_l2, tol):
         t1 = getattr(s, make1)()[0]
-        t2 = None if make2 is None else getattr(s, make2)()[0]
+        t2 = None if make2 is None else getattr(s, make2)(z_max=None)[0]
         z_hi = Z_RANGE[1] if t2 is None else s.z_star
-        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t1, t2, z_range=(Z_RANGE[0], z_hi), n_z=N_Z, l_limber=L_LIMBER,
-                 n_fft=n_fft)
+        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t1, t2, n_z=N_Z, l_limber=L_LIMBER,
+                 **({} if n_fft is None else {"n_fft": n_fft}))
         profile = {"tsz": GNFW, "cib": CIB, "cmb_lensing": NFW}
         want = swiftcl_cl(s, swiftcl_cache, t1, z_hi if t2 is None else 1.05 * z_hi, halo_D_kz(s, profile[make1]),
                           tracer2=t2, D_kz2=None if t2 is None else halo_D_kz(s, profile[make2]), n_fft=sw_n_fft,
@@ -417,7 +440,7 @@ class TestNonLimber:
     # Non-Limber halo-model 2-halo shear against CCL's FKEM on CCL's own 2-halo P(k), 3 <= l <= 200 (measured 7.8e-3).
     def test_halo_model_shear_vs_ccl_fkem(self, s):
         t, tc = s.shear()
-        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t, z_range=Z_RANGE, n_z=N_Z, l_limber=L_LIMBER)
+        got = cl(PK_2H, s.hm, jnp.asarray(ELL_NL), t, n_z=N_Z, l_limber=L_LIMBER)
         p2h = s.pk2d["m"][1]
         want = pyccl.angular_cl(s.ccl, tc, tc, ELL_NL, p_of_k_a=p2h, p_of_k_a_lin=p2h, l_limber=L_LIMBER,
                                 non_limber_integration_method="FKEM")
@@ -438,7 +461,7 @@ class TestCorrAngular:
         theta = np.geomspace(3.0, 300.0, 40) / 60.0
         galaxy, shear = s.galaxy(bias=(s.z_g, 1.0 + s.z_g), lin=True)[0], s.shear(lin=True)[0]
         t1, t2 = {"NN": (galaxy, None), "NG": (galaxy, shear)}.get(typ, (shear, None))
-        c = np.asarray(cl_linbias(s.cosmo, jnp.asarray(ell), t1, t2, z_range=Z_RANGE, n_z=N_Z, linear=False))
+        c = np.asarray(cl_linbias(s.cosmo, jnp.asarray(ell), t1, t2, n_z=N_Z, linear=False))
         got = np.asarray(corr_angular(s.cosmo, ell, c, theta, type=typ))
         want = pyccl.correlation(s.ccl_lin, ell=ell, C_ell=c, theta=theta, type=typ, method="fftlog")
         keep = np.abs(want) > 1e-2 * np.max(np.abs(want))

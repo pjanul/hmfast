@@ -370,7 +370,7 @@ class B12PressureProfile(PressureProfile):
     .. math::
 
         X(M_{200c}, z) = A_X
-        \\left(\\frac{M_{200c} / h}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
+        \\left(\\frac{M_{200c}}{10^{14} M_\\odot}\\right)^{\\alpha_m^X}
         (1 + z)^{\\alpha_z^X}
         \\tag{2}
 
@@ -634,7 +634,6 @@ class B12PressureProfile(PressureProfile):
             Electron pressure profile with shape :math:`(N_r, N_m, N_z)`,
             where singleton dimensions get squeezed before return.
         """
-        h = halo_model.cosmology.H0 / 100.0
         alpha, gamma = 1.0, -0.3
         x_out = self.x_out
         r, m, z = jnp.atleast_1d(r), jnp.atleast_1d(m), jnp.atleast_1d(z)
@@ -672,11 +671,9 @@ class B12PressureProfile(PressureProfile):
         scaled_x = x_200c / xc
         p_x = (scaled_x) ** gamma * (1 + scaled_x**alpha) ** (-beta)
 
-        # Thermal Pressure Normalization (P200c)
+        # Electron-pressure P200c: the constant is G*100*3/(8*pi) in eV cm^-3 (Msun, Mpc, km/s/Mpc) times P_e/P_th = 0.5176
         H = jnp.atleast_1d(halo_model.cosmology.hubble_parameter(z))
         f_b = halo_model.cosmology.omega_b / (halo_model.cosmology.H0 / 100.0) ** 2 / halo_model.cosmology.omega_x(0.0, "matter")
-        r_200c = r_200c * h
-        # Use M200c and r_200c for normalization
         P_200c = (
             (m200c_b / r_200c[None, :, :]) * f_b * 2.61051e-18 * (H[None, None, :]) ** 2
         )

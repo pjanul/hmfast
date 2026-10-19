@@ -20,7 +20,7 @@ them and the exponential tail amplifies any sigma(M) difference.
 import numpy as np
 import pytest
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
 from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import B13Concentration, D08Concentration
 from hmfast.halos.massdef import MassDefinition, mass_translator
@@ -53,7 +53,7 @@ def cosmologies(request, fixed_cosmology):
     emulator_set, extension = request.param
     f = fixed_cosmology
     try:
-        cosmo = Cosmology(emulator_set=emulator_set, H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
+        cosmo = CosmoPowerCosmology(emulator_set, H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
                           n_s=f.n_s, ncdm_mode="m", **extension)
     except Exception as exc:
         pytest.skip(f"{emulator_set} emulator files not available locally: {exc}")

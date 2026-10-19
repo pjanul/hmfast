@@ -3,7 +3,7 @@ Quickstart
 
 ``hmfast`` is organized around three main pieces:
 
-- ``Cosmology`` holds the cosmological parameters and computes background and power-spectrum quantities from them; ``CosmoPowerCosmology`` uses emulators, ``AnalyticCosmology`` analytic formulae.
+- ``Cosmology`` is the parent cosmology class: it holds the cosmological parameters and computes background and power-spectrum quantities from them; ``CosmoPowerCosmology`` is the ready-made subclass, built on emulators.
 - ``HaloModel`` combines the cosmology with halo ingredients such as the mass function, bias, concentration, and mass definition.
 - ``Tracer`` classes pair a kernel with a halo profile so you can build projected observables such as :math:`C_\ell`.
 

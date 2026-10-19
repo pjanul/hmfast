@@ -8,7 +8,7 @@ via pytest's conftest inheritance.
 import jax.numpy as jnp
 import pytest
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
 from hmfast.halos.concentration import (
     B13Concentration,
     ConstantConcentration,
@@ -107,10 +107,10 @@ def halo_model(fixed_cosmology, mass_def):
 )
 def other_emulator_cosmology(request):
     """
-    A Cosmology for each non-lcdm emulator set, at default params. Skips cleanly if
+    A CosmoPowerCosmology for each non-lcdm emulator set, at default params. Skips cleanly if
     that set's data isn't downloaded locally, rather than assuming it always is.
     """
     try:
-        return shared(Cosmology, emulator_set=request.param)
+        return shared(CosmoPowerCosmology, request.param)
     except Exception as exc:
         pytest.skip(f"{request.param} emulator files not available locally: {exc}")

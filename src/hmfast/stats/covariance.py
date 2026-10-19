@@ -1,6 +1,6 @@
 """
-Angular power spectrum covariances (connected non-Gaussian and super-sample),
-sourced by the halo-model trispectrum via a Tk instance passed in explicitly.
+Angular power spectrum covariances: Gaussian, from the angular power spectra, and connected
+non-Gaussian and super-sample, from the halo model.
 """
 
 from functools import partial
@@ -166,6 +166,59 @@ def _dPk_response(halo_model, k, z, profile1, profile2=None, include_1h=True, in
         response = response - (b_u + b_v) * P_uv
 
     return jnp.squeeze(response)
+
+
+# ------------------------------------------------------------------
+# Gaussian angular power spectrum covariance
+# ------------------------------------------------------------------
+
+@jax.jit
+def cov_g(l, cl13, cl24=None, cl14=None, cl23=None, *, f_sky=1.0, delta_l=1.0):
+    """
+    Gaussian covariance between two angular power spectra
+    :math:`C_{\\ell}^{12}` and :math:`C_{\\ell}^{34}`,
+
+    .. math::
+
+        {\\rm Cov}(\\ell_1, \\ell_2) =
+        \\frac{\\delta_{\\ell_1 \\ell_2}}{(2\\ell_1 + 1)\\, f_{\\rm sky}\\, \\Delta\\ell}
+        \\left[\\tilde C_{\\ell_1}^{13} \\tilde C_{\\ell_1}^{24} + \\tilde C_{\\ell_1}^{14} \\tilde C_{\\ell_1}^{23}\\right],
+
+    where :math:`\\tilde C_\\ell^{ij} = C_\\ell^{ij} + N_\\ell^{ij}` includes any noise. The spectra can come
+    from :func:`~hmfast.stats.cl`, :func:`~hmfast.stats.cl_linbias` or elsewhere. Each argument pairs one
+    tracer of :math:`C^{12}` with one of :math:`C^{34}`; for the variance of a cross spectrum
+    :math:`C^{12}`, for instance, pass ``cl11``, ``cl22`` and ``cl12``.
+
+    Parameters
+    ----------
+    l : float or jnp.ndarray
+        Multipoles (bin centres), scalar or shape :math:`(N_\\ell,)`.
+    cl13 : float or jnp.ndarray
+        :math:`\\tilde C_\\ell^{13}` at ``l``, with noise added if any.
+    cl24 : float or jnp.ndarray or None, default None
+        :math:`\\tilde C_\\ell^{24}`. If None, defaults to ``cl13``.
+    cl14 : float or jnp.ndarray or None, default None
+        :math:`\\tilde C_\\ell^{14}`. If None, defaults to ``cl13``.
+    cl23 : float or jnp.ndarray or None, default None
+        :math:`\\tilde C_\\ell^{23}`. If None, defaults to (the resolved) ``cl14``.
+    f_sky : float, default 1.0
+        Observed sky fraction.
+    delta_l : float or jnp.ndarray, default 1.0
+        Bin width, scalar or shape :math:`(N_\\ell,)`.
+
+    Returns
+    -------
+    cov : jnp.ndarray
+        Diagonal covariance with shape :math:`(N_\\ell, N_\\ell)`, where singleton
+        dimensions get squeezed before return.
+    """
+    l = jnp.atleast_1d(l)
+    cl24 = cl13 if cl24 is None else cl24
+    cl14 = cl13 if cl14 is None else cl14
+    cl23 = cl14 if cl23 is None else cl23
+
+    var = (cl13 * cl24 + cl14 * cl23) / ((2.0 * l + 1.0) * f_sky * delta_l)
+    return jnp.squeeze(jnp.diag(jnp.broadcast_to(var, l.shape)))
 
 
 # ------------------------------------------------------------------

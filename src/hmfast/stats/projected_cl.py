@@ -36,6 +36,17 @@ def _resolve_z_range(cosmology, *tracers):
     return (_Z_MIN, z_max)
 
 
+def _halo_model_z(cosmology, z):
+    """Redshifts at which to evaluate the halo model, and the squared growth ratio that scales it above z_max_pk."""
+    z_b = cosmology.z_max_pk
+    if z_b is None:
+        return z, jnp.ones_like(z)
+    above = z > z_b
+    D_b = jnp.ravel(cosmology.growth_factor(jnp.atleast_1d(z_b)))[0]
+    growth_sq = jnp.where(above, (cosmology.growth_factor(z) / D_b) ** 2, 1.0)
+    return jnp.where(above, z_b, z), growth_sq
+
+
 def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn, z_cut):
     """Shifted-grid quantities (z_lp, lp1h, lp3h, sqell) for the extended-Limber RSD
     projection (Chisari et al. 2019 Sec. 2.4.1), shared by cl_limber's and
@@ -53,7 +64,8 @@ def _extended_limber_kernel_grid(cosmology, l, z, chi, P_grid, pk_fn, z_cut):
 
     k_l = lp1h[None, :] / chi[:, None]  # (Nz, Nl) -- the SAME k as P_grid, at the shifted z'
     pk_pair = lambda k_i, z_i: jnp.squeeze(pk_fn(jnp.atleast_1d(k_i), jnp.atleast_1d(z_i)))
-    P_lp = jax.vmap(pk_pair)(k_l.reshape(-1), z_lp.reshape(-1)).reshape(k_l.shape)
+    z_lp_eval, growth_sq_lp = _halo_model_z(cosmology, z_lp)
+    P_lp = jax.vmap(pk_pair)(k_l.reshape(-1), z_lp_eval.reshape(-1)).reshape(k_l.shape) * growth_sq_lp
 
     pk_ratio = jnp.abs(P_lp / P_grid)
     sqell = jnp.where(in_range_lp, jnp.sqrt(lp1h[None, :] * pk_ratio / lp3h[None, :]), 0.0)
@@ -250,7 +262,7 @@ def _D_kz(cosmology, k, z, z_fid=0.0, linear=True, mass_integral=None):
     P_z = jnp.reshape(cosmology.pk(k, z, linear=linear), (len(k), len(z)))
     P_zfid = jnp.reshape(cosmology.pk(k, jnp.atleast_1d(z_fid), linear=linear), (len(k), 1))
     D = jnp.sqrt(P_z / P_zfid)
-    return D if mass_integral is None else D * mass_integral(k, z)
+    return D if mass_integral is None else D * mass_integral(k, _halo_model_z(cosmology, z)[0])
 
 
 @partial(jax.jit, static_argnums=(5,), static_argnames=("n_fft", "n_interp", "bias", "window", "n_k"))
@@ -342,12 +354,14 @@ def _cl_limber(pk_obj, halo_model, tracer1, tracer2, l, z_range, n_z, include_1h
             p = p + pk_obj.pk_2h(hm, k, z, tracer1.profile, tracer2.profile)
         return p
 
-    def get_pk_slice(zi):
+    z_eval, growth_sq = _halo_model_z(cosmology, z)
+
+    def get_pk_slice(zi, zi_eval):
         chi_i = cosmology.angular_diameter_distance(zi) * (1.0 + zi)
         ki = (l + 0.5) / chi_i
-        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi))).flatten()
+        return jnp.atleast_1d(pk_fn(ki, jnp.atleast_1d(zi_eval))).flatten()
 
-    P_grid = jax.vmap(get_pk_slice)(z)
+    P_grid = jax.vmap(get_pk_slice)(z, z_eval) * growth_sq[:, None]
     chi = cosmology.angular_diameter_distance(z) * (1.0 + z)
 
     # Extended-Limber setup, done once here (not per-tracer) since it's tracer-independent.

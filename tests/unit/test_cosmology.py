@@ -1,5 +1,5 @@
 """
-Unit tests for hmfast.cosmology.Cosmology: construction/validation, the full
+Unit tests for hmfast.cosmology.CosmoPowerCosmology: construction/validation, the full
 background/growth/power-spectrum/CMB API, NaN/bounds behavior, extrapolate_z,
 update()/pytree behavior, and light coverage of the non-lcdm emulator sets.
 Primary focus is lcdm:v1. No external ground truth here -- see
@@ -10,14 +10,15 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
+from hmfast.cosmology.cosmopower import _WEIGHTS
 
-from .._shared import shared
+from .._shared import emulator_z_max_bg, emulator_z_max_pk, shared
 
 
 def _construct_or_skip(emulator_set, **kwargs):
     try:
-        return shared(Cosmology, emulator_set=emulator_set, **kwargs)
+        return shared(CosmoPowerCosmology, emulator_set, **kwargs)
     except Exception as exc:
         pytest.skip(f"{emulator_set} emulator files not available locally: {exc}")
 
@@ -27,7 +28,7 @@ class TestConstruction:
     # An unrecognized emulator_set raises ValueError listing the allowed values.
     def test_invalid_emulator_set_raises(self):
         with pytest.raises(ValueError):
-            Cosmology(emulator_set="not-a-real-set")
+            CosmoPowerCosmology("not-a-real-set")
 
     # The shared fixed_cosmology fixture is wired to lcdm:v1 as expected.
     def test_default_construction_uses_lcdm_v1(self, fixed_cosmology):
@@ -108,8 +109,8 @@ class TestGrowthAndPerturbations:
     def test_sigma_m_sigma_r_cross_consistency(self, fixed_cosmology):
         r = jnp.geomspace(1.0, 100.0, 20)
         z = jnp.array(0.5)
-        cparams = fixed_cosmology._cosmo_params()
-        rho_mean_0 = cparams["Omega0_halo"] * cparams["Rho_crit_0"]
+        rho_nu = fixed_cosmology.rho_x(0.0, "neutrinos_massive") if fixed_cosmology.ncdm_mode == "cb" else 0.0
+        rho_mean_0 = fixed_cosmology.rho_x(0.0, "matter") - rho_nu
         m_from_r = 4.0 / 3.0 * jnp.pi * rho_mean_0 * r**3
         sigma_m_at_r = fixed_cosmology.sigma_m(m_from_r, z)
         sigma_r = fixed_cosmology.sigma_r(r, z)
@@ -163,12 +164,13 @@ class TestCMB:
         with pytest.raises(ValueError):
             fixed_cosmology.cl_cmb(bad_type, jnp.array([10.0]))
 
-    # TT is genuinely lazy: absent from _emu before the first cl_cmb("TT",...) call, present after.
+    # TT is genuinely lazy: absent from the weight cache before the first cl_cmb("TT",...) call, present after.
     def test_lazy_loading(self):
-        cosmo = Cosmology(emulator_set="lcdm:v1", H0=67.5, omega_cdm=0.12, omega_b=0.022, A_s=2.1e-9, n_s=0.965)
-        assert "TT" not in cosmo._emu
+        _WEIGHTS.pop(("lcdm:v1", "TT"), None)
+        cosmo = CosmoPowerCosmology("lcdm:v1", H0=67.5, omega_cdm=0.12, omega_b=0.022, A_s=2.1e-9, n_s=0.965)
+        assert ("lcdm:v1", "TT") not in _WEIGHTS
         cosmo.cl_cmb("TT", jnp.array([10.0]))
-        assert "TT" in cosmo._emu
+        assert ("lcdm:v1", "TT") in _WEIGHTS
 
 
 class TestDerivedParameters:
@@ -216,14 +218,14 @@ class TestBoundsAndNaN:
 class TestExtrapolateZ:
     # Without extrapolate_z, hubble_parameter/angular_diameter_distance are NaN beyond the background grid (z_max=20).
     def test_hz_da_nan_beyond_grid_without_extrapolation(self, fixed_cosmology):
-        z_beyond = jnp.array(float(fixed_cosmology._z_grid_bg()[-1]) + 5.0)
+        z_beyond = jnp.array(emulator_z_max_bg(fixed_cosmology) + 5.0)
         assert jnp.isnan(fixed_cosmology.hubble_parameter(z_beyond))
         assert jnp.isnan(fixed_cosmology.angular_diameter_distance(z_beyond))
 
     # With extrapolate_z=True, both are finite beyond the grid and exactly continuous with the non-extrapolated value at z_max.
     def test_hz_da_finite_and_continuous_with_extrapolation(self, fixed_cosmology):
         cosmo_ext = fixed_cosmology.update(extrapolate_z=True)
-        z_max = float(fixed_cosmology._z_grid_bg()[-1])
+        z_max = emulator_z_max_bg(fixed_cosmology)
         z_beyond = jnp.array(z_max + 5.0)
         assert jnp.isfinite(cosmo_ext.hubble_parameter(z_beyond))
         assert jnp.isfinite(cosmo_ext.angular_diameter_distance(z_beyond))
@@ -233,7 +235,7 @@ class TestExtrapolateZ:
     # pk is NaN beyond its grid without extrapolate_z; with it, a finite growth-ratio-rescaled value instead.
     def test_pk_nan_beyond_grid_without_extrapolation_finite_with_it(self, fixed_cosmology):
         cosmo_ext = fixed_cosmology.update(extrapolate_z=True)
-        z_beyond = jnp.array(float(fixed_cosmology._z_grid_pk()[-1]) + 2.0)
+        z_beyond = jnp.array(emulator_z_max_pk(fixed_cosmology) + 2.0)
         k = jnp.array([0.05])
         pk_unflagged = fixed_cosmology.pk(k, z_beyond, linear=True)
         pk_flagged = cosmo_ext.pk(k, z_beyond, linear=True)
@@ -246,46 +248,45 @@ class TestExtrapolateZ:
     # extrapolate_z=True instead integrates the growth ODE forward, giving a finite value.
     def test_growth_factor_nan_beyond_grid_without_extrapolation_finite_with_it(self, fixed_cosmology):
         cosmo_ext = fixed_cosmology.update(extrapolate_z=True)
-        z_max = float(fixed_cosmology._z_grid_pk()[-1])
+        z_max = emulator_z_max_pk(fixed_cosmology)
         z_beyond = jnp.array(z_max + 2.0)
         D_unflagged = fixed_cosmology.growth_factor(z_beyond)
         D_flagged = cosmo_ext.growth_factor(z_beyond)
         assert jnp.isnan(D_unflagged)
         assert jnp.isfinite(D_flagged)
 
-    # growth_rate/sigma8/velocity_dispersion have no extrapolation branch at all: still NaN
-    # beyond their grid regardless of extrapolate_z.
-    def test_growth_extrapolates_but_sigma8_velocity_dispersion_do_not(self, fixed_cosmology):
+    # growth_rate and velocity_dispersion follow extrapolate_z; sigma8 is NaN beyond the background grid regardless.
+    def test_growth_and_velocity_dispersion_extrapolate_but_sigma8_does_not(self, fixed_cosmology):
         cosmo_ext = fixed_cosmology.update(extrapolate_z=True)
-        z_beyond = jnp.array(float(fixed_cosmology._z_grid_pk()[-1]) + 2.0)
+        z_beyond = jnp.array(emulator_z_max_pk(fixed_cosmology) + 2.0)
         # growth_factor/growth_rate honour extrapolate_z; without it they stay NaN.
         assert jnp.isnan(fixed_cosmology.growth_rate(z_beyond))
         assert jnp.isfinite(cosmo_ext.growth_rate(z_beyond))
         assert jnp.isfinite(cosmo_ext.growth_factor(z_beyond))
-        # velocity_dispersion has no extrapolation branch, so it is NaN either way.
-        assert jnp.isnan(cosmo_ext.velocity_dispersion(z_beyond))
-        z_beyond_bg = jnp.array(float(fixed_cosmology._z_grid_bg()[-1]) + 5.0)
+        assert jnp.isnan(fixed_cosmology.velocity_dispersion(z_beyond))
+        assert jnp.isfinite(cosmo_ext.velocity_dispersion(z_beyond))
+        z_beyond_bg = jnp.array(emulator_z_max_bg(fixed_cosmology) + 5.0)
         assert jnp.isnan(cosmo_ext.sigma8(z_beyond_bg))
 
 
 class TestUpdateAndPytree:
-    # update() returns a new instance, changes only the given field, and reuses the cached emulator dict (no reload).
+    # update() returns a new instance, changes only the given field, and reuses the cached emulator functions (no reload).
     def test_update_returns_new_instance_without_reloading(self, fixed_cosmology):
         updated = fixed_cosmology.update(H0=68.0)
         assert updated is not fixed_cosmology
         assert updated.H0 == 68.0
         assert updated.omega_cdm == fixed_cosmology.omega_cdm
-        assert updated._emu is fixed_cosmology._emu
+        assert updated._functions is fixed_cosmology._functions
 
     # update() cannot switch emulator_set -- it's not an accepted keyword argument.
     def test_update_cannot_switch_emulator_set(self, fixed_cosmology):
         with pytest.raises(TypeError):
             fixed_cosmology.update(emulator_set="mnu:v1")
 
-    # Cosmology survives a JAX pytree flatten/unflatten round trip: lcdm:v1 has 7 leaves (6 base + T_cmb), fixed extension parameters are None.
+    # CosmoPowerCosmology survives a JAX pytree flatten/unflatten round trip: lcdm:v1 has 6 leaves (H0, omega_cdm, omega_b, A_s, n_s, tau); fixed parameters are not leaves.
     def test_pytree_roundtrip(self, fixed_cosmology):
         leaves, treedef = jax.tree_util.tree_flatten(fixed_cosmology)
-        assert len(leaves) == 7
+        assert len(leaves) == 6
         rt = jax.tree_util.tree_unflatten(treedef, leaves)
         assert rt.emulator_set == fixed_cosmology.emulator_set
         assert rt.extrapolate_z == fixed_cosmology.extrapolate_z
@@ -301,45 +302,23 @@ class TestFixedExtensionParameters:
         ("wcdm:v1", "f_ede", 0.2),
     ])
     def test_constructor_raises(self, emulator_set, param, value):
-        with pytest.raises(ValueError, match=param):
-            Cosmology(emulator_set=emulator_set, **{param: value})
+        with pytest.raises(TypeError, match=param):
+            CosmoPowerCosmology(emulator_set, **{param: value})
 
     # update() applies the same check, including under jit where the value is a tracer.
     def test_update_raises(self, fixed_cosmology):
-        with pytest.raises(ValueError, match="m_ncdm"):
+        with pytest.raises(TypeError, match="m_ncdm"):
             fixed_cosmology.update(m_ncdm=0.1)
-        with pytest.raises(ValueError, match="w0"):
+        with pytest.raises(TypeError, match="w0"):
             jax.jit(lambda w0: fixed_cosmology.update(w0=w0).hubble_parameter(1.0))(-0.9)
 
-    # Fixed extension parameters are stored as None; T_cmb stays settable on every set.
-    def test_fixed_params_are_none_and_T_cmb_is_free(self, fixed_cosmology):
-        assert fixed_cosmology.m_ncdm is None and fixed_cosmology.w0 is None
-        assert fixed_cosmology.update(T_cmb=2.8).T_cmb == 2.8
-
-
-class TestHalofit:
-    # pknl_mode="halofit" changes only the nonlinear P(k); the linear P(k) is untouched.
-    def test_only_nonlinear_pk_changes(self, fixed_cosmology):
-        halofit = fixed_cosmology.update(pknl_mode="halofit")
-        k, z = jnp.geomspace(1e-3, 10.0, 20), jnp.array([0.0, 1.0])
-        assert jnp.array_equal(halofit.pk(k, z, linear=True), fixed_cosmology.pk(k, z, linear=True))
-        assert not jnp.allclose(halofit.pk(k, z, linear=False), fixed_cosmology.pk(k, z, linear=False))
-
-    # Halofit tends to linear on large scales (ratio ~0.9999 at k=1e-4) and exceeds it once nonlinear (~9.8 at k=1).
-    def test_linear_limit_and_nonlinear_boost(self, fixed_cosmology):
-        halofit = fixed_cosmology.update(pknl_mode="halofit")
-        k = jnp.array([1e-4, 1.0])
-        ratio = halofit.pk(k, 0.0, linear=False) / halofit.pk(k, 0.0, linear=True)
-        assert jnp.isclose(ratio[0], 1.0, rtol=1e-3)
-        assert ratio[1] > 1.5
-
-    # An unknown pknl_mode raises, from both the constructor and update().
-    def test_invalid_mode_raises(self, fixed_cosmology):
-        with pytest.raises(ValueError, match="pknl_mode"):
-            Cosmology(pknl_mode="emulator")
-        with pytest.raises(ValueError, match="pknl_mode"):
-            fixed_cosmology.update(pknl_mode="emulator")
-
+    # Fixed parameters read as the set's constants and are not leaves; T_cmb is fixed on every set, so setting it raises.
+    def test_fixed_params_read_as_constants_and_T_cmb_is_fixed(self, fixed_cosmology):
+        assert fixed_cosmology.m_ncdm == 0.06 and fixed_cosmology.w0 == -1.0
+        assert "m_ncdm" not in fixed_cosmology.params and "w0" not in fixed_cosmology.params
+        assert fixed_cosmology.T_cmb == 2.7255
+        with pytest.raises(TypeError, match="T_cmb"):
+            fixed_cosmology.update(T_cmb=2.8)
 
 
 class TestOtherEmulatorSets:

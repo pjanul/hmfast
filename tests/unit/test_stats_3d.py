@@ -16,7 +16,6 @@ from hmfast.stats import Bk, Pk, Tk, corr_3d
 from .._shared import GNFW, K_GRID, K_GRID_BT, NFW, Z_GRID, stats_halo_model
 
 HM = stats_halo_model()
-COSMO_NO_EXTRAP = HM.cosmology.update(extrapolate_k=False)
 # Same shape as K_GRID, so calls on it reuse the compiled kernels.
 K_LOW = jnp.geomspace(1e-4, 1e-3, K_GRID.shape[0])
 
@@ -169,15 +168,15 @@ def _gaussian_xi(r):
 class TestCorr3d:
     # corr_3d of a Gaussian power spectrum matches its analytic transform, to 1e-3 of each column's peak.
     def test_gaussian_transform_pair(self):
-        xi, truth = np.asarray(corr_3d(COSMO_NO_EXTRAP, K_GAUSS, _gaussian_pk(), R_EVAL)), _gaussian_xi(R_EVAL)
+        xi, truth = np.asarray(corr_3d(HM.cosmology, K_GAUSS, _gaussian_pk(), R_EVAL, extrapolate=False)), _gaussian_xi(R_EVAL)
         assert np.all(np.abs(xi - truth) <= 1e-3 * truth.max(axis=0))
 
     # Trailing axes are transformed independently: a (N_k, 2) input equals two (N_k,) calls.
     def test_trailing_axes_independent(self):
         pk = _gaussian_pk()
-        batched = corr_3d(COSMO_NO_EXTRAP, K_GAUSS, pk, R_EVAL)
+        batched = corr_3d(HM.cosmology, K_GAUSS, pk, R_EVAL, extrapolate=False)
         for i in range(pk.shape[1]):
-            np.testing.assert_allclose(batched[:, i], corr_3d(COSMO_NO_EXTRAP, K_GAUSS, pk[:, i], R_EVAL), rtol=1e-12)
+            np.testing.assert_allclose(batched[:, i], corr_3d(HM.cosmology, K_GAUSS, pk[:, i], R_EVAL, extrapolate=False), rtol=1e-12)
 
     # The k grid must be concrete, 1D, positive and log-uniform, and match pk's leading axis.
     @pytest.mark.parametrize(

@@ -15,9 +15,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import CosmoPowerCosmology
 
-from .._shared import ccl_cosmology, peak_err, rel_err
+from .._shared import ccl_cosmology, emulator_z_max_bg, emulator_z_max_pk, peak_err, rel_err
 
 try:
     import pyccl
@@ -91,7 +91,7 @@ class TestBackgroundCCL:
 
     # With extrapolate_z=True, H(z) and D_A(z) continue past z_max_bg = 20 (measured 1.2e-3 / 1.2e-4).
     def test_hubble_and_distance_beyond_grid_with_extrapolation(self, cosmo_ext, ccl_class):
-        z_max_bg = float(cosmo_ext._z_grid_bg()[-1])
+        z_max_bg = emulator_z_max_bg(cosmo_ext)
         z = jnp.array([z_max_bg + 5.0, z_max_bg + 50.0, 100.0, 1000.0])
         a = z_to_a(z)
         assert rel_err(cosmo_ext.hubble_parameter(z), cosmo_ext.H0 * pyccl.h_over_h0(ccl_class, a)) < 2.5e-3
@@ -99,7 +99,7 @@ class TestBackgroundCCL:
 
     # sigma8 has no extrapolation branch: NaN beyond z_max_bg regardless of extrapolate_z.
     def test_sigma8_always_nan_beyond_grid(self, cosmo, cosmo_ext):
-        z_beyond = jnp.array(float(cosmo._z_grid_bg()[-1]) + 5.0)
+        z_beyond = jnp.array(emulator_z_max_bg(cosmo) + 5.0)
         assert jnp.isnan(cosmo.sigma8(z_beyond))
         assert jnp.isnan(cosmo_ext.sigma8(z_beyond))
 
@@ -146,14 +146,14 @@ class TestGrowthCCL:
 
     # With extrapolate_z=True, growth_factor continues past z_max_pk = 5 (measured 1.3e-3); NaN without the flag.
     def test_growth_factor_beyond_grid_with_extrapolation(self, cosmo, cosmo_ext, ccl_class):
-        z_max_pk = float(cosmo._z_grid_pk()[-1])
+        z_max_pk = emulator_z_max_pk(cosmo)
         z = jnp.array([z_max_pk + 2.0, z_max_pk + 10.0])
         assert jnp.all(jnp.isnan(cosmo.growth_factor(z)))
         assert rel_err(cosmo_ext.growth_factor(z), pyccl.growth_factor(ccl_class, z_to_a(z))) < 2.5e-3
 
     # growth_rate has no extrapolation branch: NaN beyond z_max_pk unless extrapolating.
     def test_growth_rate_nan_beyond_grid_unless_extrapolating(self, cosmo, cosmo_ext):
-        z_beyond = jnp.array(float(cosmo._z_grid_pk()[-1]) + 2.0)
+        z_beyond = jnp.array(emulator_z_max_pk(cosmo) + 2.0)
         assert jnp.isnan(cosmo.growth_rate(z_beyond))
         assert jnp.isfinite(cosmo_ext.growth_rate(z_beyond))
 
@@ -210,7 +210,7 @@ class TestLinearPowerCCL:
 
     # Without extrapolate_k, pk is NaN beyond the trained k range; with it, a modest factor beyond (measured 3.4e-3).
     def test_pk_k_extrapolation(self, cosmo, ccl_class):
-        k_native = cosmo._pk_grid()[0]
+        k_native = cosmo._pk_grid()
         k = jnp.array([k_native.min() * 0.5, k_native.max() * 2.0])
         assert jnp.all(jnp.isnan(cosmo.update(extrapolate_k=False).pk(k, jnp.array([1.0]), linear=True)))
         got = np.ravel(cosmo.update(extrapolate_k=True).pk(k, jnp.array([1.0]), linear=True))
@@ -219,7 +219,7 @@ class TestLinearPowerCCL:
     # Without extrapolate_z, pk is NaN beyond z_max_pk; with it, P(k) scales by CCL's growth-factor ratio
     # (measured 3.3e-5).
     def test_pk_z_extrapolation_growth_ratio(self, cosmo, cosmo_ext, ccl_class):
-        z_max_pk = float(cosmo._z_grid_pk()[-1])
+        z_max_pk = emulator_z_max_pk(cosmo)
         k0 = jnp.array([0.05])
         z = jnp.array([z_max_pk + 2.0, z_max_pk + 10.0])
         assert jnp.all(jnp.isnan(cosmo.pk(k0, z, linear=True)))
@@ -267,7 +267,7 @@ def emulator_set_cosmology(request, fixed_cosmology):
     emulator_set, extension = request.param
     f = fixed_cosmology
     try:
-        return Cosmology(emulator_set=emulator_set, H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
+        return CosmoPowerCosmology(emulator_set, H0=f.H0, omega_cdm=f.omega_cdm, omega_b=f.omega_b, A_s=f.A_s,
                          n_s=f.n_s, ncdm_mode="m", **extension)
     except Exception as exc:
         pytest.skip(f"{emulator_set} emulator files not available locally: {exc}")
@@ -311,16 +311,6 @@ class TestEmulatorSetsCCL:
         want = np.stack([pyccl.linear_matter_power(ccl, k, float(a)) for a in z_to_a(Z_PK)], axis=1)
         assert rel_err(got, want) < 3.3e-3
 
-    # pknl_mode="halofit" against CCL's halofit run on hmfast's own P_lin (measured max over sets 8.5e-4).
-    def test_pk_halofit(self, emulator_set_cosmology):
-        cosmo = emulator_set_cosmology.update(pknl_mode="halofit")
-        ccl = ccl_cosmology(cosmo, pk_linear=True, nonlinear_model="halofit")
-        k = np.geomspace(1e-3, 10.0, 40)
-        z = [0.0, 0.5, 1.0, 2.0]
-        got = np.asarray(cosmo.pk(jnp.asarray(k), jnp.asarray(z), linear=False))
-        want = np.stack([pyccl.nonlin_matter_power(ccl, k, float(a)) for a in z_to_a(z)], axis=1)
-        assert rel_err(got, want) < 1.7e-3
-
 
 # ---------------------------------------------------------------------------------------------------------------------
 # CMB spectra and derived parameters against CLASS run with the lcdm:v1 training settings (N_ur = 2.0328 plus one
@@ -336,7 +326,7 @@ def class_reference(cosmo):
         "output": "tCl,pCl,lCl,mPk", "lensing": "yes", "non_linear": "hmcode", "hmcode_version": "2016",
         "l_max_scalars": int(L_CMB[-1]), "P_k_max_1/Mpc": 50.0,
         "H0": cosmo.H0, "omega_cdm": cosmo.omega_cdm, "omega_b": cosmo.omega_b, "A_s": cosmo.A_s, "n_s": cosmo.n_s,
-        "tau_reio": cosmo.tau, "N_ur": 2.0328, "N_ncdm": 1, "m_ncdm": float(cosmo._cosmo_params()["m_ncdm"]),
+        "tau_reio": cosmo.tau, "N_ur": 2.0328, "N_ncdm": 1, "m_ncdm": float(cosmo.m_ncdm),
         "tol_perturbations_integration": 1e-7, "perturbations_sampling_stepsize": 0.05, "accurate_lensing": 1,
         "delta_l_max": 1000, "l_logstep": 1.025, "l_linstep": 15,
     }

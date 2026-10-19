@@ -36,7 +36,8 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.special  # noqa: F401  (probed below for loggamma)
 
-from hmfast.cosmology import Cosmology
+from hmfast.cosmology import Cosmology, CosmoPowerCosmology
+from hmfast.cosmology.cosmopower import _WEIGHTS
 from hmfast.halos.bias import T10HaloBias
 from hmfast.halos.concentration import (
     B13Concentration,
@@ -60,7 +61,7 @@ from hmfast.halos.profiles import (
     S12CIBProfile,
     Z07GalaxyHODProfile,
 )
-from hmfast.stats import Bk, Pk, Tk, cl, cl_linbias, corr_3d, corr_angular, cov_cng, cov_ssc, sigma2_b_disc
+from hmfast.stats import Bk, Pk, Tk, cl, cl_linbias, corr_3d, corr_angular, cov_cng, cov_g, cov_ssc, sigma2_b_disc
 from hmfast.stats import projected_cl as _cl_module
 from hmfast.stats import covariance as _covariance_module
 from hmfast.tracers import CMBLensingTracer, GalaxyLensingTracer, GalaxyTracer, kSZTracer
@@ -71,7 +72,7 @@ from .._shared import (
     B12, B16, BIAS, BK, CIB, CIB_TRACER, CMBLENS_TRACER, CONC, FIXED_COSMOLOGY, GAL_TRACER,
     GAL_TRACER_BIASED, GLENS_TRACER, GNFW, HMF, HOD, K_FFT, K_GRID, K_GRID_BT, KSZ_TRACER, L_FFT, L_GRID, M21,
     M_GRID, MD_200C, MD_200M, MD_500C, MD_VIR, N_R, N_Z, NFW, PARAMS, PK, R_GRID, R_GRID_SIGMA, THETA_GRID, TK,
-    TSZ_TRACER, Z_GRID, Z_RANGE, Z_SINGLE, cosmo, shared, stats_halo_model,
+    TSZ_TRACER, Z_GRID, Z_RANGE, Z_SINGLE, Z_STAR, cosmo, shared, stats_halo_model,
 )
 from .._shared import halo_model as _shared_halo_model
 
@@ -116,7 +117,6 @@ case("Cosmology.velocity_dispersion", lambda p: cosmo(p).velocity_dispersion(Z_G
 case("Cosmology.comoving_volume_element", lambda p: cosmo(p).comoving_volume_element(Z_GRID))
 case("Cosmology.pk[linear]", lambda p: cosmo(p).pk(K_GRID, Z_GRID, linear=True))
 case("Cosmology.pk[nonlinear]", lambda p: cosmo(p).pk(K_GRID, Z_GRID, linear=False))
-case("Cosmology.pk[halofit]", lambda p: cosmo(p, pknl_mode="halofit").pk(K_GRID, Z_GRID, linear=False))
 case("Cosmology.cl[tt]", lambda p: cosmo(p).cl_cmb("tt", jnp.arange(2, 50)))
 case("Cosmology.derived_parameters", lambda p: cosmo(p).derived_parameters())
 
@@ -179,8 +179,10 @@ for _name, _tracer in [
     ("CIBTracer", CIB_TRACER),
 ]:
     # kernel() returns (weight, der_bessel, der_angles) triples; the tags are Python ints, so weights only.
+    # CMB lensing's source plane z_star lies beyond the emulated background, so it needs extrapolate_z.
     case(f"{_name}.kernel",
-         (lambda t: lambda p: [w for w, _, _ in t.kernel(cosmo(p), Z_GRID)])(_tracer))
+         (lambda t, ext: lambda p: [w for w, _, _ in t.kernel(cosmo(p).update(extrapolate_z=ext), Z_GRID)])(
+             _tracer, _tracer is CMBLENS_TRACER))
 
 # --- 2-point statistics ----------------------------------------------------------
 case("Pk.pk_1h", lambda p: PK0.pk_1h(halo_model(p), K_GRID, Z_SINGLE, NFW))
@@ -191,18 +193,18 @@ case("Pk.pk_tot[1h only]",
 case("corr_3d[pk_tot]", lambda p: corr_3d(cosmo(p), K_FFT, PK.pk_tot(halo_model(p), K_FFT, Z_SINGLE, NFW), R_GRID))
 case("corr_3d[pk_nl]", lambda p: corr_3d(cosmo(p), K_FFT, cosmo(p).pk(K_FFT, Z_GRID, linear=False), R_GRID))
 case("cl[limber]",
-     lambda p: cl(PK, halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, z_range=Z_RANGE, n_z=N_Z))
+     lambda p: cl(PK, halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, n_z=N_Z))
 CASES.append(pytest.param(
-    lambda p: cl(PK, halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, z_range=Z_RANGE, n_z=N_Z, l_limber=100.0),
+    lambda p: cl(PK, halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, n_z=N_Z, l_limber=100.0),
     id="cl[non-limber]", marks=_NEEDS_LOGGAMMA))
 case("cl[1h only]",
-     lambda p: cl(Pk(k_damp=0.0, include_2h=False), halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, z_range=Z_RANGE, n_z=N_Z))
+     lambda p: cl(Pk(k_damp=0.0, include_2h=False), halo_model(p), L_GRID, GAL_TRACER, GAL_TRACER, n_z=N_Z))
 case("cl_linbias",
-     lambda p: cl_linbias(cosmo(p), L_GRID, GAL_TRACER_BIASED, GAL_TRACER_BIASED, z_range=Z_RANGE, n_z=N_Z))
+     lambda p: cl_linbias(cosmo(p), L_GRID, GAL_TRACER_BIASED, GAL_TRACER_BIASED, n_z=N_Z))
 for _type in ("NN", "NG", "GG+", "GG-"):
     case(f"corr_angular[{_type}]",
          (lambda t: lambda p: corr_angular(
-             cosmo(p), L_FFT, cl_linbias(cosmo(p), L_FFT, GLENS_TRACER, GLENS_TRACER, z_range=Z_RANGE, n_z=N_Z), THETA_GRID, type=t))(_type))
+             cosmo(p), L_FFT, cl_linbias(cosmo(p), L_FFT, GLENS_TRACER, GLENS_TRACER, n_z=N_Z), THETA_GRID, type=t))(_type))
 
 # --- higher-order statistics and covariances -------------------------------------
 case("Bk.bk_1h",
@@ -224,12 +226,12 @@ case("Tk.tk_tot",
 case("Tk.tk_tot[2h only]",
      lambda p: Tk(include_1h=False, include_3h=False, include_4h=False).tk_tot(
          halo_model(p), K_GRID_BT, K_GRID_BT, Z_SINGLE, NFW))
+case("cov_g", lambda p: cov_g(L_GRID, p[0] * L_GRID**-2.0, f_sky=0.4))
 case("cov_cng",
-     lambda p: cov_cng(TK, halo_model(p), L_GRID[:3], L_GRID[:3], GAL_TRACER, None, None, None,
-                       z_range=Z_RANGE, n_z=N_Z))
+     lambda p: cov_cng(TK, halo_model(p), L_GRID[:3], L_GRID[:3], GAL_TRACER, None, None, None, n_z=N_Z))
 case("cov_ssc",
      lambda p: cov_ssc(PK, halo_model(p), L_GRID[:3], L_GRID[:3], GAL_TRACER, None, None, None,
-                       z_range=Z_RANGE, n_z=N_Z, f_sky=0.4))
+                       n_z=N_Z, f_sky=0.4))
 case("sigma2_b_disc", lambda p: sigma2_b_disc(cosmo(p), Z_GRID, f_sky=0.4))
 
 
@@ -284,14 +286,15 @@ def test_bk_k_damp_sweep_does_not_recompile():
 
 
 def test_cl_survives_jit_before_eager():
-    """Tracing must not poison a shared Cosmology for later use.
+    """Tracing must not poison a shared CosmoPowerCosmology for later use.
 
-    The first cl_cmb call on a fresh instance loads its emulator; when that happens under a
+    The first cl_cmb call loads the set's TT emulator; when that happens under a
     trace, the loaded weights must stay concrete. A sampler that jits its likelihood, then takes
     its gradient or inspects a spectrum eagerly on the same object, hits exactly this order.
     """
-    obj = Cosmology(
-        emulator_set="lcdm:v1", H0=67.36, omega_cdm=0.12011, omega_b=0.02242,
+    _WEIGHTS.pop(("lcdm:v1", "TT"), None)  # so the first load below happens under the trace
+    obj = CosmoPowerCosmology(
+        "lcdm:v1", H0=67.36, omega_cdm=0.12011, omega_b=0.02242,
         A_s=2.1005e-9, n_s=0.9665,
     )
     ell = jnp.arange(2, 200)
@@ -328,7 +331,7 @@ JITTED_API = [
     (_cl_module, "cl"), (_cl_module, "cl_linbias"),
     (Bk, "_bk_1h"), (Bk, "_bk_2h"), (Bk, "_bk_3h"), (Bk, "_bk_tot"),
     (Tk, "tk_1h"), (Tk, "tk_2h"), (Tk, "tk_3h"), (Tk, "tk_4h"), (Tk, "tk_tot"),
-    (_covariance_module, "cov_cng"), (_covariance_module, "cov_ssc"),
+    (_covariance_module, "cov_g"), (_covariance_module, "cov_cng"), (_covariance_module, "cov_ssc"),
     (_covariance_module, "sigma2_b_disc"),
 ]
 
@@ -397,23 +400,21 @@ def _hod_galaxy(e):
 def _cl_gy(e):
     t_g = GAL_TRACER.update(profile=HOD.update(alpha_s=e[5]))
     t_y = TSZ_TRACER.update(profile=GNFW.update(beta=e[6]))
-    return cl(PK, halo_model(e[:5]), L_GRID, t_g, t_y, z_range=Z_RANGE, n_z=N_Z)
+    return cl(PK, halo_model(e[:5]), L_GRID, t_g, t_y, n_z=N_Z)
 
 
 LOG_PARAMS = jnp.log(PARAMS)
 GRADIENT_CASES = {
-    "cl_yy": (lambda th: (lambda e: cl(PK, halo_model(e[:5]), L_GRID, _gnfw_tsz(e), _gnfw_tsz(e), z_range=Z_RANGE, n_z=N_Z))(jnp.exp(th)),
+    "cl_yy": (lambda th: (lambda e: cl(PK, halo_model(e[:5]), L_GRID, _gnfw_tsz(e), _gnfw_tsz(e), n_z=N_Z))(jnp.exp(th)),
               jnp.concatenate([LOG_PARAMS, jnp.log(jnp.array([6.41, 4.13, 1.4]))])),
-    "cl_gg": (lambda th: (lambda e: cl(PK, halo_model(e[:5]), L_GRID, _hod_galaxy(e), _hod_galaxy(e), z_range=Z_RANGE, n_z=N_Z))(jnp.exp(th)),
+    "cl_gg": (lambda th: (lambda e: cl(PK, halo_model(e[:5]), L_GRID, _hod_galaxy(e), _hod_galaxy(e), n_z=N_Z))(jnp.exp(th)),
               jnp.concatenate([LOG_PARAMS, jnp.log(jnp.array([1.0, 1e13, 0.2]))])),
     "cl_gy": (lambda th: _cl_gy(jnp.exp(th)), jnp.concatenate([LOG_PARAMS, jnp.log(jnp.array([1.0, 4.13]))])),
-    "cl_kgkg": (lambda th: cl(PK, halo_model(jnp.exp(th)), L_GRID, GLENS_TRACER, GLENS_TRACER, z_range=Z_RANGE, n_z=N_Z), LOG_PARAMS),
+    "cl_kgkg": (lambda th: cl(PK, halo_model(jnp.exp(th)), L_GRID, GLENS_TRACER, GLENS_TRACER, n_z=N_Z), LOG_PARAMS),
     "pk_mm": (lambda th: (lambda hm: PK.pk_1h(hm, K_GRID, Z_SINGLE, NFW) + PK.pk_2h(hm, K_GRID, Z_SINGLE, NFW))(
         halo_model(jnp.exp(th))), LOG_PARAMS),
-    "cl_kgkg_nl[hmcode]": (lambda th: cl_linbias(cosmo(jnp.exp(th), "hmcode"), L_GRID, GLENS_TRACER, GLENS_TRACER, z_range=Z_RANGE, n_z=N_Z,
+    "cl_kgkg_nl[hmcode]": (lambda th: cl_linbias(cosmo(jnp.exp(th)), L_GRID, GLENS_TRACER, GLENS_TRACER, n_z=N_Z,
                                                  linear=False), LOG_PARAMS),
-    "cl_kgkg_nl[halofit]": (lambda th: cl_linbias(cosmo(jnp.exp(th), "halofit"), L_GRID, GLENS_TRACER, GLENS_TRACER, z_range=Z_RANGE, n_z=N_Z,
-                                                  linear=False), LOG_PARAMS),
 }
 
 
@@ -430,9 +431,9 @@ def _jacobian_errors(name, step=1e-4):
 
 
 # Central-difference step 1e-4 in ln(theta); errors are relative to each parameter's largest sensitivity. A broken
-# gradient is off by O(1), so these ~5x-measured bounds leave room (measured: 1.3e-6, 2.0e-5, 1.2e-5, 1.3e-5, 2.8e-9, 2.1e-6, 1.8e-6).
+# gradient is off by O(1), so these ~5x-measured bounds leave room (measured: 1.3e-6, 2.0e-5, 1.2e-5, 1.3e-5, 2.8e-9, 2.1e-6).
 GRADIENT_FD_TOL = {"cl_yy": 1e-5, "cl_gg": 1e-4, "cl_gy": 6e-5, "cl_kgkg": 6e-5, "pk_mm": 1.5e-8,
-                   "cl_kgkg_nl[hmcode]": 1e-5, "cl_kgkg_nl[halofit]": 1e-5}
+                   "cl_kgkg_nl[hmcode]": 1e-5}
 
 
 # One end-to-end Jacobian through the halo-model mass integrals and one through the Limber projection; the rest run as benchmarks.
@@ -519,12 +520,12 @@ def _delta_c(x):
 
 
 # kSZ needs a finite z_max, and is read at a z inside velocity_dispersion's valid range.
-_H0_KERNEL_TRACERS = [(CMBLensingTracer(), _Z_HALF), (GalaxyLensingTracer(dndz=_TRACER_DNDZ), _Z_HALF),
+_H0_KERNEL_TRACERS = [(CMBLensingTracer(z_source=Z_STAR), _Z_HALF), (GalaxyLensingTracer(dndz=_TRACER_DNDZ), _Z_HALF),
                       (GalaxyTracer(dndz=_TRACER_DNDZ), _Z_HALF), (kSZTracer(z_max=3.0), jnp.array(1.0))]
 
 
 def _tracer_kernels_H0(x):
-    c = FIXED_COSMOLOGY.update(H0=x[0])
+    c = FIXED_COSMOLOGY.update(H0=x[0], extrapolate_z=True)  # CMB lensing's source plane is beyond the background grid
     return jnp.stack([_kernel_total(tracer, c, z) for tracer, z in _H0_KERNEL_TRACERS])
 
 

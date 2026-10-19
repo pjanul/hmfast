@@ -4,7 +4,7 @@ Compiled counterparts of tests/unit/test_jax_transforms.py.
 The unit file only traces each entry point under ``jax.jit``, which is where jittability
 failures surface. Here every case is compiled and its jitted numbers are checked against
 the eager call, and the end-to-end gradient cases too heavy for the unit suite (halo-model
-C_ell through HOD/GNFW profiles, and the halofit Limber spectrum) are checked against finite
+C_ell through HOD/GNFW profiles) are checked against finite
 differences and between forward and reverse mode.
 
 The all-terms trispectrum and bispectrum cases (and cov_cng, which runs the full trispectrum) re-run code that the
@@ -18,7 +18,7 @@ import pytest
 
 from hmfast.stats import Bk, Tk, cov_cng
 
-from .._shared import GAL_TRACER, K_GRID_BT, L_GRID, N_Z, NFW, Z_RANGE, Z_SINGLE, stats_halo_model
+from .._shared import GAL_TRACER, K_GRID_BT, L_GRID, N_Z, NFW, Z_SINGLE, stats_halo_model
 from ..unit.test_jax_transforms import (
     CASES,
     GRADIENT_CASES,
@@ -38,8 +38,8 @@ JIT_CASES = [c for c in CASES if c.id not in REPLACED_CASES] + [
                  id="Tk.tk_tot[1h+4h]"),
     pytest.param(lambda p: BK_1H_3H.bk_tot(stats_halo_model(p), K_GRID_BT, K_GRID_BT, -0.5, Z_SINGLE, NFW),
                  id="Bk.bk_tot[1h+3h]"),
-    pytest.param(lambda p: cov_cng(TK_1H_4H, stats_halo_model(p), L_GRID[:3], L_GRID[:3], GAL_TRACER,
-                                   z_range=Z_RANGE, n_z=N_Z), id="cov_cng[1h+4h]"),
+    pytest.param(lambda p: cov_cng(TK_1H_4H, stats_halo_model(p), L_GRID[:3], L_GRID[:3], GAL_TRACER, n_z=N_Z),
+                 id="cov_cng[1h+4h]"),
 ]
 assert REPLACED_CASES <= {c.id for c in CASES}, "a replaced case was renamed in the unit file"
 

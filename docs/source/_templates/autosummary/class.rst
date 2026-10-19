@@ -13,7 +13,7 @@
 {% set excluded_attributes = excluded_attributes + ['delta', 'reference'] %}
 {% endif %}
 {# Ready-made cosmologies document only what they add; the rest is on Cosmology. #}
-{% set own_only = objname in ['CosmoPowerCosmology', 'AnalyticCosmology'] %}
+{% set own_only = objname in ['CosmoPowerCosmology'] %}
 
 .. autoclass:: {{ objname }}
    :members:

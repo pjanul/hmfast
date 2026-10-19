@@ -15,19 +15,20 @@ from hmfast.utils import Const, dopri5_integrate, log_interp1d_extrap
 _C_KMS = Const._c_ / 1e3
 
 _LCDM_NAMES = ("H0", "omega_cdm", "omega_b", "A_s", "n_s")
-_STANDARD_CONSTANTS = MappingProxyType({"Omega_k": 0.0, "m_ncdm": 0.06, "N_ur": 3.046, "w0": -1.0, "wa": 0.0,
-                                        "T_cmb": 2.7255})
+_STANDARD_CONSTANTS = MappingProxyType({"Omega_k": 0.0, "m_ncdm": 0.06, "w0": -1.0, "wa": 0.0, "T_cmb": 2.7255,
+                                        "T_ncdm": 0.71611})
 _EDE = ("m_ncdm", "N_ur", "f_ede", "z_c", "theta_i", "r")
-_V1 = {"z_max_pk": 5.0, "grid": "v1", "log_bg": False, "n_s": (0.8, 1.2), "deg_ncdm": 1.0}
+_V1 = {"z_max_pk": 5.0, "grid": "v1", "log_bg": False, "n_s": (0.8, 1.2), "deg_ncdm": 1.0, "N_ur": 2.0328}
 
-# "free": extension parameters the set takes; "grid"/"log_bg": output layout of the networks.
+# "free": extension parameters; "N_ur": massless neutrinos if fixed (N_eff = 3.046); "grid"/"log_bg": output layout.
 _EMULATOR_SETS = {
     "lcdm:v1":        {**_V1, "subdir": "lcdm", "suffix": "v1", "free": (), "n_s": (0.8812, 1.0492)},
     "mnu:v1":         {**_V1, "subdir": "mnu", "suffix": "mnu_v1", "free": ("m_ncdm",)},
     "neff:v1":        {**_V1, "subdir": "neff", "suffix": "neff_v1", "free": ("N_ur",)},
     "wcdm:v1":        {**_V1, "subdir": "wcdm", "suffix": "w_v1", "free": ("w0",)},
     "ede:v1":         {**_V1, "subdir": "ede", "suffix": "v1", "free": _EDE, "deg_ncdm": 3.0},
-    "mnu-3states:v1": {**_V1, "subdir": "mnu-3states", "suffix": "v1", "free": ("m_ncdm",), "deg_ncdm": 3.0},
+    "mnu-3states:v1": {**_V1, "subdir": "mnu-3states", "suffix": "v1", "free": ("m_ncdm",), "deg_ncdm": 3.0,
+                       "N_ur": 0.00641},
     "ede:v2":         {**_V1, "subdir": "ede", "suffix": "v2", "free": _EDE, "deg_ncdm": 3.0,
                        "z_max_pk": 20.0, "grid": "v2", "log_bg": True},
 }
@@ -68,7 +69,8 @@ def _param_names(emulator_set):
 
 def _constants(emulator_set):
     names = _param_names(emulator_set)
-    return {n: v for n, v in _STANDARD_CONSTANTS.items() if n not in names}
+    constants = {**_STANDARD_CONSTANTS, "N_ur": _EMULATOR_SETS[emulator_set]["N_ur"]}
+    return {n: v for n, v in constants.items() if n not in names}
 
 
 def _grid(emulator_set):
@@ -156,21 +158,25 @@ def _hubble_flrw(emulator_set, z, p, z_cal):
 def _growth_ode(emulator_set, z, p):
     """ln D above the P(k) range from the growth equation, matched to the emulated D at its top."""
     z_max = _EMULATOR_SETS[emulator_set]["z_max_pk"]
-    H0, om0 = p["H0"], _cosmology(emulator_set, p).omega_x(0.0, "matter")
+    H0, cosmo = p["H0"], _cosmology(emulator_set, p)
     hz = lambda zz: _hubble_flrw(emulator_set, zz, p, z_max)
+    rho_crit_0 = cosmo.rho_x(0.0, "critical")
 
-    # Seed well past any requested z so D~a has room to relax onto the growing mode.
+    # Seed well past any requested z so the solution has room to relax onto the growing mode.
     z_start = jax.lax.stop_gradient(4.0 * jnp.maximum(jnp.max(z), z_max))
     x_start, x_max = -jnp.log1p(z_start), -jnp.log1p(z_max)
+    # Growing-mode rate with radiation and matter (Meszaros), f = 1.5 y / (1 + 1.5 y) for y = rho_m / rho_r.
+    y = cosmo.rho_x(z_start, "matter") / (cosmo.rho_x(z_start, "radiation") + cosmo.rho_x(z_start, "neutrinos_rel"))
+    f_start = 1.5 * y / (1.0 + 1.5 * y)
 
     def growth_rhs(x, y):
         _, f = y
         dlnH_dx = jax.grad(lambda xx: jnp.log(hz(jnp.expm1(-xx))))(x)
         zz = jnp.expm1(-x)
-        return f, -f ** 2 - (2.0 + dlnH_dx) * f + 1.5 * om0 * (1.0 + zz) ** 3 * H0 ** 2 / hz(zz) ** 2
+        return f, -f ** 2 - (2.0 + dlnH_dx) * f + 1.5 * cosmo.rho_x(zz, "matter") / rho_crit_0 * H0 ** 2 / hz(zz) ** 2
 
     # max_h caps node spacing so batched interior queries interpolate safely.
-    x_traj, (lnD_traj, f_traj) = dopri5_integrate(growth_rhs, (jnp.array(0.0), jnp.array(1.0)), x_start, x_max,
+    x_traj, (lnD_traj, f_traj) = dopri5_integrate(growth_rhs, (jnp.array(0.0), f_start), x_start, x_max,
                                                   rtol=1e-4, atol=1e-7, max_steps=64, max_h=0.3)
     # Cubic Hermite in ln a with f = dlnD/dlna at the nodes, so D is smooth and growth_rate is its derivative.
     x = jnp.minimum(-jnp.log1p(z), x_max)
@@ -267,20 +273,21 @@ class CosmoPowerCosmology(Cosmology):
     ``ede:v2``          as ``ede:v1``                                    3                   20
     ==================  ===============================================  ==================  ==============
 
-    The background is valid to :math:`z = 20`.
+    The background is valid to :math:`z = 20`. The set's ``z_max_pk`` is also its
+    :attr:`~hmfast.cosmology.Cosmology.z_max_pk`, above which projected statistics scale the halo model by the
+    linear growth factor.
 
     Parameters
     ----------
     emulator_set : str
         Emulator set, one of the table above (default ``"lcdm:v1"``).
-    H0, omega_cdm, omega_b, A_s, n_s, tau : float
-        As in :class:`~hmfast.cosmology.Cosmology`; ``tau`` defaults to 0.0544.
-    Omega_k, m_ncdm, N_ur, w0, wa, T_cmb, f_ede, z_c, theta_i, r : float or None
-        As in :class:`~hmfast.cosmology.Cosmology`. None takes the set's value: the fiducial value if the set
-        varies the parameter (``m_ncdm`` 0.06, ``N_ur`` 3.046, ``w0`` -1, ``f_ede`` 0.1, ``z_c`` 3162.278,
-        ``theta_i`` 1.57, ``r`` 0.01); otherwise it is fixed (``Omega_k`` 0, ``m_ncdm`` 0.06, ``N_ur`` 3.046,
-        ``w0`` -1, ``wa`` 0, ``T_cmb`` 2.7255) or absent, and setting it raises a ``TypeError``. Every set is
-        flat with no evolving dark energy, so ``Omega_k`` and ``wa`` are always fixed at 0.
+    H0, omega_cdm, omega_b, A_s, n_s, tau, m_ncdm, N_ur, w0, f_ede, z_c, theta_i, r : float or None
+        As in :class:`~hmfast.cosmology.Cosmology`, for the parameters the set varies (table above); None takes the
+        fiducial value (``tau`` 0.0544, ``m_ncdm`` 0.06, ``N_ur`` 3.046, ``w0`` -1, ``f_ede`` 0.1, ``z_c`` 3162.278,
+        ``theta_i`` 1.57, ``r`` 0.01). A set that does not vary ``m_ncdm``, ``N_ur`` or ``w0`` fixes them at 0.06 eV,
+        2.0328 (0.00641 for ``mnu-3states:v1``, so :math:`N_\\mathrm{eff} = 3.046`) and -1, and has no ``f_ede``,
+        ``z_c``, ``theta_i`` or ``r``; setting any of these raises a ``TypeError``.
+        Every set is flat (``Omega_k`` = 0) with ``wa`` = 0, ``T_cmb`` = 2.7255 K and ``T_ncdm`` = 0.71611.
     ncdm_mode : {"cb", "m"}
         As in :class:`~hmfast.cosmology.Cosmology`.
     extrapolate_k : bool
@@ -290,8 +297,7 @@ class CosmoPowerCosmology(Cosmology):
         If True, redshifts above the emulators' range are extrapolated with an FLRW :math:`H(z)` from
         :meth:`~hmfast.cosmology.Cosmology.rho_x` and the linear growth equation, matched to the emulators
         at the top of the range; if False (default), they are NaN. This is less accurate for early dark
-        energy models, and for masses/neutrino content where the non-relativistic approximation for
-        massive neutrinos breaks down before then.
+        energy models.
 
     Examples
     --------
@@ -300,24 +306,23 @@ class CosmoPowerCosmology(Cosmology):
     _STATIC = Cosmology._STATIC + ("emulator_set", "extrapolate_z", "extrapolate_k")
 
     def __init__(self, emulator_set="lcdm:v1", *,
-                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, Omega_k=None, A_s=2.1053e-9, n_s=0.965, tau=0.0544,
-                 m_ncdm=None, N_ur=None, w0=None, wa=None, T_cmb=None,
-                 f_ede=None, z_c=None, theta_i=None, r=None,
+                 H0=68.0, omega_cdm=0.12, omega_b=0.02246576, A_s=2.1053e-9, n_s=0.965, tau=0.0544,
+                 m_ncdm=None, N_ur=None, w0=None, f_ede=None, z_c=None, theta_i=None, r=None,
                  ncdm_mode="cb", extrapolate_k=True, extrapolate_z=False):
         if emulator_set not in _EMULATOR_SETS:
             raise ValueError(f"Unknown emulator set {emulator_set!r}. Allowed: {', '.join(_EMULATOR_SETS)}.")
         self.emulator_set = emulator_set
         self.extrapolate_z, self.extrapolate_k = extrapolate_z, extrapolate_k
         names = _param_names(emulator_set)
-        named = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, Omega_k=Omega_k, A_s=A_s, n_s=n_s, tau=tau,
-                     m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, wa=wa, T_cmb=T_cmb, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
+        named = dict(H0=H0, omega_cdm=omega_cdm, omega_b=omega_b, A_s=A_s, n_s=n_s, tau=tau,
+                     m_ncdm=m_ncdm, N_ur=N_ur, w0=w0, f_ede=f_ede, z_c=z_c, theta_i=theta_i, r=r)
         given = {n: v for n, v in named.items() if v is not None}
         self.params = {n: given.get(n, _FIDUCIAL_PARAMS[n]) for n in names}
         unknown = [n for n in given if n not in names]
         if unknown:
             raise TypeError(self._not_parameters(unknown))
         self._setup(self.params, _functions(emulator_set, extrapolate_z, extrapolate_k), _grid(emulator_set)[0],
-                    ncdm_mode)
+                    ncdm_mode, _EMULATOR_SETS[emulator_set]["z_max_pk"])
 
         if os.environ.get("READTHEDOCS") != "True":
             for key in ("HZ", "DAZ", "S8Z", "PKL", "PKNL", "DER"):
@@ -335,7 +340,10 @@ class CosmoPowerCosmology(Cosmology):
         extrapolate_z, extrapolate_k : bool or None
             New values of these settings; None leaves a value unchanged.
         **changes
-            As in :meth:`Cosmology.update`, for the parameters the emulator set varies.
+            New values of the set's free parameters, the differentiable leaves: ``H0``, ``omega_cdm``, ``omega_b``,
+            ``A_s``, ``n_s`` and ``tau`` in every set, plus ``m_ncdm`` (``mnu:v1``, ``mnu-3states:v1``, ``ede:*``),
+            ``N_ur`` (``neff:v1``, ``ede:*``), ``w0`` (``wcdm:v1``) and ``f_ede``, ``z_c``, ``theta_i``, ``r``
+            (``ede:*``). None leaves a value unchanged.
 
         Returns
         -------

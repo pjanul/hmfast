@@ -64,7 +64,7 @@ class TestCMBLensingKernelCCL:
         z_star = float(cosmo_ext.derived_parameters()["z_star"])
         z = np.geomspace(1e-3, z_star, 300)
         tracer_ccl = pyccl.CMBLensingTracer(cosmo_ccl, z_source=z_star)
-        (got,), (want,) = hmfast_terms(CMBLensingTracer(), cosmo_ext, z), ccl_terms(tracer_ccl, cosmo_ccl, z)
+        (got,), (want,) = hmfast_terms(CMBLensingTracer(z_source=z_star), cosmo_ext, z), ccl_terms(tracer_ccl, cosmo_ccl, z)
         assert peak_err(got, want) < 0.1
 
 

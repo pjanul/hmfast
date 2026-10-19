@@ -9,4 +9,3 @@ hmfast.cosmology
 
    Cosmology
    CosmoPowerCosmology
-   AnalyticCosmology
